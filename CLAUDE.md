@@ -54,6 +54,14 @@ just `pipx install` the `bounds` CLI.
   `root.yaml` (`roles:`/`criticality:`); resolve via `RootManifest.role_registry()` /
   `criticality_registry()`, never hard-code the enum at a check site.
 
+## Source of Truth & Versioning (Mandatory)
+
+GitHub is the single source of truth. To prevent staleness and ensure `pipx upgrade` works for all users:
+- **Automatic Versioning.** This repo uses `setuptools-scm`. The version is derived from git tags + commits. Never add a static `version =` string back to `pyproject.toml`.
+- **Release process.** To cut a formal release, tag it: `git tag -a v0.x.y -m "Release v0.x.y" && git push origin v0.x.y`.
+- **Contributor installs.** Always install using `pip install -e .` (editable) for development.
+- **End-user staleness check.** If an agent or user reports a stale `bounds` CLI, the fix is: `pipx install --force git+https://github.com/Farzin312/bounds.git`.
+
 ## Where things live
 
 `config.py` constants · `errors.py` codes · `models.py` data model · `manifest/` load+schema ·

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=82.0.1", "wheel"]
+requires = ["setuptools>=82.0.1", "wheel", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "bounds"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Architecture contract enforcer for AI-native codebase understanding — zero-LLM structural validation via tree-sitter."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.0.3", "pytest-xdist>=3.8.0", "coverage>=7.14.1", "build>=1.5.0"]
+dev = ["pytest>=9.0.3", "pytest-xdist>=3.8.0", "coverage>=7.14.1", "build>=1.5.0", "setuptools-scm>=8.0"]
 
 [project.urls]
 Homepage = "https://github.com/Farzin312/bounds"
@@ -79,3 +79,6 @@ ignore = [
     "F541",  # f-string without placeholders present in current source
     "I001",  # import block sorting not yet applied to current source
 ]
+
+[tool.setuptools_scm]
+# No configuration needed, defaults are fine

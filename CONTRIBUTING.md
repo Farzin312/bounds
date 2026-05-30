@@ -190,14 +190,15 @@ Tree-sitter adapters live in `src/bounds/extract/`. To add a new language:
 5. Add the tree-sitter grammar to `pyproject.toml` dependencies.
 6. Write tests in `tests/test_extract.py`.
 
-## Release Process
+## Release Process & Source of Truth
 
-1. Update version in `pyproject.toml`.
-2. Update `CHANGELOG.md`.
-3. Tag the release: `git tag v0.2.0 && git push origin v0.2.0`.
-4. The [release workflow](.github/workflows/release.yml) builds and publishes
-   to PyPI automatically.
-5. Verify: `pip install bounds==<version>` and `bounds --version`.
+GitHub is the single source of truth for the codebase and its version.
+
+1. **Automatic Versioning.** This repository uses `setuptools-scm`. The version is derived dynamically from git tags and the commit count. **Never** re-add a static `version =` string to `pyproject.toml`.
+2. **Update CHANGELOG.md.** Document the changes for the new version.
+3. **Tag the release.** To cut a formal release, create a git tag: `git tag -a v0.x.y -m "Release v0.x.y" && git push origin v0.x.y`.
+4. **Automatic Build.** The [release workflow](.github/workflows/release.yml) detects the tag, builds the sdist/wheel, and publishes to PyPI using the tag as the version.
+5. **Update local CLI.** To update your own `bounds` installation to the latest version on GitHub, run: `pipx install --force git+https://github.com/Farzin312/bounds.git`.
 
 ## Documentation
 
