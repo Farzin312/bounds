@@ -31,7 +31,7 @@ classifiers = [
 dependencies = [
     "click>=8.1",
     "PyYAML>=6",
-    "tree-sitter>=0.21,<0.26",
+    "tree-sitter>=0.25.2,<0.26",
     "tree-sitter-python>=0.21",
     "tree-sitter-typescript>=0.21",
 ]
