@@ -20,19 +20,23 @@ _SEVERITY_ORDER = ("error", "warning", "info")
 _BULLETS = {"error": "✗", "warning": "⚠", "info": "ℹ"}
 
 
-def emit(payload: dict, human: bool, stream=None) -> None:
-    """Write ``payload`` to ``stream`` as JSON (default) or a human-readable view.
+def emit(payload: dict, human: bool, stream=None, ci: bool = False) -> None:
+    """Write ``payload`` to ``stream`` as JSON (default), a human view, or CI plaintext.
 
     JSON path preserves insertion order (``sort_keys=False``) since producers already
     build their dicts deterministically. The human path detects payload type by keys:
-    a validation report (``validation_status`` + ``mode``), a subsystem compact
-    (``name`` + ``role``), or a generic key/value listing.
+    a validation report (``validation_status`` + ``mode``), a namespace-filtered describe
+    (``namespace`` + ``subsystems``), a subsystem compact (``name`` + ``role``), or a
+    generic key/value listing. The ``ci`` path renders a report as one issue per line.
     """
     # SUPERVISOR-NOTE (review, 2026-05-29): resolve sys.stdout at call time, not as a
     # default arg — a default binds the stream at import and ignores later redirection
     # (CliRunner, contextlib.redirect_stdout), which silently dropped all CLI output.
     if stream is None:
         stream = sys.stdout
+    if ci:
+        stream.write(_render_report_ci(payload))
+        return
     if not human:
         json.dump(payload, stream, indent=2, sort_keys=False)
         stream.write("\n")
@@ -40,11 +44,50 @@ def emit(payload: dict, human: bool, stream=None) -> None:
 
     if isinstance(payload, dict) and "validation_status" in payload and "mode" in payload:
         stream.write(_render_report_dict_human(payload))
+    elif isinstance(payload, dict) and "namespace" in payload and "subsystems" in payload:
+        stream.write(_render_namespace_human(payload))
     elif isinstance(payload, dict) and "name" in payload and "role" in payload:
         stream.write(_render_subsystem_human(payload))
     else:
         stream.write(_render_generic_human(payload))
     stream.write("\n")
+
+
+def _render_report_ci(payload: dict) -> str:
+    """Render a report as CI plaintext: one ``severity\tcode\tlocation\tmessage`` per line.
+
+    Stable, tab-delimited, sorted by the report's own issue order (severity then code).
+    Designed for ``grep``/``awk`` in CI logs: the bare error code is its own field, so
+    ``grep E_BOUNDARY_VIOLATION`` matches cleanly. A clean report emits a single
+    ``ok\t<status>`` line so a passing run is never indistinguishable from a crash.
+    A fatal ``CompactError`` payload (``{"error": {...}}``) emits one ``fatal`` line so a
+    CI parser sees the failure code instead of a misleading ``ok``.
+    """
+    err = payload.get("error")
+    if isinstance(err, dict):
+        return f"fatal\t{err.get('code', '')}\t-\t{err.get('message', '')}\n"
+    issues = payload.get("issues", []) or []
+    if not issues:
+        return f"ok\t{payload.get('validation_status', 'fresh')}\n"
+    lines: list[str] = []
+    for issue in issues:
+        code = issue.get("code", "")
+        sev = issue.get("severity", "")
+        location = "/".join(part for part in (issue.get("subsystem"), issue.get("file")) if part) or "-"
+        message = issue.get("message", "")
+        lines.append(f"{sev}\t{code}\t{location}\t{message}")
+    return "\n".join(lines) + "\n"
+
+
+def _render_namespace_human(payload: dict) -> str:
+    """Render a namespace-filtered describe (``namespace`` + a list of subsystem dicts)."""
+    ns = payload.get("namespace", "")
+    subs = payload.get("subsystems", []) or []
+    header = f"namespace: {ns}  ({len(subs)} subsystem{'s' if len(subs) != 1 else ''})"
+    if not subs:
+        return header + "\n\n(no subsystems in this namespace)"
+    blocks = [_render_subsystem_human(sub) for sub in subs]
+    return header + "\n\n" + ("\n\n" + ("-" * 40) + "\n\n").join(blocks)
 
 
 def report_to_dict(report: ValidationReport) -> dict:
@@ -196,6 +239,9 @@ def _render_subsystem_human(payload: dict) -> str:
     files = payload.get("files", [])
     if files:
         lines.append(f"files:      {', '.join(files)}")
+    entry_points = payload.get("entry_points", [])
+    if entry_points:
+        lines.append(f"entry_points: {', '.join(entry_points)}")
 
     exposes = payload.get("exposes", [])
     if exposes:
@@ -211,6 +257,8 @@ def _render_subsystem_human(payload: dict) -> str:
                 tag = " [verified]"
             elif verified is False:
                 tag = " [unverified]"
+            if e.get("entry_point"):
+                tag += " [entry-point]"
             loc = f"  {file}" if file else ""
             lines.append(f"  - {name} ({kind}){loc}{tag}")
     else:

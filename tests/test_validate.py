@@ -94,6 +94,20 @@ def test_schema_subsystem_bad_role():
     assert any(i.code == errors.E_SCHEMA_INVALID and "role" in i.message for i in issues)
 
 
+def test_schema_root_entry_points_must_be_list():
+    issues = schema.validate_root(
+        {"version": "1", "project": "p", "entry_points": "main.py"}
+    )
+    assert any(i.code == errors.E_SCHEMA_INVALID and "entry_points" in i.message for i in issues)
+
+
+def test_schema_root_entry_points_list_ok():
+    issues = schema.validate_root(
+        {"version": "1", "project": "p", "entry_points": ["main.py", "app.py"]}
+    )
+    assert issues == []
+
+
 def test_schema_valid_subsystem_passes():
     issues = schema.validate_subsystem(
         "auth",
@@ -368,3 +382,33 @@ def test_engine_hotfix_never_blocks(py_project):
     report = engine.run(py_project, mode="hotfix")
     assert report.ok is True
     assert report.mode == "hotfix"
+
+
+def test_engine_entry_point_not_blocking(py_project, git_init):
+    # A root entry point + a genuine orphan, both unowned, under --fail-on-unowned:
+    # the orphan blocks (error), the entry point is reported but never blocks (warning).
+    (py_project / "app.py").write_text("def main():\n    pass\n", encoding="utf-8")
+    (py_project / "orphan.py").write_text("def stray():\n    pass\n", encoding="utf-8")
+    rootf = py_project / ".compact" / "root.yaml"
+    rootf.write_text(rootf.read_text(encoding="utf-8") + "entry_points: [app.py]\n", encoding="utf-8")
+    git_init(py_project)
+
+    report = engine.run(py_project, mode="full", fail_on_unowned=True)
+    assert report.ok is False  # orphan.py still blocks
+    assert report.stats["entry_points"] == ["app.py"]
+    by_file = {(i.file, i.severity) for i in report.issues if i.code == errors.E_UNOWNED_FILE}
+    assert ("orphan.py", "error") in by_file
+    assert ("app.py", "warning") in by_file
+
+
+def test_engine_entry_point_alone_is_clean(py_project, git_init):
+    # When the only unowned file is an entry point, --fail-on-unowned does not block.
+    (py_project / "manage.py").write_text("def main():\n    pass\n", encoding="utf-8")
+    rootf = py_project / ".compact" / "root.yaml"
+    rootf.write_text(rootf.read_text(encoding="utf-8") + "entry_points: [manage.py]\n", encoding="utf-8")
+    git_init(py_project)
+
+    report = engine.run(py_project, mode="full", fail_on_unowned=True)
+    assert report.ok is True
+    assert report.stats["entry_points"] == ["manage.py"]
+    assert report.errors() == []

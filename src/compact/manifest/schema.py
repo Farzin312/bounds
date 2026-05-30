@@ -17,7 +17,8 @@ def validate_root(data: dict) -> list[Issue]:
     """Validate a root-manifest dict, returning schema Issues (never raises).
 
     Enforces: ``version`` and ``project`` present, ``enforce`` (if present) in
-    ``config.VALID_ENFORCE``, and ``subsystems`` (if present) a list of names.
+    ``config.VALID_ENFORCE``, ``subsystems`` (if present) a list of names, and
+    ``entry_points`` (if present) a list of file globs.
     """
     issues: list[Issue] = []
 
@@ -70,6 +71,17 @@ def validate_root(data: dict) -> list[Issue]:
                 severity="error",
                 message="root manifest 'subsystems' must be a list of names",
                 fix="make `subsystems` a YAML list, e.g. `subsystems: [manifest, extract]`",
+            )
+        )
+
+    entry_points = data.get("entry_points")
+    if entry_points is not None and not isinstance(entry_points, list):
+        issues.append(
+            Issue(
+                code=errors.E_SCHEMA_INVALID,
+                severity="error",
+                message="root manifest 'entry_points' must be a list of file globs",
+                fix="make `entry_points` a YAML list, e.g. `entry_points: [main.py, app.py]`",
             )
         )
 

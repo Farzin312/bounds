@@ -130,10 +130,27 @@ Tree-sitter adapters live in `src/compact/extract/`. To add a new language:
 ## Release Process
 
 1. Update version in `pyproject.toml`.
-2. Update `CHANGELOG.md` if one exists (not yet — tracked on ROADMAP).
+2. Update `CHANGELOG.md`.
 3. Tag the release: `git tag v0.2.0 && git push origin v0.2.0`.
 4. The [release workflow](.github/workflows/release.yml) builds and publishes
    to PyPI automatically.
+5. Verify: `pip install compact==<version>` and `compact --version`.
+
+## Documentation
+
+When contributing documentation changes:
+
+- **README.md** — product pitch, quickstart, agent integration. Must include real benchmark data
+  and competitive positioning. No emoji.
+- **ARCHITECTURE.md** — engineering contract. Every module signature, dataclass field, error code,
+  and JSON shape is binding.
+- **ROADMAP.md** — scope and phasing. What is in vs what is deferred.
+- **SECURITY.md** — security principles (7), vulnerability disclosure policy, install channels.
+- **CHANGELOG.md** — version history. Keep a summary of changes per release.
+- **Benchmarks** — raw data in `benchmarks/v0.1.0/` with full methodology, commands, and
+  measurements.
+- **Terminology** — use `exposes`, `paths`, `consumes`, `consumed_by` (computed), `namespace`.
+  Not `provides`, `files`, `consumed_by` (declared), `owns.files`.
 
 ## Questions?
 

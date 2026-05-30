@@ -5,12 +5,29 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "compact"
 version = "0.1.0"
-description = "AI-native codebase understanding via subsystem boundary manifests (zero-LLM structural validation)."
+description = "Architecture contract enforcer for AI-native codebase understanding — zero-LLM structural validation via tree-sitter."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Farzin Shifat", email = "farzinshifat@gmail.com" }]
-keywords = ["ai", "codebase", "tree-sitter", "architecture", "manifest", "validation"]
+keywords = [
+    "ai", "codebase", "tree-sitter", "architecture",
+    "manifest", "validation", "code-graph", "drift-detection",
+    "subsystem-boundaries", "contract-enforcement",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Build Tools",
+]
 dependencies = [
     "click>=8.1",
     "PyYAML>=6",
@@ -20,7 +37,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-xdist>=3", "coverage>=7"]
+dev = ["pytest>=7", "pytest-xdist>=3", "coverage>=7", "build>=1"]
+
+[project.urls]
+Homepage = "https://github.com/Farzin312/compact"
+Repository = "https://github.com/Farzin312/compact"
+Documentation = "https://github.com/Farzin312/compact#readme"
+Changelog = "https://github.com/Farzin312/compact/blob/main/CHANGELOG.md"
+Issues = "https://github.com/Farzin312/compact/issues"
 
 [project.scripts]
 compact = "compact.cli:main"

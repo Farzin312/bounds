@@ -119,6 +119,7 @@ class RootManifest:
     languages: list[str] = field(default_factory=list)
     enforce: str = "off"
     subsystems: list[str] = field(default_factory=list)
+    entry_points: list[str] = field(default_factory=list)  # root-level bootstrap globs
     source_path: str = ""
 
     def to_dict(self) -> dict:
@@ -128,6 +129,7 @@ class RootManifest:
             "languages": list(self.languages),
             "enforce": self.enforce,
             "subsystems": list(self.subsystems),
+            "entry_points": list(self.entry_points),
         }
 
     @classmethod
@@ -138,6 +140,7 @@ class RootManifest:
             languages=[str(x) for x in (data.get("languages") or [])],
             enforce=str(data.get("enforce", "off")),
             subsystems=[str(s) for s in (data.get("subsystems") or [])],
+            entry_points=[str(g) for g in (data.get("entry_points") or [])],
             source_path=source_path,
         )
 
