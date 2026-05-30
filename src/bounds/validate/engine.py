@@ -136,7 +136,7 @@ def run(
         prev = state.get(rel)
 
         # Quick mode: a file git says is unchanged is trusted from cache without hashing/parsing.
-        if mode == "quick" and rel not in changed_rel and prev is not None:
+        if mode == "quick" and rel not in changed_rel and prev is not None and not _oversized(abs_path):
             extracts[rel] = prev.to_result()
             prev.subsystem = owner  # keep the cached owner current (partial reads)
             cache_hits += 1
@@ -163,7 +163,7 @@ def run(
                 Issue(
                     errors.E_EXTRACTION_FAILED,
                     "warning",
-                    f"could not read '{rel}': {exc}",
+                    f"could not read '{rel}': {exc.strerror or type(exc).__name__}",
                     subsystem=owner,
                     file=rel,
                     fix="check the file's permissions/encoding; Bounds skipped it",
@@ -271,6 +271,14 @@ def run(
 # ===========================================================================
 # Helpers
 # ===========================================================================
+def _oversized(path: Path) -> bool:
+    """True if the file is larger than config.MAX_FILE_BYTES (fail soft on stat error)."""
+    try:
+        return path.stat().st_size > config.MAX_FILE_BYTES
+    except OSError:
+        return False
+
+
 def _is_external_symlink(abs_path: Path, project_root: Path) -> bool:
     """True if ``abs_path`` reaches its target through a symlink that escapes the project.
 

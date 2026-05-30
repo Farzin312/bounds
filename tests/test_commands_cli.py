@@ -337,3 +337,29 @@ def test_coverage_counts_local_unresolved_not_external(monkeypatch, py_project):
     )
     cov = json.loads(_invoke(monkeypatch, py_project, ["validate"]).output)["stats"]["coverage"]
     assert cov["unresolved_local_imports"] == 1
+
+
+def test_quick_flags_oversized_unchanged_file(monkeypatch, py_project, git_init):
+    # PR fix: the oversized guard runs BEFORE the quick-mode cache hit, so an unchanged-but-
+    # oversized owned file is flagged loudly, never silently served from a stale cache record.
+    import bounds.config as cfg
+    git_init(py_project)
+    _invoke(monkeypatch, py_project, ["validate"])  # warm the cache at normal size
+    monkeypatch.setattr(cfg, "MAX_FILE_BYTES", 5)   # now every file is "oversized"
+    data = json.loads(_invoke(monkeypatch, py_project, ["validate", "--quick"]).output)
+    assert any(
+        i["code"] == "E_EXTRACTION_FAILED" and "MAX_FILE_BYTES" in i["message"]
+        for i in data["issues"]
+    )
+
+
+def test_walk_does_not_descend_external_symlink_dir(monkeypatch, py_project, tmp_path):
+    # PR fix: a directory symlink that escapes the repo is never traversed, so `where` cannot
+    # surface symbols from outside the project (no arbitrary external extraction / unbounded walk).
+    import os
+    external = tmp_path / "outside"
+    external.mkdir()
+    (external / "secret.py").write_text("def Sekret():\n    pass\n", encoding="utf-8")
+    os.symlink(external, py_project / "src" / "models" / "ext")
+    data = json.loads(_invoke(monkeypatch, py_project, ["where", "Sekret"]).output)
+    assert data["count"] == 0

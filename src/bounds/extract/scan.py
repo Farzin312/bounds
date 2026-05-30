@@ -29,6 +29,10 @@ def walk_supported(base: Path, exts: set[str]) -> list[Path]:
     """
     out: list[Path] = []
     seen_dirs: set[Path] = set()
+    try:
+        base_real = base.resolve()
+    except OSError:
+        base_real = base
     stack: list[Path] = [base]
     while stack:
         d = stack.pop()
@@ -46,8 +50,16 @@ def walk_supported(base: Path, exts: set[str]) -> list[Path]:
         for entry in entries:
             try:
                 if entry.is_dir():
-                    if entry.name not in config.DEFAULT_IGNORES:
-                        stack.append(entry)
+                    if entry.name in config.DEFAULT_IGNORES:
+                        continue
+                    # Never descend a symlinked directory that escapes the walk root —
+                    # blocks unbounded traversal of (or extraction from) an external tree.
+                    if entry.is_symlink():
+                        try:
+                            entry.resolve().relative_to(base_real)
+                        except (OSError, ValueError):
+                            continue
+                    stack.append(entry)
                 elif entry.is_file() and entry.suffix in exts:
                     out.append(entry)
             except OSError:
