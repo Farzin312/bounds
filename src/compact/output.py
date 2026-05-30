@@ -24,9 +24,9 @@ def emit(payload: dict, human: bool, stream=None) -> None:
     """Write ``payload`` to ``stream`` as JSON (default) or a human-readable view.
 
     JSON path preserves insertion order (``sort_keys=False``) since producers already
-    build their dicts deterministically. The human path detects a validation report by
-    the ``validation_status`` key and renders it richly; any other dict is shown as a
-    plain key/value listing.
+    build their dicts deterministically. The human path detects payload type by keys:
+    a validation report (``validation_status`` + ``mode``), a subsystem compact
+    (``name`` + ``role``), or a generic key/value listing.
     """
     # SUPERVISOR-NOTE (review, 2026-05-29): resolve sys.stdout at call time, not as a
     # default arg — a default binds the stream at import and ignores later redirection
@@ -38,8 +38,10 @@ def emit(payload: dict, human: bool, stream=None) -> None:
         stream.write("\n")
         return
 
-    if isinstance(payload, dict) and "validation_status" in payload:
+    if isinstance(payload, dict) and "validation_status" in payload and "mode" in payload:
         stream.write(_render_report_dict_human(payload))
+    elif isinstance(payload, dict) and "name" in payload and "role" in payload:
+        stream.write(_render_subsystem_human(payload))
     else:
         stream.write(_render_generic_human(payload))
     stream.write("\n")
@@ -174,6 +176,76 @@ def _format_issue_lines(issue: dict) -> list[str]:
     if fix:
         lines.append(f"    fix: {fix}")
     return lines
+
+
+def _render_subsystem_human(payload: dict) -> str:
+    """Render a subsystem compact (shape of ``SubsystemCompact.to_dict()``) as readable text."""
+    lines: list[str] = []
+    lines.append(f"subsystem:  {payload.get('name', '?')}")
+    lines.append(f"role:       {payload.get('role', '?')}")
+    lines.append(f"criticality: {payload.get('criticality', '?')}")
+    ns = payload.get("namespace")
+    if ns:
+        lines.append(f"namespace:  {ns}")
+    desc = payload.get("description", "")
+    if desc:
+        lines.append(f"description: {desc}")
+    paths = payload.get("paths", [])
+    if paths:
+        lines.append(f"paths:      {', '.join(paths)}")
+    files = payload.get("files", [])
+    if files:
+        lines.append(f"files:      {', '.join(files)}")
+
+    exposes = payload.get("exposes", [])
+    if exposes:
+        lines.append(f"")
+        lines.append(f"exposes ({len(exposes)}):")
+        for e in exposes:
+            name = e.get("name", "?")
+            kind = e.get("kind", "?")
+            file = e.get("file", "")
+            verified = e.get("verified")
+            tag = ""
+            if verified is True:
+                tag = " [verified]"
+            elif verified is False:
+                tag = " [unverified]"
+            loc = f"  {file}" if file else ""
+            lines.append(f"  - {name} ({kind}){loc}{tag}")
+    else:
+        lines.append(f"")
+        lines.append("exposes:    (none)")
+
+    consumes = payload.get("consumes", [])
+    if consumes:
+        lines.append(f"")
+        lines.append(f"consumes ({len(consumes)}):")
+        for c in consumes:
+            sub = c.get("subsystem", "?")
+            iface = c.get("interfaces", [])
+            via = c.get("via")
+            detail = f" via {via}" if via else ""
+            iface_str = f" [{', '.join(iface)}]" if iface else ""
+            lines.append(f"  - {sub}{iface_str}{detail}")
+    else:
+        lines.append(f"")
+        lines.append("consumes:   (none)")
+
+    consumed_by = payload.get("consumed_by", [])
+    if consumed_by:
+        lines.append(f"consumed_by: {', '.join(sorted(consumed_by))}")
+    else:
+        lines.append("consumed_by: (none)")
+
+    val_status = payload.get("validation_status", "")
+    if val_status:
+        lines.append(f"validation_status: {val_status}")
+    semantic = payload.get("semantic")
+    if semantic is not None:
+        lines.append(f"semantic: {semantic.get('note', '')}")
+
+    return "\n".join(lines)
 
 
 def _render_generic_human(payload) -> str:

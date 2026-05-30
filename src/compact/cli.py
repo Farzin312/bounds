@@ -15,6 +15,7 @@ from pathlib import Path
 import click
 
 from . import __version__, config, errors, output
+from .extract import get_adapter, supported_extensions
 from .manifest import loader as manifest_loader
 from .validate import engine as validate_engine
 from .validate.checks import CheckContext, check_cycles
@@ -100,7 +101,85 @@ def describe_cmd(name: str, deep: bool, human: bool) -> None:
                 f"subsystem '{name}' not found",
                 fix=f"known subsystems: {sorted(subs)}; or run 'compact init --subsystem {name}'",
             )
-        payload = subs[name].to_dict()
+        sub = subs[name]
+        payload = sub.to_dict()
+
+        # ---- Merge Tier-1 extraction into Tier-2 declared data ----
+        exts = supported_extensions()
+        extracted_symbols: dict[str, str] = {}  # symbol_name -> file_path
+        owned_files: list[str] = []
+
+        for raw_path in sub.paths or []:
+            base = root / raw_path
+            if base.is_dir():
+                for f in sorted(base.rglob("*")):
+                    if f.is_file() and f.suffix in exts:
+                        rel = f.relative_to(root).as_posix()
+                        owned_files.append(rel)
+                        adapter = get_adapter(rel)
+                        if adapter is None:
+                            continue
+                        try:
+                            source = f.read_bytes()
+                        except OSError:
+                            continue
+                        result = adapter.extract(rel, source)
+                        if result and result.error is None:
+                            for sym in result.symbols:
+                                if sym.exported:
+                                    extracted_symbols[sym.name] = rel
+            elif base.is_file() and base.suffix in exts:
+                rel = base.relative_to(root).as_posix()
+                owned_files.append(rel)
+                adapter = get_adapter(rel)
+                if adapter is not None:
+                    try:
+                        source = base.read_bytes()
+                    except OSError:
+                        continue
+                    result = adapter.extract(rel, source)
+                    if result and result.error is None:
+                        for sym in result.symbols:
+                            if sym.exported:
+                                extracted_symbols[sym.name] = rel
+            else:
+                # Treat as glob pattern relative to project root
+                for f in sorted(root.glob(raw_path)):
+                    if f.is_file() and f.suffix in exts:
+                        rel = f.relative_to(root).as_posix()
+                        if rel not in owned_files:
+                            owned_files.append(rel)
+                        adapter = get_adapter(rel)
+                        if adapter is None:
+                            continue
+                        try:
+                            source = f.read_bytes()
+                        except OSError:
+                            continue
+                        result = adapter.extract(rel, source)
+                        if result and result.error is None:
+                            for sym in result.symbols:
+                                if sym.exported:
+                                    extracted_symbols[sym.name] = rel
+
+        # Also check sub.files (the explicit files list)
+        for raw in sub.files or []:
+            f = root / raw
+            if f.is_file() and f.suffix in exts:
+                rel = f.relative_to(root).as_posix()
+                if rel not in owned_files:
+                    owned_files.append(rel)
+
+        for expose in payload.get("exposes", []):
+            ename = expose.get("name", "")
+            if ename in extracted_symbols:
+                expose["file"] = extracted_symbols[ename]
+                expose["verified"] = True
+            else:
+                expose["verified"] = False
+
+        payload["files"] = sorted(owned_files)
+
         try:
             report = validate_engine.run(root, mode="quick", persist=False)
             payload["validation_status"] = report.status
@@ -261,9 +340,8 @@ def init_cmd(root_flag: bool, subsystem: str | None, human: bool) -> None:
         result: dict = {"created": created, "skipped": skipped}
 
         if subsystem:
-            sub_dir = compact_dir / config.SUBSYS_DIR / subsystem
-            sub_dir.mkdir(parents=True, exist_ok=True)
-            sub_file = sub_dir / config.SUBSYS_FILE
+            sub_file = compact_dir / config.MANIFESTS_DIR / f"{subsystem}.yaml"
+            sub_file.parent.mkdir(parents=True, exist_ok=True)
             rel = sub_file.relative_to(project).as_posix()
             if sub_file.exists():
                 skipped.append(rel)

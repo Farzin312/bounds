@@ -7,6 +7,7 @@ COMPACT_DIR = ".compact"
 ROOT_FILE = "root.yaml"
 SUBSYS_DIR = "subsystems"
 SUBSYS_FILE = "compact.yaml"
+MANIFESTS_DIR = "manifests"
 STATE_FILE = "state.json"
 
 # ---- Schema / versioning ----

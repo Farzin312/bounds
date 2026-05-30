@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "pytest-xdist>=3", "coverage>=7"]
 
 [project.scripts]
 compact = "compact.cli:main"

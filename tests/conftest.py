@@ -42,19 +42,18 @@ def git_sample_project(sample_project: Path) -> Path:
 def py_project(tmp_path: Path) -> Path:
     """A minimal two-subsystem Python project: `models` (core) consumed by `svc` (service)."""
     root = tmp_path / "proj"
-    (root / ".compact" / "subsystems" / "models").mkdir(parents=True)
-    (root / ".compact" / "subsystems" / "svc").mkdir(parents=True)
+    (root / ".compact" / "manifests").mkdir(parents=True)
     (root / ".compact" / "root.yaml").write_text(
         'version: "1"\nproject: proj\nlanguages: [python]\nenforce: "off"\n'
         "subsystems: [models, svc]\n",
         encoding="utf-8",
     )
-    (root / ".compact" / "subsystems" / "models" / "compact.yaml").write_text(
+    (root / ".compact" / "manifests" / "models.yaml").write_text(
         "name: models\nrole: library\ncriticality: core\npaths: [src/models]\n"
         "exposes:\n  - { name: Thing, kind: class }\nconsumes: []\n",
         encoding="utf-8",
     )
-    (root / ".compact" / "subsystems" / "svc" / "compact.yaml").write_text(
+    (root / ".compact" / "manifests" / "svc.yaml").write_text(
         "name: svc\nrole: service\ncriticality: leaf\npaths: [src/svc]\nexposes: []\n"
         "consumes:\n  - { subsystem: models, via: models, interfaces: [Thing] }\n",
         encoding="utf-8",

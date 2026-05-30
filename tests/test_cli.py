@@ -108,7 +108,7 @@ def test_init_root_then_subsystem(tmp_path, monkeypatch):
 
     r2 = runner.invoke(main, ["init", "--subsystem", "widgets"])
     assert r2.exit_code == 0
-    assert (tmp_path / ".compact" / "subsystems" / "widgets" / "compact.yaml").exists()
+    assert (tmp_path / ".compact" / "manifests" / "widgets.yaml").exists()
 
     # the scaffolded project is now discoverable
     r3 = runner.invoke(main, ["list"])

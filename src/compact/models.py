@@ -69,6 +69,7 @@ class SubsystemCompact:
     role: str = "library"
     criticality: str = "leaf"
     description: str = ""
+    namespace: str = ""
     paths: list[str] = field(default_factory=list)
     exposes: list[Interface] = field(default_factory=list)
     consumes: list[Consumes] = field(default_factory=list)
@@ -77,7 +78,7 @@ class SubsystemCompact:
     source_path: str = ""
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "name": self.name,
             "role": self.role,
             "criticality": self.criticality,
@@ -88,6 +89,9 @@ class SubsystemCompact:
             "files": list(self.files),
             "consumed_by": sorted(self.consumed_by),
         }
+        if self.namespace:
+            d["namespace"] = self.namespace
+        return d
 
     @classmethod
     def from_dict(cls, data: dict, source_path: str = "") -> "SubsystemCompact":
@@ -96,6 +100,7 @@ class SubsystemCompact:
             role=str(data.get("role", "library")),
             criticality=str(data.get("criticality", "leaf")),
             description=str(data.get("description", "")),
+            namespace=str(data.get("namespace", "")),
             paths=[str(p) for p in (data.get("paths") or [])],
             exposes=[Interface.from_dict(e) for e in (data.get("exposes") or [])],
             consumes=[Consumes.from_dict(c) for c in (data.get("consumes") or [])],

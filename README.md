@@ -4,14 +4,14 @@
 
 ### Give your AI agent a map of the codebase — not the whole city.
 
-**Compact** is a zero-LLM CLI that turns a codebase's architecture into deterministic, machine-readable
-manifests. AI coding agents read a 10-line YAML boundary instead of 10 files — and get a structural
+**Compact** is a CLI that turns a codebase's architecture into deterministic, machine-readable
+manifests — using **tree-sitter (zero LLM)** for all structural validation. AI coding agents read a 10-line YAML boundary instead of 10 files — and get a structural
 **validation** they can actually trust, in milliseconds, for zero tokens.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](#cross-platform-support)
-[![Zero LLM](https://img.shields.io/badge/structural%20engine-zero%20LLM-brightgreen.svg)](#how-it-works)
+[![Zero LLM](https://img.shields.io/badge/structural%20validation-zero%20LLM-brightgreen.svg)](#how-it-works)
 
 [Quick start](#quick-start) · [Agent integration](#agent--editor-integration) · [Commands](#command-reference) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md)
 
@@ -41,7 +41,7 @@ declare each subsystem's role, its public interfaces, and its cross-boundary dep
 The result is a structural contract an agent can query and a CI pipeline can enforce:
 
 - 🗺️ **`describe`** — hand an agent a subsystem's exact public surface as JSON, instead of raw files.
-- ✅ **`validate`** — catch drift the moment exports stop matching the manifest. 6 checks, zero LLM.
+- ✅ **`validate`** — catch drift the moment exports stop matching the manifest. 6 checks, zero LLM (tree-sitter, deterministic).
 - ⚡ **`--quick`** — git-diff incremental validation in **sub-200 ms**, safe for every commit.
 - 🔒 **Deterministic & free** — same input, same bytes out. No tokens, no network, no flakiness.
 - 🤖 **Agent-native** — JSON by default; `--human` when a person is reading.
@@ -62,7 +62,7 @@ Three tiers, only the top one ever costs a token:
 | **Declared** | human-written YAML | **zero** | descriptions, boundaries, contract metadata |
 | **Semantic** | LLM, on demand (roadmap) | tokens/use | type signatures, intent summaries |
 
-A subsystem manifest looks like this (`.compact/subsystems/auth/compact.yaml`):
+A subsystem manifest looks like this (`.compact/manifests/auth.yaml`):
 
 ```yaml
 name: auth
@@ -136,7 +136,7 @@ compact --help
 ```bash
 cd your-project
 compact init --root                  # scaffold .compact/root.yaml
-compact init --subsystem auth        # add .compact/subsystems/auth/compact.yaml
+compact init --subsystem auth        # add .compact/manifests/auth.yaml
 # ...edit the manifest to declare paths / exposes / consumes...
 
 compact list                         # discover subsystems        (JSON)
@@ -155,7 +155,7 @@ compact overview                     # project health dashboard
 | Command | What it returns |
 |---------|-----------------|
 | `compact init --root` | Scaffolds `.compact/root.yaml`. |
-| `compact init --subsystem <name>` | Scaffolds `.compact/subsystems/<name>/compact.yaml`. |
+| `compact init --subsystem <name>` | Scaffolds `.compact/manifests/<name>.yaml`. |
 | `compact list` | All subsystems with role, criticality, and interface counts. |
 | `compact describe <name>` | One subsystem's full manifest as JSON (`--deep` reserves Tier-3 LLM enrichment — roadmap). |
 | `compact validate` | Full validation, all 6 checks. `--quick` (git-diff incremental), `--mode <m>`, `--enforce on\|off`, `--base <ref>`. |

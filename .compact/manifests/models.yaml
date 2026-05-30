@@ -5,6 +5,8 @@ description: The Compact data model — manifest, extraction, and validation dat
 paths:
   - src/compact/models.py
 exposes:
+  - { name: Interface, kind: class }
+  - { name: Consumes, kind: class }
   - { name: SubsystemCompact, kind: class }
   - { name: RootManifest, kind: class }
   - { name: Symbol, kind: class }

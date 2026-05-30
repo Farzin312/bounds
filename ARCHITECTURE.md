@@ -30,8 +30,8 @@ compact/
 ├── LICENSE
 ├── .compact/                      # Compact's own manifests (bootstrap demo, Phase 5)
 │   ├── root.yaml
-│   └── subsystems/
-│       └── <name>/compact.yaml
+│   └── manifests/
+│       └── <name>.yaml
 ├── src/
 │   └── compact/
 │       ├── __init__.py            # __version__
@@ -394,7 +394,7 @@ subsystems:
   - cli
 ```
 
-**`.compact/subsystems/extract/compact.yaml`**
+**`.compact/manifests/extract.yaml`**
 ```yaml
 name: extract
 role: library
@@ -474,7 +474,7 @@ compact validate [--quick|--mode M] [--enforce on|off] [--base REF]
 compact preflight                  → ValidationReport (mode=preflight) + per-check summary
 compact overview                   → {project, subsystems, roles:{...}, criticality:{...}, edges, cycles, health:{...}}
 compact init --root                → scaffolds .compact/root.yaml
-compact init --subsystem <name>    → scaffolds .compact/subsystems/<name>/compact.yaml
+compact init --subsystem <name>    → scaffolds .compact/manifests/<name>.yaml
 ```
 
 Every command's JSON includes top-level `"validation_status"` where meaningful and `"ok": bool`. Fatal `CompactError` → `{"error":{code,message,fix}}` on stdout + exit 2.

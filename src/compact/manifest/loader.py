@@ -54,7 +54,7 @@ def load_root(project_root: Path) -> RootManifest:
 
 
 def load_subsystem(project_root: Path, name: str) -> SubsystemCompact:
-    """Load ``.compact/subsystems/<name>/compact.yaml`` into a :class:`SubsystemCompact`.
+    """Load `.compact/manifests/<name>.yaml` into a :class:`SubsystemCompact`.
 
     Raises :class:`CompactError` with ``E_SUBSYSTEM_NOT_FOUND`` if the file is absent or
     ``E_MANIFEST_PARSE_ERROR`` if YAML parsing fails. The returned subsystem's ``name``
@@ -114,9 +114,8 @@ def _subsystem_path(project_root: Path, name: str) -> Path:
     return (
         Path(project_root)
         / config.COMPACT_DIR
-        / config.SUBSYS_DIR
-        / name
-        / config.SUBSYS_FILE
+        / config.MANIFESTS_DIR
+        / f"{name}.yaml"
     )
 
 
