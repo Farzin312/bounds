@@ -21,7 +21,7 @@ writing the change and **prove** nothing broke after.
 
 ```bash
 bounds impact auth          # who depends on auth? → billing, api, frontend (+ the exact interfaces)
-bounds describe billing     # what does billing rely on from auth? (verified contract, ~300 tokens)
+bounds describe billing     # what does billing rely on from auth? (verified contract, ~400 tokens)
 # … the agent makes the change, now knowing the reach …
 bounds preflight            # contracts + boundaries + cycles + drift — fails if a consumer was broken
 ```
@@ -40,7 +40,7 @@ You're asked to rename `auth.verify` to `auth.verify_token`. Before touching any
 1. `bounds impact auth` reports that `billing`, `api`, and `frontend` consume `auth`, and lists the
    exact interfaces each relies on. `frontend` relies on `verify`.
 2. `bounds describe frontend` confirms how `frontend` declares its dependency on that interface — a
-   ~300-token contract instead of opening the `frontend/` source tree.
+   ~400-token contract instead of opening the `frontend/` source tree.
 3. You make the rename and update the three consumer manifests.
 4. `bounds preflight` runs the 6 checks; if you missed a consumer, it fails with the orphaned import
    named and a fix suggested.

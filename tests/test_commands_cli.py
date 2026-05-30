@@ -21,6 +21,27 @@ def test_impact_cli(monkeypatch, py_project):
     assert data["subsystem"] == "models"
     assert "svc" in data["transitive_consumers"]
     assert data["blast_radius"] >= 1
+    # s-29 honesty fields are always present.
+    assert data["basis"] == "declared-consumes"
+    assert data["blast_radius_is_lower_bound"] is True
+    assert "lower bound" in data["note"]
+    assert "undeclared_consumer_edges" not in data  # only with --verify
+
+
+def test_impact_verify_flags_undeclared_consumer(monkeypatch, py_project):
+    # Drop svc's declared consume of models, but svc/main.py still imports it: the declared
+    # blast radius now under-reports (0), and --verify must surface the real edge (s-29).
+    (py_project / ".bounds" / "manifests" / "svc.yaml").write_text(
+        "name: svc\nrole: service\ncriticality: leaf\npaths: [src/svc]\nexposes: []\nconsumes: []\n",
+        encoding="utf-8",
+    )
+    plain = json.loads(_invoke(monkeypatch, py_project, ["impact", "models"]).output)
+    assert plain["blast_radius"] == 0                  # declared graph misses it
+    assert plain["blast_radius_is_lower_bound"] is True
+
+    verified = json.loads(_invoke(monkeypatch, py_project, ["impact", "models", "--verify"]).output)
+    edges = verified["undeclared_consumer_edges"]
+    assert any(e["consumer"] == "svc" and "src/svc/main.py" in e["files"] for e in edges)
 
 
 def test_impact_unknown_subsystem_is_fatal(monkeypatch, py_project):
@@ -85,3 +106,121 @@ def test_discover_cli_runs(monkeypatch, py_project):
     res = _invoke(monkeypatch, py_project, ["discover"])
     assert res.exit_code == 0
     assert json.loads(res.output)["mode"] == "discover"
+
+
+# ---------------------------------------------------------------------------
+# s-34 de-spaghetti — golden / determinism guards
+#
+# describe's Tier-1+2 merge now lives in describe.py and reuses the shared
+# scan.iter_subsystem_files + scan.extract_file (one home for the owned-file
+# walk). These pin the JSON shape + byte-stability so a future refactor can't
+# silently change describe/validate output.
+# ---------------------------------------------------------------------------
+def _strip_duration(obj):
+    """Recursively drop the only non-deterministic field (stats.duration_ms)."""
+    if isinstance(obj, dict):
+        return {k: _strip_duration(v) for k, v in obj.items() if k != "duration_ms"}
+    if isinstance(obj, list):
+        return [_strip_duration(x) for x in obj]
+    return obj
+
+
+def test_describe_is_byte_stable_and_merges_tiers(monkeypatch, py_project):
+    r1 = _invoke(monkeypatch, py_project, ["describe", "models"])
+    r2 = _invoke(monkeypatch, py_project, ["describe", "models"])
+    assert r1.exit_code == 0 and r2.exit_code == 0
+    assert r1.output == r2.output  # byte-identical across runs (deterministic)
+
+    data = json.loads(r1.output)
+    assert data["name"] == "models"
+    assert data["files"] == ["src/models/thing.py"]
+    assert "validation_status" in data
+    thing = next(e for e in data["exposes"] if e["name"] == "Thing")
+    assert thing["verified"] is True
+    assert thing["file"] == "src/models/thing.py"
+
+
+def test_validate_json_is_byte_stable(monkeypatch, py_project):
+    _invoke(monkeypatch, py_project, ["validate"])  # warm the cache first
+    r1 = _invoke(monkeypatch, py_project, ["validate"])
+    r2 = _invoke(monkeypatch, py_project, ["validate"])
+    assert r1.exit_code in (0, 1) and r2.exit_code in (0, 1)
+    assert _strip_duration(json.loads(r1.output)) == _strip_duration(json.loads(r2.output))
+
+
+# ---------------------------------------------------------------------------
+# s-31 — subsystem-scoped describe status + coverage signals
+# ---------------------------------------------------------------------------
+def test_describe_status_is_subsystem_scoped(monkeypatch, py_project):
+    # Introduce drift in `models` only (declare a class the source doesn't export).
+    m = py_project / ".bounds" / "manifests" / "models.yaml"
+    m.write_text(
+        m.read_text(encoding="utf-8").replace(
+            "  - { name: Thing, kind: class }",
+            "  - { name: Thing, kind: class }\n  - { name: Missing, kind: class }",
+        ),
+        encoding="utf-8",
+    )
+    svc = json.loads(_invoke(monkeypatch, py_project, ["describe", "svc"]).output)
+    assert svc["validation_status"] == "fresh"   # svc itself is clean...
+    assert svc["project_status"] == "stale"      # ...but the project has drift (in models)
+
+    models = json.loads(_invoke(monkeypatch, py_project, ["describe", "models"]).output)
+    assert models["validation_status"] == "stale"   # the drift is scoped to models
+    assert models["project_status"] == "stale"
+
+
+# ---------------------------------------------------------------------------
+# s-30 — bounds where
+# ---------------------------------------------------------------------------
+def test_where_python_exact(monkeypatch, py_project):
+    data = json.loads(_invoke(monkeypatch, py_project, ["where", "Thing"]).output)
+    assert data["match"] == "exact" and data["count"] == 1
+    r = data["results"][0]
+    assert r["file"] == "src/models/thing.py"
+    assert r["owning_subsystem"] == "models"
+    assert r["exposed"] is True   # Thing is declared in models.exposes
+    assert r["kind"] == "class"
+
+
+def test_where_prefix(monkeypatch, py_project):
+    data = json.loads(_invoke(monkeypatch, py_project, ["where", "Th", "--prefix"]).output)
+    assert data["match"] == "prefix"
+    assert any(r["symbol"] == "Thing" for r in data["results"])
+
+
+def test_where_ts_exposed_flag(monkeypatch, sample_project):
+    # TS parity + exposed flag: login is declared (exposed); the internal UserRepository is not.
+    login = json.loads(_invoke(monkeypatch, sample_project, ["where", "login"]).output)["results"]
+    assert login and login[0]["owning_subsystem"] == "auth" and login[0]["exposed"] is True
+    repo = json.loads(_invoke(monkeypatch, sample_project, ["where", "UserRepository"]).output)["results"]
+    assert repo and repo[0]["owning_subsystem"] == "database" and repo[0]["exposed"] is False
+
+
+def test_where_collision_returns_all_sorted(monkeypatch, py_project):
+    # Same symbol name defined in two subsystems → both reported, deterministically sorted by file.
+    (py_project / "src" / "svc" / "dup.py").write_text("class Thing:\n    pass\n", encoding="utf-8")
+    data = json.loads(_invoke(monkeypatch, py_project, ["where", "Thing"]).output)
+    assert [r["file"] for r in data["results"]] == ["src/models/thing.py", "src/svc/dup.py"]
+
+
+def test_where_not_found(monkeypatch, py_project):
+    data = json.loads(_invoke(monkeypatch, py_project, ["where", "Nonexistent"]).output)
+    assert data["count"] == 0 and data["results"] == []
+
+
+def test_validate_reports_coverage_block(monkeypatch, py_project):
+    cov = json.loads(_invoke(monkeypatch, py_project, ["validate"]).output)["stats"]["coverage"]
+    assert cov["files_owned"] >= 2
+    assert cov["unresolved_local_imports"] == 0
+    assert cov["extraction_failures"] == 0
+
+
+def test_coverage_counts_local_unresolved_not_external(monkeypatch, py_project):
+    # A relative import to a non-existent local module is local-looking but unresolved (counted);
+    # a stdlib import (os) is not local-looking and must NOT inflate the count.
+    (py_project / "src" / "svc" / "extra.py").write_text(
+        "import os\nfrom ..models.ghost import Ghost\n", encoding="utf-8"
+    )
+    cov = json.loads(_invoke(monkeypatch, py_project, ["validate"]).output)["stats"]["coverage"]
+    assert cov["unresolved_local_imports"] == 1

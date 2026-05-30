@@ -212,6 +212,31 @@ def test_drift_undeclared_extra_on_core_is_info():
     assert not any(i.severity == "error" for i in issues)  # foo is declared & present
 
 
+def test_drift_undeclared_extra_on_leaf_is_info():
+    # s-32: undeclared exports surface as info on leaf/connector too (not just core/unbounded),
+    # which is where the most common real drift hides. Still info → never blocks.
+    for crit in ("leaf", "connector"):
+        subs = {"a": Sub(name="a", criticality=crit, paths=["x"], exposes=[Interface("foo")])}
+        extracts = {
+            "x/f.py": ExtractResult(
+                "x/f.py", "python",
+                [Symbol("foo", "function", 1, True), Symbol("extra", "function", 2, True)],
+            )
+        }
+        issues = check_structural_drift(_ctx(subs, extracts, {"x/f.py": "a"}))
+        assert any(i.severity == "info" and "extra" in i.message for i in issues), crit
+        assert not any(i.severity == "error" for i in issues), crit
+
+
+def test_drift_no_undeclared_flag_when_exposes_empty():
+    # s-32 guard: a subsystem that declares *no* exposes (e.g. not yet calibrated) is not
+    # spammed with an info per exported symbol — undeclared drift needs a declared set to drift from.
+    subs = {"a": Sub(name="a", criticality="leaf", paths=["x"], exposes=[])}
+    extracts = {"x/f.py": ExtractResult("x/f.py", "python", [Symbol("extra", "function", 1, True)])}
+    issues = check_structural_drift(_ctx(subs, extracts, {"x/f.py": "a"}))
+    assert issues == []
+
+
 # ===========================================================================
 # Check 2 — boundary compliance
 # ===========================================================================

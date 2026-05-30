@@ -11,30 +11,36 @@ roam-code, CodeSage). Every prior approach shares the same assumption: **parse e
 graph, let the AI figure it out.** That's the right tool for *exploration*. It creates three problems
 when an agent needs a cheap, trustworthy answer instead — and those three gaps are what Bounds targets.
 
+> *A code graph tells your agent what the code **is**; Bounds tells it what the code is **supposed to be** — and fails the build when those diverge. Use a graph to explore, use Bounds to enforce.*
+
 ---
 
-## The three problems
+## The three gaps
 
-### 1. Token bloat
+The first two are gaps a derived graph *structurally cannot* close — they're not a matter of a bigger
+index or a faster parser, but of information the graph never contained. The third (token cost) is one
+a graph *can* answer, just expensively. That's the order of what matters.
 
-A full code graph of a Django codebase can be tens of thousands of tokens. An agent pays this cost
-just to find where `login()` is defined. Bounds gives you the answer in a few hundred tokens of JSON —
-one CLI call. A Bounds contract is `O(public API count)`, not `O(full symbol count)`, so it stays
-roughly flat as the implementation behind it grows.
-
-### 2. No intent signal
+### 1. No intent signal
 
 A graph tells you what IS, not what SHOULD BE. Every symbol is equal — there is no way to tell a
 deliberate public contract apart from an internal helper that happens to be reachable. Bounds
 distinguishes public contracts from private implementation by design: the developer declares the
 boundary in YAML, and Bounds enforces it against the extracted reality.
 
-### 3. No drift detection
+### 2. No drift detection
 
 A graph is always correct by definition — it reflects reality. That's also its blind spot: it cannot
 tell you that someone added an export without declaring it, or removed an interface another subsystem
 depends on. Bounds's validation is exactly the difference between *declared intent* and *extracted
 reality*, checked in both directions on every commit.
+
+### 3. Token bloat
+
+A full code graph of a Django codebase can be tens of thousands of tokens. An agent pays this cost
+just to find where `login()` is defined. Bounds gives you the answer in a few hundred tokens of JSON —
+one CLI call. A Bounds contract is `O(public API count)`, not `O(full symbol count)`, so it stays
+roughly flat as the implementation behind it grows.
 
 ---
 

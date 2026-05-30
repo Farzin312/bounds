@@ -11,9 +11,7 @@ from __future__ import annotations
 import json
 import sys
 
-from . import config
 from .errors import BoundsError
-from .models import ValidationReport
 
 # Severity groups, in the order they render and rank.
 _SEVERITY_ORDER = ("error", "warning", "info")
@@ -44,6 +42,8 @@ def emit(payload: dict, human: bool, stream=None, ci: bool = False) -> None:
 
     if isinstance(payload, dict) and "validation_status" in payload and "mode" in payload:
         stream.write(_render_report_dict_human(payload))
+    elif isinstance(payload, dict) and {"symbol", "match", "results"} <= payload.keys():
+        stream.write(_render_where_human(payload))
     elif isinstance(payload, dict) and "namespace" in payload and "subsystems" in payload:
         stream.write(_render_namespace_human(payload))
     elif isinstance(payload, dict) and "name" in payload and "role" in payload:
@@ -79,6 +79,24 @@ def _render_report_ci(payload: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _render_where_human(payload: dict) -> str:
+    """Render a ``bounds where`` result (symbol + match mode + per-definition rows)."""
+    sym = payload.get("symbol", "")
+    match = payload.get("match", "exact")
+    results = payload.get("results", []) or []
+    head = f"where {sym}  ({match} match · {len(results)} result{'s' if len(results) != 1 else ''})"
+    if not results:
+        return head + "\n\n(no matches)"
+    lines = [head, ""]
+    for r in results:
+        tag = " [exposed]" if r.get("exposed") else ""
+        lines.append(
+            f"  {r.get('symbol')} ({r.get('kind')})  {r.get('file')}:{r.get('line')}"
+            f"  → {r.get('owning_subsystem')}{tag}"
+        )
+    return "\n".join(lines)
+
+
 def _render_namespace_human(payload: dict) -> str:
     """Render a namespace-filtered describe (``namespace`` + a list of subsystem dicts)."""
     ns = payload.get("namespace", "")
@@ -88,40 +106,6 @@ def _render_namespace_human(payload: dict) -> str:
         return header + "\n\n(no subsystems in this namespace)"
     blocks = [_render_subsystem_human(sub) for sub in subs]
     return header + "\n\n" + ("\n\n" + ("-" * 40) + "\n\n").join(blocks)
-
-
-def report_to_dict(report: ValidationReport) -> dict:
-    """Return the stable JSON dict for a validation report."""
-    return report.to_dict()
-
-
-def render_report_human(report: ValidationReport) -> str:
-    """Render a concise, deterministic multi-line summary of a validation report.
-
-    Layout: a status line, a mode line, a stats line, then issues grouped by severity
-    (error, warning, info) as ``[CODE] subsystem/file: message`` with an indented
-    ``fix:`` line when a fix is present, ending in an OK/FAILED summary line.
-    """
-    return _render_report_dict_human(report.to_dict())
-
-
-def exit_code_for(report: ValidationReport, mode: str, enforce: str) -> int:
-    """Map a report to a process exit code.
-
-    Returns ``config.EXIT_BLOCKED`` (1) when the mode treats errors as blocking and the
-    report contains at least one error-severity issue; otherwise ``config.EXIT_OK`` (0).
-    Blocking rule: ``preflight`` blocks on any error; ``full``/``audit`` block only when
-    ``enforce == "on"``; ``quick``/``hotfix`` never block. Warnings never block.
-    """
-    has_errors = any(i.severity == "error" for i in report.issues)
-    if not has_errors:
-        return config.EXIT_OK
-
-    if mode == "preflight":
-        return config.EXIT_BLOCKED
-    if mode in ("full", "audit") and enforce == "on":
-        return config.EXIT_BLOCKED
-    return config.EXIT_OK
 
 
 def emit_error(err: BoundsError, human: bool, stream=None) -> None:
@@ -289,6 +273,9 @@ def _render_subsystem_human(payload: dict) -> str:
     val_status = payload.get("validation_status", "")
     if val_status:
         lines.append(f"validation_status: {val_status}")
+    proj_status = payload.get("project_status", "")
+    if proj_status:
+        lines.append(f"project_status: {proj_status}")
     semantic = payload.get("semantic")
     if semantic is not None:
         lines.append(f"semantic: {semantic.get('note', '')}")

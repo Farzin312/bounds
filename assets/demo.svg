@@ -38,7 +38,7 @@
     </g>
     <g opacity="1" transform="translate(0,122)"><animate attributeName="opacity" values="0;0;0;1;1;1;1;0;0" keyTimes="0;0.16;0.38;0.44;0.6;0.8;0.93;0.98;1" dur="7s" repeatCount="indefinite"/>
       <text x="34"><tspan class="b">"verified"</tspan><tspan class="dim">: </tspan><tspan class="g">true</tspan><tspan class="dim">, </tspan><tspan class="b">"consumed_by"</tspan><tspan class="dim">: [</tspan><tspan class="c">"billing","api"</tspan><tspan class="dim">] }</tspan></text>
-      <text x="540" class="y">~300 tokens</text>
+      <text x="540" class="y">~400 tokens</text>
     </g>
     <g opacity="1" transform="translate(0,156)"><animate attributeName="opacity" values="0;0;0;0;0;1;1;0;0" keyTimes="0;0.16;0.38;0.5;0.58;0.62;0.93;0.98;1" dur="7s" repeatCount="indefinite"/>
       <text class="g">$</text><text x="18" class="c">bounds impact auth</text>
@@ -53,7 +53,7 @@
   <!-- value strip: three clean full-width rows -->
   <g transform="translate(24,322)">
     <rect x="-4" y="-4" width="712" height="86" rx="8" fill="#11161d" stroke="#21262d"/>
-    <text x="14" y="24"><tspan class="b">▸ </tspan><tspan class="c" font-size="14">~300 tokens to understand a subsystem</tspan><tspan class="dim" font-size="12">   ·   not thousands spent reading source</tspan></text>
+    <text x="14" y="24"><tspan class="b">▸ </tspan><tspan class="c" font-size="14">~400 tokens to understand a subsystem</tspan><tspan class="dim" font-size="12">   ·   not thousands spent reading source</tspan></text>
     <text x="14" y="48"><tspan class="g">▸ </tspan><tspan class="c" font-size="14">zero LLM in the structural path</tspan><tspan class="dim" font-size="12">   ·   tree-sitter + pure Python · sub-200ms</tspan></text>
     <text x="14" y="72"><tspan class="m">▸ </tspan><tspan class="c" font-size="14">drift caught on every commit</tspan><tspan class="dim" font-size="12">   ·   one command wires 8 coding agents</tspan></text>
   </g>

@@ -14,14 +14,15 @@ from pathlib import Path
 
 import click
 
-from . import __version__, agentsync, calibrate as calibrate_mod, ciconfig, config, discover as discover_mod, errors, output
+from . import __version__, agentsync, calibrate as calibrate_mod, ciconfig, config, describe as describe_mod, discover as discover_mod, errors, output
 from .cache import store as cache_store
-from .extract import get_adapter, supported_extensions
-from .ignore import IgnoreMatcher
+from .extract import scan
+from .extract.scan import strip_ext
+from .ignore import IgnoreMatcher, load_matcher
 from .manifest import loader as manifest_loader
 from .validate import engine as validate_engine
 from .validate import propagation
-from .validate.checks import CheckContext, check_cycles
+from .validate.checks import CheckContext, build_suffix_index, check_cycles, resolve_import
 
 # ---- shared option ----
 _human = click.option("--human", "-H", "human", is_flag=True, default=False,
@@ -98,97 +99,6 @@ def list_cmd(namespace: str | None, human: bool) -> None:
 # ===========================================================================
 # describe
 # ===========================================================================
-def _extract_owned(root: Path, sub) -> tuple[dict[str, str], list[str]]:
-    """Tier-1 extraction for one subsystem.
-
-    Returns ``(exported_symbol_name -> owning_file, owned_files)``. A file is recorded as
-    owned regardless of whether it parses (so ``files`` reflects the declared surface), but
-    only successfully-extracted exported symbols populate the symbol map used to mark
-    ``exposes`` entries ``verified``.
-    """
-    exts = supported_extensions()
-    extracted_symbols: dict[str, str] = {}  # symbol_name -> file_path
-    owned_files: list[str] = []
-
-    def scan(rel: str, abs_path: Path) -> None:
-        if rel not in owned_files:
-            owned_files.append(rel)
-        adapter = get_adapter(rel)
-        if adapter is None:
-            return
-        try:
-            source = abs_path.read_bytes()
-        except OSError:
-            return
-        result = adapter.extract(rel, source)
-        if result and result.error is None:
-            for sym in result.symbols:
-                if sym.exported:
-                    extracted_symbols[sym.name] = rel
-
-    for raw_path in sub.paths or []:
-        base = root / raw_path
-        if base.is_dir():
-            for f in sorted(base.rglob("*")):
-                if f.is_file() and f.suffix in exts:
-                    scan(f.relative_to(root).as_posix(), f)
-        elif base.is_file() and base.suffix in exts:
-            scan(base.relative_to(root).as_posix(), base)
-        else:  # treat as a glob relative to the project root
-            for f in sorted(root.glob(raw_path)):
-                if f.is_file() and f.suffix in exts:
-                    scan(f.relative_to(root).as_posix(), f)
-
-    # Also record sub.files (explicit files list) as owned, even if non-source.
-    for raw in sub.files or []:
-        f = root / raw
-        if f.is_file() and f.suffix in exts:
-            rel = f.relative_to(root).as_posix()
-            if rel not in owned_files:
-                owned_files.append(rel)
-
-    return extracted_symbols, owned_files
-
-
-def _describe_one(
-    root: Path, sub, deep: bool, validation_status: str, entry_matcher: IgnoreMatcher
-) -> dict:
-    """Build the merged Tier-1 + Tier-2 describe payload for a single subsystem.
-
-    Owned files matching a ``root.entry_points`` glob are surfaced: each is listed under
-    ``entry_points`` and any ``exposes`` entry backed by one is flagged ``entry_point: true``
-    (GAP #6, hybrid B+C), so an agent sees a symbol lives in a bootstrap file.
-    """
-    payload = sub.to_dict()
-    extracted_symbols, owned_files = _extract_owned(root, sub)
-    for expose in payload.get("exposes", []):
-        ename = expose.get("name", "")
-        if ename in extracted_symbols:
-            expose["file"] = extracted_symbols[ename]
-            expose["verified"] = True
-            if entry_matcher and entry_matcher.matches(expose["file"]):
-                expose["entry_point"] = True
-        else:
-            expose["verified"] = False
-    payload["files"] = sorted(owned_files)
-    # Always present (like ``files``) for a stable shape; the human renderer hides it when empty.
-    payload["entry_points"] = sorted(
-        f for f in owned_files if entry_matcher and entry_matcher.matches(f)
-    )
-    payload["validation_status"] = validation_status
-    if deep:
-        payload["semantic"] = {"note": "LLM enrichment (Tier 3) not enabled in this build"}
-    return payload
-
-
-def _quick_status(root: Path) -> str:
-    """Compute the project's validation status via a read-only quick run (or 'unresolved')."""
-    try:
-        return validate_engine.run(root, mode="quick", persist=False).status
-    except errors.BoundsError:
-        return "unresolved"
-
-
 @main.command("describe")
 @click.argument("name", required=False)
 @click.option("--namespace", default=None,
@@ -217,11 +127,11 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: boo
 
         if namespace is not None:
             matched = [subs[n] for n in sorted(subs) if subs[n].namespace == namespace]
-            # Validation status is project-wide; compute it once and reuse across the group.
-            vstatus = _quick_status(root) if matched else ""
+            # One shared read-only quick run; each describe_one scopes status to its subsystem (s-31).
+            report = describe_mod.status_report(root) if matched else None
             payload = {
                 "namespace": namespace,
-                "subsystems": [_describe_one(root, s, deep, vstatus, entry_matcher) for s in matched],
+                "subsystems": [describe_mod.describe_one(root, s, deep, report, entry_matcher) for s in matched],
             }
             output.emit(payload, human)
             return
@@ -232,7 +142,10 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: boo
                 f"subsystem '{name}' not found",
                 fix=f"known subsystems: {sorted(subs)}; or run 'bounds init --subsystem {name}'",
             )
-        output.emit(_describe_one(root, subs[name], deep, _quick_status(root), entry_matcher), human)
+        output.emit(
+            describe_mod.describe_one(root, subs[name], deep, describe_mod.status_report(root), entry_matcher),
+            human,
+        )
 
     _run(human, go)
 
@@ -368,8 +281,11 @@ def overview_cmd(human: bool) -> None:
 # ===========================================================================
 @main.command("impact")
 @click.argument("name", required=True)
+@click.option("--verify", is_flag=True, default=False,
+              help="Cross-check the declared blast radius against the resolved import graph "
+                   "(extracts source — off the fast path).")
 @_human
-def impact_cmd(name: str, human: bool) -> None:
+def impact_cmd(name: str, verify: bool, human: bool) -> None:
     """Show the transitive blast radius of a subsystem (who breaks if its surface changes)."""
 
     def go() -> None:
@@ -400,7 +316,101 @@ def impact_cmd(name: str, human: bool) -> None:
             "direct_consumers": sorted(direct),
             "transitive_consumers": transitive,
             "blast_radius": len(transitive),
+            # s-29: be honest that this counts ONLY declared `consumes` edges. A real import
+            # that no manifest declares is not in this number, so it is a lower bound.
+            "basis": "declared-consumes",
+            "blast_radius_is_lower_bound": True,
+            "note": (
+                "blast_radius counts only declared `consumes` edges; an import not declared in a "
+                "manifest is not counted, so treat it as a lower bound. Run `bounds impact "
+                f"{name} --verify` to cross-check the resolved import graph, or `bounds validate` "
+                "for boundary/contract checks."
+            ),
             "consumers": consumers,
+        }
+        if verify:
+            payload["undeclared_consumer_edges"] = _verify_consumer_edges(root, subs, name)
+        output.emit(payload, human)
+
+    _run(human, go)
+
+
+def _verify_consumer_edges(root: Path, subs: dict, name: str) -> list[dict]:
+    """Resolved-import cross-check for ``bounds impact --verify`` (s-29).
+
+    Extract every subsystem's source, resolve each import to an owned file, and return the
+    consumer subsystems that really import from ``name`` but declare no ``consumes`` edge to it —
+    exactly the edges the declared-only blast radius silently misses. Deterministic: sorted.
+    Reuses the shared :func:`extract.scan.extract_project` + the one import resolver, so it
+    agrees with validate on ownership and resolution rather than carrying its own copy.
+    """
+    file_owner, extracts, _ = scan.extract_project(root, subs, load_matcher(root))
+    known_noext = {strip_ext(rel): rel for rel in sorted(extracts)}
+    suffix_index = build_suffix_index(known_noext)
+    declared = set(subs[name].consumed_by)  # subsystems that declare consuming `name`
+    evidence: dict[str, set[str]] = {}
+    for rel in sorted(extracts):
+        owner = file_owner.get(rel)
+        if owner is None or owner == name:
+            continue
+        for imp in extracts[rel].imports:
+            target = resolve_import(rel, imp.module, known_noext, suffix_index)
+            if target and file_owner.get(target) == name:
+                evidence.setdefault(owner, set()).add(rel)
+    return [
+        {"consumer": consumer, "files": sorted(files)}
+        for consumer, files in sorted(evidence.items())
+        if consumer not in declared
+    ]
+
+
+# ===========================================================================
+# where
+# ===========================================================================
+@main.command("where")
+@click.argument("symbol", required=True)
+@click.option("--prefix", is_flag=True, default=False,
+              help="Match symbols whose name starts with SYMBOL, instead of an exact match.")
+@_human
+def where_cmd(symbol: str, prefix: bool, human: bool) -> None:
+    """Locate a symbol: which file defines it, and which subsystem owns it (s-30).
+
+    Returns every definition (name collisions across files are all reported), each tagged with
+    its owning subsystem and whether that subsystem *declares* it in `exposes`. Extraction is
+    fresh (never a stale cache), so a result is always current. Works for Python and TS/JS.
+    """
+
+    def go() -> None:
+        root = _require_root()
+        _, subs, _ = manifest_loader.load_all(root)
+        # Fresh project-wide extraction (shared helper) — never trusts a stale cache for a lookup.
+        file_owner, extracts, _ = scan.extract_project(root, subs, load_matcher(root))
+        declared_by = {n: subs[n].expose_names() for n in subs}
+
+        def matches(sym_name: str) -> bool:
+            return sym_name.startswith(symbol) if prefix else sym_name == symbol
+
+        results: list[dict] = []
+        for rel in extracts:
+            owner = file_owner.get(rel, "")
+            declared = declared_by.get(owner, set())
+            for sym in extracts[rel].symbols:
+                if matches(sym.name):
+                    results.append({
+                        "symbol": sym.name,
+                        "kind": sym.kind,
+                        "file": rel,
+                        "line": sym.line,
+                        "owning_subsystem": owner,
+                        "exposed": sym.name in declared,
+                    })
+        # All owners, deterministically sorted (handles name collisions across files).
+        results.sort(key=lambda r: (r["file"], r["symbol"], r["line"], r["kind"]))
+        payload = {
+            "symbol": symbol,
+            "match": "prefix" if prefix else "exact",
+            "count": len(results),
+            "results": results,
         }
         output.emit(payload, human)
 

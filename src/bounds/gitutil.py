@@ -16,6 +16,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+# Hard ceiling on any single git subprocess (s-33). A wedged git (e.g. a network filesystem or a
+# stuck lock) must not hang Bounds — on timeout the helper fails soft (returns None), exactly like
+# git being absent, so the caller transparently falls back to a full (non-incremental) scan.
+GIT_TIMEOUT_SECONDS = 10
+
 
 def _run_git(repo: Path, args: list[str], stdin: str | None = None) -> str | None:
     """Run ``git <args>`` inside ``repo`` and return stdout, or ``None`` on any failure.
@@ -35,8 +40,9 @@ def _run_git(repo: Path, args: list[str], stdin: str | None = None) -> str | Non
             capture_output=True,
             text=True,
             input=stdin,
+            timeout=GIT_TIMEOUT_SECONDS,
         )
-    except (FileNotFoundError, OSError):
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         # git binary not installed / not executable.
         return None
     if proc.returncode != 0:
@@ -57,8 +63,9 @@ def _run_git_allow_exit1(repo: Path, args: list[str], stdin: str | None = None) 
             capture_output=True,
             text=True,
             input=stdin,
+            timeout=GIT_TIMEOUT_SECONDS,
         )
-    except (FileNotFoundError, OSError):
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return None
     if proc.returncode not in (0, 1):
         return None

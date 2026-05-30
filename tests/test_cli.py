@@ -23,13 +23,16 @@ def test_list(sample_project, monkeypatch):
 
 
 def test_validate_clean_is_fresh(sample_project, monkeypatch):
+    # The sample project has no errors/warnings, so it validates fresh + ok. Its database
+    # subsystem deliberately exports an internal `UserRepository` it does not declare, which
+    # s-32 (bidirectional drift) surfaces as a non-blocking info — fresh + exit 0 are unchanged.
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["validate"])
     assert result.exit_code == 0
     data = _json(result)
     assert data["validation_status"] == "fresh"
     assert data["ok"] is True
-    assert data["issues"] == []
+    assert not [i for i in data["issues"] if i["severity"] in ("error", "warning")]
 
 
 def test_validate_quick_mode(git_sample_project, monkeypatch):
@@ -104,7 +107,17 @@ def test_validate_ci_output(sample_project, monkeypatch):
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["validate", "--ci"])
     assert result.exit_code == 0
-    # CI plaintext: a clean report is a single tab-delimited "ok\t<status>" line, not JSON.
+    # CI plaintext is tab-delimited, never JSON. The sample project's lone advisory (s-32
+    # info about the undeclared internal UserRepository) renders as one severity-tagged line.
+    assert "{" not in result.output
+    assert "info\tE_STRUCTURAL_DRIFT\t" in result.output
+
+
+def test_validate_ci_clean_ok_line(py_project, monkeypatch):
+    # A genuinely clean project emits the single tab-delimited "ok\t<status>" line.
+    monkeypatch.chdir(py_project)
+    result = CliRunner().invoke(main, ["validate", "--ci"])
+    assert result.exit_code == 0
     assert result.output.startswith("ok\t")
     assert "{" not in result.output
 

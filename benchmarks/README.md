@@ -26,7 +26,7 @@ benchmarks/
 
 Token cost, retrieval shape, and drift-detection correctness are properties of
 the *codebase and the tokenizer*, not of the CPU or RAM. A token reduction of
-~98% is the same on a laptop or a server. Reporting "MacBook, 18 GB RAM" would
+this magnitude is the same on a laptop or a server. Reporting "MacBook, 16 GB RAM" would
 imply hardware is a variable that matters here — it is not. The only
 machine-relative number we report at all is wall-clock latency, and it is
 explicitly de-emphasized and stated without any hardware spec (see Metric 3).
@@ -51,8 +51,11 @@ Tokens to obtain a subsystem's contract via Bounds versus reading its source:
 - `bounds impact <name>` vs manually tracing imports across the source
 
 `run.py` reports per-command token counts (Bounds output vs source-equivalent)
-and an aggregate reduction %. On the Bounds repo itself the aggregate reduction
-is ~98% (see `results/claude-baseline.md`).
+and an aggregate reduction %. On the Bounds repo itself the whole-map `bounds
+list` call cuts ~98.7% of source-equivalent tokens, while a single `bounds
+describe` is ~86% (399 vs 2,872 tokens). Read "~98%" as the whole-map figure,
+never as the per-`describe` number (see `results/claude-baseline.md` for the
+per-command breakdown).
 
 ### 2. Retrieval scaling + context-rot (the core large-codebase argument)
 

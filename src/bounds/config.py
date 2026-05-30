@@ -46,6 +46,12 @@ ROLE_BASE_BEHAVIOR = {
 }
 
 # ---- Extraction ----
+# Hard ceiling on a single source file's size (bytes). A file larger than this is skipped with
+# an E_EXTRACTION_FAILED warning rather than read into memory (s-33 resource bound) — guards
+# against a giant minified/generated blob or a runaway file exhausting memory. 1 MB is far above
+# any hand-written source file; legitimately-huge generated files should be gitignored anyway.
+MAX_FILE_BYTES = 1_000_000
+
 # Directories never descended into when globbing subsystem files.
 DEFAULT_IGNORES = {
     "node_modules",

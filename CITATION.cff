@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use Bounds in your work, please cite it as below."
+title: "Bounds"
+abstract: >-
+  A zero-LLM CLI that extracts a codebase's structural surface (exported symbols
+  and cross-module imports) with tree-sitter and validates it against
+  human-declared subsystem manifests, failing the build when the real source
+  diverges from its intended architectural contract.
+type: software
+authors:
+  - family-names: Shifat
+    given-names: Farzin
+    email: farzinshifat@gmail.com
+repository-code: "https://github.com/Farzin312/bounds"
+url: "https://github.com/Farzin312/bounds"
+license: MIT
+keywords:
+  - architecture
+  - tree-sitter
+  - static-analysis
+  - code-graph
+  - ci

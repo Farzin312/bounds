@@ -28,10 +28,9 @@ from pathlib import Path
 import yaml
 
 from . import config, errors
-from .extract import supported_extensions
 from .extract.scan import extract_file, iter_repo_source, strip_ext
 from .ignore import load_matcher
-from .validate.checks import resolve_import
+from .validate.checks import build_suffix_index, resolve_import
 
 
 def run_discover(
@@ -66,6 +65,7 @@ def run_discover(
         if result is not None:
             extracts[rel] = result
     known_noext = {strip_ext(rel): rel for rel in sorted(extracts)}
+    suffix_index = build_suffix_index(known_noext)  # built once; O(1) per-import resolution (s-34)
 
     # Cross-candidate consume edges (direct imports only).
     consumes: dict[str, set[str]] = {c: set() for c in candidate_files}
@@ -74,7 +74,7 @@ def run_discover(
         if owner is None:
             continue
         for imp in result.imports:
-            target = resolve_import(rel, imp.module, known_noext)
+            target = resolve_import(rel, imp.module, known_noext, suffix_index)
             tgt_owner = file_to_candidate.get(target) if target else None
             if tgt_owner and tgt_owner != owner:
                 consumes[owner].add(tgt_owner)

@@ -37,7 +37,8 @@ bounds/
 ├── src/
 │   └── bounds/
 │       ├── __init__.py            # __version__
-│       ├── cli.py                 # click group + all commands
+│       ├── cli.py                 # click group + all commands (arg-parse + one go() per command)
+│       ├── describe.py            # Tier-1+2 `describe` assembly (s-34; reuses extract/scan + validate engine)
 │       ├── config.py              # constants: dir names, schema version, defaults, role/criticality registries
 │       ├── errors.py              # BoundsError + stable error-code registry
 │       ├── models.py              # all dataclasses (the data model)
@@ -235,7 +236,12 @@ class ValidationReport:
     mode: str                      # quick|full|preflight|hotfix|audit
     ok: bool                       # True if no blocking issues for the mode
     issues: list[Issue] = []
-    stats: dict = {}               # {files_scanned, cache_hits, subsystems, dirty, propagated, duration_ms}
+    stats: dict = {}               # {files_total, files_parsed, cache_hits, subsystems, dirty, propagated,
+                                   #  enforce, skipped_*, unowned, entry_points, coverage, duration_ms}
+                                   # coverage (s-31): {files_owned, unresolved_local_imports, extraction_failures}
+                                   # — an honest signal that boundary checking is not as complete as a clean
+                                   #   report implies (unresolved_local_imports is measured in boundary modes:
+                                   #   full/preflight/audit; quick reports 0).
 ```
 
 `status` semantics:
@@ -456,13 +462,32 @@ def run(project_root: Path, mode: str = "full", base: str = "HEAD",
     # outside every subsystem to a blocking E_UNOWNED_FILE error (entry_points stay warnings).
 ```
 
-### `extract/scan.py` — shared filesystem→extraction helpers (discover/calibrate)
+### `extract/scan.py` — shared filesystem→extraction helpers (the single home for fs walks)
 ```python
 def strip_ext(rel: str) -> str                                    # drop the extension (import-resolution stem)
+def in_default_ignores(path: Path, project_root: Path) -> bool    # path under any DEFAULT_IGNORES dir (one home, s-34)
 def iter_repo_source(project_root: Path, matcher: IgnoreMatcher | None = None) -> list[str]
     # sorted repo-relative posix paths of every supported source file; skips DEFAULT_IGNORES + .boundsignore.
+def iter_subsystem_files(project_root: Path, sub: SubsystemCompact, exts: set[str]) -> list[Path]
+    # the owned-file walk (paths globs + explicit files), deduped by real path + sorted; skips
+    # DEFAULT_IGNORES. The ONE home shared by validate/engine + describe (s-34) so both agree on
+    # which files a subsystem owns — neither carries its own copy.
+def extract_project(project_root, subsystems, matcher=None) -> tuple[dict, dict, set]
+    # project-wide extraction (file_owner, extracts, generated) — the ONE home shared by calibrate,
+    # impact --verify, and `where` (s-34); flat topology (first owner wins), applies .boundsignore.
 def extract_file(project_root: Path, rel: str) -> tuple[ExtractResult | None, bool]
     # one file's surface; returns (result_or_None, is_generated). None if unsupported/unreadable/parse-fail.
+```
+
+### `describe.py` — Tier-1 + Tier-2 `describe` assembly (s-34)
+```python
+def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], list[str]]
+    # (exported symbol -> owning file, owned files) via scan.iter_subsystem_files + scan.extract_file.
+def describe_one(root, sub, deep, validation_status, entry_matcher) -> dict
+    # merged describe payload: SubsystemCompact.to_dict() + exposes[*].verified/file/entry_point,
+    # files, entry_points, validation_status (+ semantic stub when deep).
+def quick_status(root: Path) -> str                               # project status via a read-only quick run
+# Extracted out of cli.py so command modules stay arg-parse + one go() closure (no business logic).
 ```
 
 ### `discover.py` — bootstrap discovery (s-14)
@@ -514,10 +539,8 @@ def run_ci_install(project_root, *, targets: set[str]) -> dict
 def emit(payload: dict, human: bool, stream=None, ci: bool = False) -> None
     # JSON by default; human=True re-renders the same data; ci=True emits the tab-delimited
     # CI contract (one issue/fatal per line) for `--ci` callers. Never exposes data JSON omits.
-def report_to_dict(report: ValidationReport) -> dict
-def render_report_human(report: ValidationReport) -> str
-def exit_code_for(report: ValidationReport, mode: str, enforce: str) -> int
-    # 0 ok; 1 blocking errors (preflight always; full only when enforce=on); 2 internal error
+    # (Renders directly from the report dict — ValidationReport.to_dict() — so JSON and human
+    # views can never disagree; there is no separate report_to_dict/render/exit_code helper.)
 def emit_error(err: BoundsError, human: bool, stream=None) -> None
 ```
 
@@ -587,7 +610,7 @@ consumes:
 
 ## 7. The 6 checks (logic)
 
-1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files. Declared-but-missing → drift; (optionally) undeclared exported symbol in a `core` subsystem → info. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
+1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files. Declared-but-missing → drift (`error`). Undeclared-but-exported (a symbol in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (s-32, bidirectional drift — not just `core`/unbounded; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). The `info` severity never blocks, so exit codes are unchanged; escalation to `error`/CI is s-37. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
 2. **Boundary compliance** (`E_BOUNDARY_VIOLATION`, error): for each import in subsystem A resolving to a file owned by subsystem B, the imported names must all be in B's `exposes`. Importing a non-exposed (internal) symbol → violation. Resolution: match import `module` against B's file paths (suffix/relative resolution). Fix: "import only B's exposed interfaces, or add `<name>` to B.exposes".
 3. **Contract compliance** (`E_CONTRACT_MISSING_EXPORT`, error): for each `consumes` entry, every listed interface must appear in the provider's `exposes`. Missing → contract break. Fix: "provider `<B>` does not expose `<iface>`; update consumer or provider".
 4. **Cross-subsystem impact** (`E_STALE_INTERFACE`, error/stale): a provider's `structure_hash` changed (it's in `dirty`) and it has consumers (`consumed_by`) → those consumer interfaces may be stale. Emits one issue per affected consumer. Fix: "re-validate consumer `<C>`; provider `<B>` interface surface changed".
@@ -635,7 +658,9 @@ The scan-bearing commands (`validate`, `preflight`) also accept `--include-ignor
 bounds list [--namespace NS]       → {project, subsystems:[{name, role, criticality, namespace?,
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name>             → SubsystemCompact.to_dict() + {files, entry_points, validation_status,
-                                       exposes[*].verified, exposes[*].file?, exposes[*].entry_point?}
+                                       project_status, exposes[*].verified, exposes[*].file?, exposes[*].entry_point?}
+                                       # validation_status is SUBSYSTEM-SCOPED (this subsystem's own issues);
+                                       # project_status is the project-wide rollup, kept additively (s-31)
 bounds describe --namespace NS     → {namespace, subsystems:[<describe payload>...]}
 bounds describe <name> --deep      → same + {semantic: {"note":"LLM enrichment (Tier 3) not enabled in this build"}}
 bounds validate [--quick|--mode M] [--enforce on|off] [--base REF] [scan flags]
@@ -643,8 +668,18 @@ bounds validate [--quick|--mode M] [--enforce on|off] [--base REF] [scan flags]
 bounds preflight [scan flags]      → ValidationReport (mode=preflight) + {checks: per-check counts}
 bounds overview                    → {project, subsystems, roles:{...}, criticality:{...}, edges, cycles,
                                        schema_issues:[...], health:{ok, schema_errors, cycles}}
-bounds impact <name>               → {subsystem, criticality, direct_consumers, transitive_consumers,
-                                       blast_radius:int, consumers:[{name,via,interfaces}]}  (E_SUBSYSTEM_NOT_FOUND if unknown)
+bounds impact <name> [--verify]    → {subsystem, criticality, direct_consumers, transitive_consumers,
+                                       blast_radius:int, basis:"declared-consumes",
+                                       blast_radius_is_lower_bound:true, note, consumers:[{name,via,interfaces}]}
+                                       # s-29: blast_radius counts ONLY declared `consumes` edges (a lower bound).
+                                       # --verify adds undeclared_consumer_edges:[{consumer, files:[...]}] — real
+                                       # importers of <name> with no declared consume (resolved import graph; off
+                                       # the quick path). (E_SUBSYSTEM_NOT_FOUND if unknown)
+bounds where <symbol> [--prefix]   → {symbol, match:"exact"|"prefix", count,
+                                       results:[{symbol, kind, file, line, owning_subsystem, exposed}]}
+                                       # s-30: locate a symbol's definition(s) + owning subsystem; all
+                                       # collisions returned, sorted by (file,name,line,kind); fresh extraction
+                                       # (never a stale cache); Python + TS. exposed = declared in owner.exposes
 bounds init --root                 → scaffolds .bounds/root.yaml; → {created, skipped, bounds_dir}
 bounds init --subsystem <name> [--namespace NS]
                                    → scaffolds .bounds/manifests/<name>.yaml; → {created, skipped, hint, bounds_dir}
@@ -660,7 +695,11 @@ bounds cache (--migrate|--inspect|--prune)
                                    → cache/store {migrate,inspect,prune_missing} payload (see §4 / §10)
 ```
 
-`describe`'s `validation_status` comes from a read-only quick run (`persist=False`). Every command's
+`describe`'s status comes from one read-only quick run (`persist=False`); its issues are re-derived
+into a **subsystem-scoped** `validation_status` (this subsystem's own issues only) and an additive
+project-wide `project_status` (s-31). Both re-derive `fresh`/`stale`/`unresolved` from each issue
+code's *canonical* severity (`errors.SEVERITY`) rather than the quick-downgraded live one, so a
+per-subsystem status can read `stale`. Every command's
 JSON carries `"validation_status"` where meaningful and `"ok": bool` where applicable. Fatal
 `BoundsError` → `{"error":{code,message,fix}}` on stdout + exit 2 (or one `fatal` line under `--ci`).
 

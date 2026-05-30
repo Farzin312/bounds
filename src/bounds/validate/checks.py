@@ -9,11 +9,36 @@ from __future__ import annotations
 
 import posixpath
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from posixpath import normpath
 
 from .. import errors
+from ..extract.scan import strip_ext
 from ..models import ExtractResult, Issue, RootManifest, SubsystemCompact
+
+
+def _issue(
+    code: str,
+    message: str,
+    *,
+    severity: str | None = None,
+    subsystem: str | None = None,
+    file: str | None = None,
+    fix: str | None = None,
+) -> Issue:
+    """Construct an :class:`Issue`, defaulting its severity from the single-source
+    ``errors.SEVERITY`` table (s-34). An explicit ``severity`` overrides it for the
+    context-dependent cases — e.g. an undeclared export surfaced at ``info`` rather than the
+    code's canonical ``error`` — so the table stays the one home for canonical severities.
+    """
+    return Issue(
+        code,
+        severity or errors.SEVERITY[code],
+        message,
+        subsystem=subsystem,
+        file=file,
+        fix=fix,
+    )
 
 
 # ===========================================================================
@@ -28,6 +53,10 @@ class CheckContext:
     file_owner: dict[str, str]          # rel posix path -> subsystem name
     dirty: set[str] = field(default_factory=set)
     propagated: set[str] = field(default_factory=set)
+    # s-31 coverage signal: count of local-looking imports that did NOT resolve to an owned
+    # file. checks are pure (CheckContext)->list[Issue], so the count is threaded here (the
+    # engine reads it after running checks) rather than returned. Only check_boundary writes it.
+    unresolved_local_imports: int = 0
 
     def files_of(self, subsystem: str) -> list[str]:
         """Extracted files owned by ``subsystem`` (sorted, only those present in extracts)."""
@@ -55,8 +84,24 @@ class CheckContext:
         if cached is None:
             cached = {}
             for rel in sorted(self.extracts):
-                cached.setdefault(_strip_ext(rel), rel)
+                cached.setdefault(strip_ext(rel), rel)
             self._known_noext = cached
+        return cached
+
+    def suffix_index(self) -> dict[str, str]:
+        """Trailing-segment suffix -> known stem, for O(1) import resolution (cached, s-34)."""
+        cached = getattr(self, "_suffix_index", None)
+        if cached is None:
+            cached = build_suffix_index(self.known_noext())
+            self._suffix_index = cached
+        return cached
+
+    def known_top_segments(self) -> set[str]:
+        """First path segments of every extracted file, for the 'local-looking' test (cached)."""
+        cached = getattr(self, "_known_top", None)
+        if cached is None:
+            cached = {stem.split("/", 1)[0] for stem in self.known_noext()}
+            self._known_top = cached
         return cached
 
     def role_exposes_orphans(self, subsystem: str) -> bool:
@@ -67,20 +112,42 @@ class CheckContext:
         registry = self.root.role_registry()
         return bool(registry.get(sub.role, {}).get("orphan_exposes", False))
 
-    def is_unbounded_criticality(self, subsystem: str) -> bool:
-        """True if the subsystem's criticality propagates unbounded (depth -1), e.g. 'core' (s-17)."""
-        sub = self.subsystems.get(subsystem)
-        if sub is None:
-            return False
-        return self.root.criticality_registry().get(sub.criticality, 0) == -1
-
-
 # ===========================================================================
 # Import resolution helpers (best-effort; never produces false positives by guessing)
 # ===========================================================================
-def _strip_ext(rel: str) -> str:
-    suffix = PurePosixPath(rel).suffix
-    return rel[: -len(suffix)] if suffix else rel
+def build_suffix_index(known_noext: dict[str, str]) -> dict[str, str]:
+    """Map every trailing path-segment suffix of each known stem to a known stem (s-34).
+
+    Replaces import resolution's old ``O(files)`` ``endswith`` scan with an ``O(1)`` lookup.
+    For ``"src/bounds/models"`` the suffixes ``"models"``, ``"bounds/models"`` and the full
+    path all point back at it. On a collision the lexicographically smallest stem wins, so
+    the result is identical to the previous ``sorted(known_noext)`` first-match (determinism).
+    """
+    idx: dict[str, str] = {}
+    for noext in known_noext:
+        parts = noext.split("/")
+        for i in range(len(parts)):
+            suffix = "/".join(parts[i:])
+            cur = idx.get(suffix)
+            if cur is None or noext < cur:
+                idx[suffix] = noext
+    return idx
+
+
+def _is_local_looking(module: str, known_top: set[str]) -> bool:
+    """True if ``module`` plausibly refers to an in-project file (s-31 coverage).
+
+    A relative specifier (``./x``, ``..pkg``) is always local. A bare specifier is local-looking
+    only when its first segment matches a top-level segment of some extracted file — so stdlib /
+    third-party imports (``os``, ``react``) don't inflate the unresolved-import count, while a
+    real intra-repo import we failed to resolve does.
+    """
+    if not module:
+        return False
+    if module.startswith("."):
+        return True
+    first = module.replace(".", "/").split("/", 1)[0]
+    return first in known_top
 
 
 def _candidate_stems(importer_rel: str, module: str) -> list[str]:
@@ -102,17 +169,30 @@ def _candidate_stems(importer_rel: str, module: str) -> list[str]:
     return [module.replace(".", "/")]
 
 
-def resolve_import(importer_rel: str, module: str, known_noext: dict[str, str]) -> str | None:
-    """Resolve an import specifier to a known extracted file path, or None if it's external/ambiguous."""
+def resolve_import(
+    importer_rel: str,
+    module: str,
+    known_noext: dict[str, str],
+    suffix_index: dict[str, str] | None = None,
+) -> str | None:
+    """Resolve an import specifier to a known extracted file path, or None if external/ambiguous.
+
+    ``suffix_index`` (from :func:`build_suffix_index`) backs the trailing-segment fallback in
+    ``O(1)``; when omitted it is built on demand so ad-hoc callers stay correct. Resolution
+    order per candidate stem: exact stem, then package ``/index``/``/__init__``, then the
+    smallest stem ending in that segment suffix.
+    """
+    if suffix_index is None:
+        suffix_index = build_suffix_index(known_noext)
     for stem in _candidate_stems(importer_rel, module):
         if stem in known_noext:
             return known_noext[stem]
         for suffix in ("/index", "/__init__"):
             if stem + suffix in known_noext:
                 return known_noext[stem + suffix]
-        for noext in sorted(known_noext):
-            if noext == stem or noext.endswith("/" + stem):
-                return known_noext[noext]
+        hit = suffix_index.get(stem)
+        if hit is not None:
+            return known_noext[hit]
     return None
 
 
@@ -127,22 +207,25 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
         actual = ctx.actual_exports(name)
         for missing in sorted(declared - actual):
             issues.append(
-                Issue(
+                _issue(
                     errors.E_STRUCTURAL_DRIFT,
-                    "error",
                     f"subsystem '{name}' declares '{missing}' in exposes but no source file exports it",
                     subsystem=name,
                     fix=f"remove '{missing}' from {name}.exposes, or export it from {sub.paths or ['its sources']}",
                 )
             )
-        # Undeclared public surface on an unbounded-criticality (core-like) subsystem is info only.
-        if ctx.is_unbounded_criticality(name) and declared:
+        # Undeclared public surface — a symbol the source exports but the manifest doesn't
+        # list — is surfaced as info for ANY subsystem with a declared expose set (s-32,
+        # bidirectional drift). Previously this only fired on unbounded/core subsystems, so the
+        # most common real drift (a new undeclared export on a leaf/connector) was invisible.
+        # Severity stays info (never blocks), so exit codes are unchanged; escalation is s-37.
+        if declared:
             for extra in sorted(actual - declared):
                 issues.append(
-                    Issue(
+                    _issue(
                         errors.E_STRUCTURAL_DRIFT,
-                        "info",
                         f"subsystem '{name}' exports '{extra}' which is not declared in exposes",
+                        severity="info",
                         subsystem=name,
                         fix=f"add '{extra}' to {name}.exposes if it is part of the public surface",
                     )
@@ -156,12 +239,18 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
 def check_boundary(ctx: CheckContext) -> list[Issue]:
     issues: list[Issue] = []
     known = ctx.known_noext()
+    suffix_index = ctx.suffix_index()
+    known_top = ctx.known_top_segments()
     for name in sorted(ctx.subsystems):
         for rel in ctx.files_of(name):
             result = ctx.extracts[rel]
             for imp in result.imports:
-                target = resolve_import(rel, imp.module, known)
+                target = resolve_import(rel, imp.module, known, suffix_index)
                 if not target:
+                    # Unresolved: if it looks intra-repo, it's a gap in boundary coverage
+                    # (an owned file we couldn't attribute) — count it for the s-31 signal.
+                    if _is_local_looking(imp.module, known_top):
+                        ctx.unresolved_local_imports += 1
                     continue
                 owner = ctx.file_owner.get(target)
                 if not owner or owner == name:
@@ -176,9 +265,8 @@ def check_boundary(ctx: CheckContext) -> list[Issue]:
                         continue
                     if nm in provider_symbols:  # a real internal that isn't part of the public surface
                         issues.append(
-                            Issue(
+                            _issue(
                                 errors.E_BOUNDARY_VIOLATION,
-                                "error",
                                 f"'{rel}' imports '{nm}' from subsystem '{owner}', which does not expose it",
                                 subsystem=name,
                                 file=rel,
@@ -199,9 +287,8 @@ def check_contract(ctx: CheckContext) -> list[Issue]:
             provider = ctx.subsystems.get(c.subsystem)
             if provider is None:
                 issues.append(
-                    Issue(
+                    _issue(
                         errors.E_UNRESOLVED_REFERENCE,
-                        "warning",
                         f"subsystem '{name}' consumes unknown subsystem '{c.subsystem}'",
                         subsystem=name,
                         fix=f"create subsystem '{c.subsystem}', or fix the reference in {name}.consumes",
@@ -212,9 +299,8 @@ def check_contract(ctx: CheckContext) -> list[Issue]:
             for iface in sorted(c.interfaces):
                 if iface not in exposed:
                     issues.append(
-                        Issue(
+                        _issue(
                             errors.E_CONTRACT_MISSING_EXPORT,
-                            "error",
                             f"subsystem '{name}' depends on '{iface}' from '{c.subsystem}', "
                             f"which does not expose it",
                             subsystem=name,
@@ -237,9 +323,8 @@ def check_cross_impact(ctx: CheckContext) -> list[Issue]:
         )
         provider_text = ", ".join(f"'{p}'" for p in providers) if providers else "an upstream provider"
         issues.append(
-            Issue(
+            _issue(
                 errors.E_STALE_INTERFACE,
-                "error",
                 f"interface surface of {provider_text} changed; consumer '{consumer}' may be stale",
                 subsystem=consumer,
                 fix=f"re-validate '{consumer}' and update its consumes if the provider's interfaces changed",
@@ -260,9 +345,8 @@ def check_cycles(ctx: CheckContext) -> list[Issue]:
     for cycle in _find_cycles(graph):
         chain = " -> ".join(cycle + [cycle[0]])
         issues.append(
-            Issue(
+            _issue(
                 errors.E_CYCLE_DETECTED,
-                "error",
                 f"circular dependency: {chain}",
                 subsystem=cycle[0],
                 fix="break the cycle via an interface/inversion, or move shared code into a library subsystem",
@@ -278,31 +362,43 @@ def _rotate_min(cycle: list[str]) -> list[str]:
 
 
 def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
+    """Enumerate distinct directed cycles. Iterative DFS (s-33): an explicit stack instead of
+    recursion so a deep dependency graph can't raise an uncaught ``RecursionError``. Semantics are
+    unchanged — a back-edge to a GRAY node yields the cycle from that node to the current one,
+    rotated to a canonical (min-first) form and de-duplicated; results sorted by (length, chain)."""
     WHITE, GRAY, BLACK = 0, 1, 2
     color = {n: WHITE for n in graph}
-    stack: list[str] = []
     seen: set[tuple[str, ...]] = set()
     cycles: list[list[str]] = []
 
-    def dfs(u: str) -> None:
-        color[u] = GRAY
-        stack.append(u)
-        for v in graph.get(u, []):
-            cv = color.get(v, WHITE)
-            if cv == GRAY:
-                cyc = _rotate_min(stack[stack.index(v):])
-                key = tuple(cyc)
-                if key not in seen:
-                    seen.add(key)
-                    cycles.append(cyc)
-            elif cv == WHITE:
-                dfs(v)
-        color[u] = BLACK
-        stack.pop()
-
-    for n in sorted(graph):
-        if color[n] == WHITE:
-            dfs(n)
+    for root in sorted(graph):
+        if color[root] != WHITE:
+            continue
+        path: list[str] = [root]
+        stack: list[tuple[str, "object"]] = [(root, iter(graph.get(root, [])))]
+        color[root] = GRAY
+        while stack:
+            u, it = stack[-1]
+            descended = False
+            for v in it:
+                cv = color.get(v, WHITE)
+                if cv == GRAY:
+                    cyc = _rotate_min(path[path.index(v):])
+                    key = tuple(cyc)
+                    if key not in seen:
+                        seen.add(key)
+                        cycles.append(cyc)
+                elif cv == WHITE:
+                    color[v] = GRAY
+                    path.append(v)
+                    stack.append((v, iter(graph.get(v, []))))
+                    descended = True
+                    break
+                # BLACK neighbour: fully explored, skip
+            if not descended:
+                color[u] = BLACK
+                path.pop()
+                stack.pop()
     return sorted(cycles, key=lambda c: (len(c), c))
 
 
@@ -324,9 +420,8 @@ def check_orphans(ctx: CheckContext) -> list[Issue]:
         for iface in sorted(sub.expose_names()):
             if (name, iface) not in consumed:
                 issues.append(
-                    Issue(
+                    _issue(
                         errors.E_ORPHAN_EXPORT,
-                        "warning",
                         f"interface '{iface}' exposed by '{name}' is consumed by no subsystem",
                         subsystem=name,
                         fix=f"remove '{iface}' from {name}.exposes if unused, "

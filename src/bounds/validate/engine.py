@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .. import config, errors, gitutil
 from ..cache import store as cache_store
-from ..extract import content_hash, get_adapter, supported_extensions
+from ..extract import content_hash, get_adapter, supported_extensions, scan
 from ..ignore import IgnoreMatcher, load_matcher
 from ..manifest import loader as manifest_loader
 from ..models import Issue, ValidationReport
@@ -78,7 +78,7 @@ def run(
     skipped_ignored = 0
     for name in sorted(subsystems):
         sub = subsystems[name]
-        for abs_path in _iter_files(project_root, sub, exts):
+        for abs_path in scan.iter_subsystem_files(project_root, sub, exts):
             rel = abs_path.relative_to(project_root).as_posix()
             if rel in file_owner:  # flat topology: first declared owner wins
                 continue
@@ -141,9 +141,33 @@ def run(
             cache_hits += 1
             continue
 
+        # Fail loud on an OWNED file we can't read or that's oversized — never silently drop it
+        # (a dropped owned file makes a real symbol look like verified:false). s-33.
         try:
+            if abs_path.stat().st_size > config.MAX_FILE_BYTES:
+                issues.append(
+                    Issue(
+                        errors.E_EXTRACTION_FAILED,
+                        "warning",
+                        f"skipped '{rel}': exceeds MAX_FILE_BYTES ({config.MAX_FILE_BYTES} bytes)",
+                        subsystem=owner,
+                        file=rel,
+                        fix="file too large to extract; split it or exclude it via .boundsignore",
+                    )
+                )
+                continue
             source = abs_path.read_bytes()
-        except OSError:
+        except OSError as exc:
+            issues.append(
+                Issue(
+                    errors.E_EXTRACTION_FAILED,
+                    "warning",
+                    f"could not read '{rel}': {exc}",
+                    subsystem=owner,
+                    file=rel,
+                    fix="check the file's permissions/encoding; Bounds skipped it",
+                )
+            )
             continue
 
         chash = content_hash(source)
@@ -216,6 +240,15 @@ def run(
     blocking = _is_blocking(issues, mode, final_enforce) or unowned_blocks
     duration_ms = int((time.perf_counter() - started) * 1000)
 
+    # s-31 coverage: an honest signal that boundary checking is not as complete as a clean
+    # report implies. unresolved_local_imports is measured only in boundary-checking modes
+    # (full/preflight/audit); quick reports 0 (it runs no boundary check).
+    coverage = {
+        "files_owned": len(files),
+        "unresolved_local_imports": ctx.unresolved_local_imports,
+        "extraction_failures": sum(1 for i in issues if i.code == errors.E_EXTRACTION_FAILED),
+    }
+
     stats = {
         "files_total": len(files),
         "files_parsed": parsed,
@@ -228,6 +261,7 @@ def run(
         "skipped_gitignored": skipped_gitignored,
         "unowned": sum(1 for i in unowned if i.severity == "error"),
         "entry_points": sorted(entry_points),
+        "coverage": coverage,
         "duration_ms": duration_ms,
     }
     return ValidationReport(status=status, mode=mode, ok=not blocking, issues=issues, stats=stats)
@@ -236,51 +270,6 @@ def run(
 # ===========================================================================
 # Helpers
 # ===========================================================================
-def _iter_files(project_root: Path, sub, exts: set[str]) -> list[Path]:
-    """All supported source files belonging to a subsystem (deterministically sorted)."""
-    out: list[Path] = []
-    seen: set[Path] = set()
-
-    def add(f: Path) -> None:
-        try:
-            key = f.resolve()
-        except OSError:
-            key = f
-        if key in seen:
-            return
-        seen.add(key)
-        out.append(f)
-
-    for raw in sub.paths or []:
-        base = project_root / raw
-        if base.is_dir():
-            for f in base.rglob("*"):
-                if f.is_file() and f.suffix in exts and not _ignored(f, project_root):
-                    add(f)
-        elif base.is_file():
-            if base.suffix in exts:
-                add(base)
-        else:  # treat as a glob relative to the project root
-            for f in sorted(project_root.glob(raw)):
-                if f.is_file() and f.suffix in exts and not _ignored(f, project_root):
-                    add(f)
-
-    for raw in sub.files or []:
-        f = project_root / raw
-        if f.is_file() and f.suffix in exts:
-            add(f)
-
-    return sorted(out, key=lambda p: p.as_posix())
-
-
-def _ignored(f: Path, project_root: Path) -> bool:
-    try:
-        rel = f.relative_to(project_root)
-    except ValueError:
-        return False
-    return any(part in config.DEFAULT_IGNORES for part in rel.parts)
-
-
 def _is_external_symlink(abs_path: Path, project_root: Path) -> bool:
     """True if ``abs_path`` reaches its target through a symlink that escapes the project.
 
@@ -379,17 +368,15 @@ def _source_universe(
                 prel = abs_path.resolve().relative_to(root_real).as_posix()
             except (ValueError, OSError):
                 continue  # tracked file outside the scoped project root
-            if _ignored(abs_path, project_root):
+            if scan.in_default_ignores(abs_path, project_root):
                 continue
             if matcher and matcher.matches(prel):
                 continue
             universe.add(prel)
         return universe
 
-    # Not a git repo: walk the filesystem instead.
-    for f in project_root.rglob("*"):
-        if not f.is_file() or f.suffix not in exts or _ignored(f, project_root):
-            continue
+    # Not a git repo: walk the filesystem instead (symlink-cycle-safe shared walker).
+    for f in scan.walk_supported(project_root, exts):
         prel = f.relative_to(project_root).as_posix()
         if matcher and matcher.matches(prel):
             continue
