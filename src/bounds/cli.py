@@ -1,7 +1,7 @@
-"""Command-line interface for Compact.
+"""Command-line interface for Bounds.
 
 Every command prints a JSON object to stdout by default and accepts ``-H/--human`` for a readable
-rendering of the same data. Fatal conditions raise :class:`~compact.errors.CompactError`, which is
+rendering of the same data. Fatal conditions raise :class:`~bounds.errors.BoundsError`, which is
 caught here, emitted as ``{"error": {...}}``, and exits with code 2. Blocking validation failures
 exit 1; everything else exits 0.
 """
@@ -29,31 +29,31 @@ _human = click.option("--human", "-H", "human", is_flag=True, default=False,
 def _require_root() -> Path:
     root = manifest_loader.find_root(Path.cwd())
     if root is None:
-        raise errors.CompactError(
+        raise errors.BoundsError(
             errors.E_MANIFEST_NOT_FOUND,
-            "no .compact/ directory found in this or any parent directory",
-            fix="run 'compact init --root' to initialize Compact in this project",
+            "no .bounds/ directory found in this or any parent directory",
+            fix="run 'bounds init --root' to initialize Bounds in this project",
         )
     return root
 
 
 def _run(human: bool, fn, ci: bool = False):
-    """Execute a command body, turning CompactError into a structured error + exit 2.
+    """Execute a command body, turning BoundsError into a structured error + exit 2.
 
     ``ci`` is threaded from commands that expose ``--ci`` so a fatal error stays in the
     tab-delimited CI contract (one ``fatal`` line) instead of falling back to JSON.
     """
     try:
         fn()
-    except errors.CompactError as err:
+    except errors.BoundsError as err:
         output.emit(err.to_dict(), human, ci=ci)
         sys.exit(config.EXIT_FATAL)
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
-@click.version_option(__version__, prog_name="compact")
+@click.version_option(__version__, prog_name="bounds")
 def main() -> None:
-    """Compact — AI-native codebase understanding via subsystem boundary manifests."""
+    """Bounds — AI-native codebase understanding via subsystem boundary manifests."""
 
 
 # ===========================================================================
@@ -183,7 +183,7 @@ def _quick_status(root: Path) -> str:
     """Compute the project's validation status via a read-only quick run (or 'unresolved')."""
     try:
         return validate_engine.run(root, mode="quick", persist=False).status
-    except errors.CompactError:
+    except errors.BoundsError:
         return "unresolved"
 
 
@@ -194,20 +194,20 @@ def _quick_status(root: Path) -> str:
 @click.option("--deep", is_flag=True, default=False, help="Include Tier-3 LLM enrichment (roadmap).")
 @_human
 def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: bool) -> None:
-    """Return a subsystem compact as JSON, or every compact in a namespace."""
+    """Return a subsystem manifest as JSON, or every manifest in a namespace."""
 
     def go() -> None:
         if name is None and namespace is None:
-            raise errors.CompactError(
+            raise errors.BoundsError(
                 errors.E_USAGE,
                 "nothing to describe",
                 fix="pass a subsystem name, or --namespace <ns> to describe a group",
             )
         if name is not None and namespace is not None:
-            raise errors.CompactError(
+            raise errors.BoundsError(
                 errors.E_USAGE,
                 "pass either a subsystem name or --namespace, not both",
-                fix="run 'compact describe <name>' or 'compact describe --namespace <ns>'",
+                fix="run 'bounds describe <name>' or 'bounds describe --namespace <ns>'",
             )
         root = _require_root()
         rootm, subs, _ = manifest_loader.load_all(root)
@@ -225,10 +225,10 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: boo
             return
 
         if name not in subs:
-            raise errors.CompactError(
+            raise errors.BoundsError(
                 errors.E_SUBSYSTEM_NOT_FOUND,
                 f"subsystem '{name}' not found",
-                fix=f"known subsystems: {sorted(subs)}; or run 'compact init --subsystem {name}'",
+                fix=f"known subsystems: {sorted(subs)}; or run 'bounds init --subsystem {name}'",
             )
         output.emit(_describe_one(root, subs[name], deep, _quick_status(root), entry_matcher), human)
 
@@ -241,7 +241,7 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: boo
 # File-selection + output toggles shared by validate and preflight.
 _scan_options = [
     click.option("--include-ignored", is_flag=True, default=False,
-                 help="Scan files normally excluded by .compactignore."),
+                 help="Scan files normally excluded by .boundsignore."),
     click.option("--include-gitignored", is_flag=True, default=False,
                  help="Scan files excluded by .gitignore."),
     click.option("--follow-symlinks", is_flag=True, default=False,
@@ -386,35 +386,35 @@ consumes: []
 
 
 @main.command("init")
-@click.option("--root", "root_flag", is_flag=True, default=False, help="Initialize .compact/root.yaml.")
+@click.option("--root", "root_flag", is_flag=True, default=False, help="Initialize .bounds/root.yaml.")
 @click.option("--subsystem", default=None, help="Scaffold a new subsystem manifest.")
 @click.option("--namespace", default=None, help="Namespace for the scaffolded subsystem (requires --subsystem).")
 @_human
 def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, human: bool) -> None:
-    """Initialize .compact/ structure, or add a subsystem."""
+    """Initialize .bounds/ structure, or add a subsystem."""
 
     def go() -> None:
         if not root_flag and not subsystem:
-            raise errors.CompactError(
+            raise errors.BoundsError(
                 errors.E_USAGE,
                 "nothing to initialize",
-                fix="pass --root to scaffold .compact/, or --subsystem <name> to add one",
+                fix="pass --root to scaffold .bounds/, or --subsystem <name> to add one",
             )
         if namespace and not subsystem:
-            raise errors.CompactError(
+            raise errors.BoundsError(
                 errors.E_USAGE,
                 "--namespace requires --subsystem",
                 fix="pass --subsystem <name> together with --namespace <ns>",
             )
         existing = manifest_loader.find_root(Path.cwd())
         project = existing or Path.cwd()
-        compact_dir = project / config.COMPACT_DIR
+        bounds_dir = project / config.BOUNDS_DIR
         created: list[str] = []
         skipped: list[str] = []
 
         if root_flag:
-            compact_dir.mkdir(parents=True, exist_ok=True)
-            root_file = compact_dir / config.ROOT_FILE
+            bounds_dir.mkdir(parents=True, exist_ok=True)
+            root_file = bounds_dir / config.ROOT_FILE
             rel = root_file.relative_to(project).as_posix()
             if root_file.exists():
                 skipped.append(rel)
@@ -428,7 +428,7 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
         result: dict = {"created": created, "skipped": skipped}
 
         if subsystem:
-            sub_file = compact_dir / config.MANIFESTS_DIR / f"{subsystem}.yaml"
+            sub_file = bounds_dir / config.MANIFESTS_DIR / f"{subsystem}.yaml"
             sub_file.parent.mkdir(parents=True, exist_ok=True)
             rel = sub_file.relative_to(project).as_posix()
             if sub_file.exists():
@@ -440,9 +440,9 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
                     encoding="utf-8",
                 )
                 created.append(rel)
-            result["hint"] = f"add '{subsystem}' to the 'subsystems' list in {config.COMPACT_DIR}/{config.ROOT_FILE}"
+            result["hint"] = f"add '{subsystem}' to the 'subsystems' list in {config.BOUNDS_DIR}/{config.ROOT_FILE}"
 
-        result["compact_dir"] = compact_dir.relative_to(project).as_posix()
+        result["bounds_dir"] = bounds_dir.relative_to(project).as_posix()
         output.emit(result, human)
 
     _run(human, go)

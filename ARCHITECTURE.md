@@ -1,7 +1,7 @@
-# Compact — Architecture
+# Bounds — Architecture
 
 > AI-native codebase understanding via subsystem boundary manifests.
-> This document is the **authoritative engineering contract** for Compact's internals. Every module
+> This document is the **authoritative engineering contract** for Bounds's internals. Every module
 > signature, dataclass field, error code, and JSON shape below is binding — the implementation builds
 > against it. For the product pitch and usage, see [README.md](README.md); for scope/phasing, see
 > [ROADMAP.md](ROADMAP.md).
@@ -13,7 +13,7 @@
 1. **Zero LLM cost for all structural operations.** Tree-sitter only. Tier 3 (LLM) is opt-in via `--deep` and is *stubbed* in the MVP.
 2. **Deterministic.** Same inputs → same output, byte-for-byte. No timestamps in hashes, sorted collections everywhere.
 3. **JSON-first.** Every command prints a JSON object to stdout. `--human` re-renders the same data for humans. Errors are JSON too.
-4. **Hidden `.compact/`.** Never auto-discovered by other tools; walked up from CWD by the CLI only.
+4. **Hidden `.bounds/`.** Never auto-discovered by other tools; walked up from CWD by the CLI only (a legacy `.compact/` is read as a fallback when `.bounds/` is absent).
 5. **Fail soft, report hard.** A single unparsable file degrades to an `Issue`, never a crash. Exit codes encode severity.
 6. **Forward-compatible.** `version` on every manifest + cache file; unknown fields preserved/ignored, never fatal.
 
@@ -22,28 +22,29 @@
 ## 1. Directory structure
 
 ```
-compact/
+bounds/
 ├── pyproject.toml                 # build + deps + console_script entry point
 ├── README.md                      # product pitch + quickstart + agent integration guide
 ├── ARCHITECTURE.md                # this file — engineering contract
 ├── ROADMAP.md                     # MVP scope vs. future phases
 ├── LICENSE
-├── .compact/                      # Compact's own manifests (bootstrap demo, Phase 5)
-│   ├── root.yaml
-│   └── manifests/
-│       └── <name>.yaml
+├── .bounds/                       # Bounds's own manifests (bootstrap demo, Phase 5)
+│   ├── root.yaml                  # global config: project, languages, enforce, entry_points, subsystems
+│   ├── manifests/                 # one <name>.yaml per subsystem
+│   │   └── <name>.yaml
+│   └── state.json                 # extraction cache (gitignored)
 ├── src/
-│   └── compact/
+│   └── bounds/
 │       ├── __init__.py            # __version__
 │       ├── cli.py                 # click group + all commands  (Phase 3)
 │       ├── config.py              # constants: dir names, schema version, defaults
-│       ├── errors.py              # CompactError + stable error-code registry
+│       ├── errors.py              # BoundsError + stable error-code registry
 │       ├── models.py              # all dataclasses (the data model)
 │       ├── output.py              # JSON / human emit + exit-code mapping
 │       ├── gitutil.py             # git repo detection + changed-file diff
 │       ├── manifest/
 │       │   ├── __init__.py
-│       │   ├── loader.py          # discover .compact/, load root + subsystems
+│       │   ├── loader.py          # discover .bounds/, load root + subsystems
 │       │   └── schema.py          # validate manifest dicts → list[Issue]
 │       ├── extract/
 │       │   ├── __init__.py
@@ -70,7 +71,7 @@ compact/
     ├── test_cli_integration.py
     └── fixtures/
         └── sample_project/        # tiny multi-subsystem TS+Py project
-            ├── .compact/
+            ├── .bounds/
             └── src/...
 ```
 
@@ -80,11 +81,11 @@ compact/
 
 ```
                     ┌─────────────────────────────────────────────────────────┐
-   CLI (click)      │  compact <cmd> [--human] [--quick|--mode M] [--enforce]  │
+   CLI (click)      │  bounds <cmd> [--human] [--quick|--mode M] [--enforce]   │
                     └───────────────┬─────────────────────────────────────────┘
                                     │
                     ┌───────────────▼───────────────┐
-   discovery        │  manifest.loader.find_root()   │  walk up CWD → .compact/
+   discovery        │  manifest.loader.find_root()   │  walk up CWD → .bounds/
                     │  load_root() + load_all()      │  RootManifest + {name: SubsystemCompact}
                     └───────────────┬────────────────┘   (+ schema.validate_* → Issues)
                                     │
@@ -159,7 +160,7 @@ class SubsystemCompact:
     consumes: list[Consumes] = []  # declared cross-boundary deps
     files: list[str] = []          # optional explicit file list (else derived from paths)
     consumed_by: list[str] = []    # AUTO-filled by loader (inverse of consumes)
-    source_path: str = ""          # abs path to this compact.yaml
+    source_path: str = ""          # abs path to this bounds.yaml
 
 @dataclass
 class RootManifest:
@@ -167,7 +168,8 @@ class RootManifest:
     project: str
     languages: list[str] = []      # ["typescript","python"]
     enforce: str = "off"           # on|off  (whether full-mode issues are blocking)
-    subsystems: list[str] = []     # subsystem names (each has its own compact.yaml)
+    subsystems: list[str] = []     # subsystem names (each has its own bounds.yaml)
+    entry_points: list[str] = []   # root-level bootstrap globs exempt from --fail-on-unowned
     source_path: str = ""
 
 # ---- Extraction tier (deterministic) ----
@@ -224,23 +226,24 @@ class ValidationReport:
 
 ### `config.py`
 ```python
-COMPACT_DIR = ".compact"
+BOUNDS_DIR = ".bounds"
+LEGACY_DIR = ".compact"          # pre-rename layout; still read for backward compatibility
 ROOT_FILE = "root.yaml"
-SUBSYS_DIR = "subsystems"
-SUBSYS_FILE = "compact.yaml"
+MANIFESTS_DIR = "manifests"
+SUBSYS_FILE = "bounds.yaml"
 STATE_FILE = "state.json"
 SCHEMA_VERSION = "1"
 VALID_ROLES = {"service","platform","connector","library"}
 VALID_CRITICALITY = {"core","connector","leaf"}
 VALID_MODES = {"quick","full","preflight","hotfix","audit"}
-DEFAULT_IGNORES = {"node_modules",".git","dist","build","__pycache__",".venv",".compact"}
+DEFAULT_IGNORES = {"node_modules",".git","dist","build","__pycache__",".venv",".bounds",".compact"}
 # propagation depth by criticality of the *changed* provider:
 PROPAGATION_DEPTH = {"core": -1, "connector": 1, "leaf": 0}   # -1 = unbounded
 ```
 
 ### `errors.py`
 ```python
-class CompactError(Exception):
+class BoundsError(Exception):
     def __init__(self, code: str, message: str, fix: str | None = None): ...
     code: str; message: str; fix: str | None
     def to_dict(self) -> dict           # {error:{code,message,fix}}
@@ -259,8 +262,8 @@ def changed_files(repo: Path, base: str = "HEAD") -> list[Path]
 
 ### `manifest/loader.py`
 ```python
-def find_root(start: Path) -> Path | None          # walk up for .compact/ ; returns the dir holding .compact
-def load_root(project_root: Path) -> RootManifest   # raises CompactError(E_MANIFEST_*)
+def find_root(start: Path) -> Path | None          # walk up for .bounds/ (legacy .compact/ fallback); returns the dir holding it
+def load_root(project_root: Path) -> RootManifest   # raises BoundsError(E_MANIFEST_*)
 def load_subsystem(project_root: Path, name: str) -> SubsystemCompact
 def load_all(project_root: Path) -> tuple[RootManifest, dict[str, SubsystemCompact], list[Issue]]
     # loads root + every declared subsystem, fills consumed_by, returns schema Issues (non-fatal)
@@ -381,10 +384,10 @@ def exit_code_for(report: ValidationReport, mode: str, enforce: str) -> int
 
 ## 5. Manifest schema (YAML)
 
-**`.compact/root.yaml`**
+**`.bounds/root.yaml`**
 ```yaml
 version: "1"
-project: compact
+project: bounds
 languages: [python]
 enforce: "off"
 subsystems:
@@ -392,16 +395,19 @@ subsystems:
   - extract
   - validate
   - cli
+entry_points:                 # root-level bootstrap globs exempt from `bounds validate --fail-on-unowned`
+  - main.py
+  - app.py
 ```
 
-**`.compact/manifests/extract.yaml`**
+**`.bounds/manifests/extract.yaml`**
 ```yaml
 name: extract
 role: library
 criticality: core
 description: Tree-sitter extraction of exported symbols and imports per language.
 paths:
-  - src/compact/extract
+  - src/bounds/extract
 exposes:
   - { name: get_adapter, kind: function }
   - { name: LanguageAdapter, kind: class }
@@ -422,7 +428,7 @@ consumes:
 | `hotfix` | emergency | — | none | never (always ok) |
 | `audit` | weekly | all | all 6 | never (report) |
 
-`compact validate` defaults to `full`. `--quick` → quick. `--mode M` explicit. `compact preflight` → preflight mode.
+`bounds validate` defaults to `full`. `--quick` → quick. `--mode M` explicit. `bounds preflight` → preflight mode.
 
 ---
 
@@ -450,7 +456,7 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_CYCLE_DETECTED` | error | circular subsystem dependency |
 | `E_ORPHAN_EXPORT` | warning | exposed interface consumed by no one |
 | `E_UNRESOLVED_REFERENCE` | warning | forward ref to unknown subsystem/interface |
-| `E_MANIFEST_NOT_FOUND` | fatal | no `.compact/` found |
+| `E_MANIFEST_NOT_FOUND` | fatal | no `.bounds/` (or legacy `.compact/`) found |
 | `E_MANIFEST_PARSE_ERROR` | fatal | YAML parse failure |
 | `E_SCHEMA_INVALID` | error | manifest missing required keys / bad enum |
 | `E_SUBSYSTEM_NOT_FOUND` | fatal | `describe <name>` for unknown subsystem |
@@ -466,50 +472,15 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 All commands accept `--human/-H` (default JSON) and resolve the project root via `find_root(Path.cwd())`.
 
 ```
-compact list                       → {subsystems:[{name,role,criticality,description,exposes_count,consumes_count}]}
-compact describe <name>            → full SubsystemCompact.to_dict() + {validation_status}
-compact describe <name> --deep     → same + {semantic: {...}}  (Tier-3 stub: {"note":"LLM enrichment not enabled"})
-compact validate [--quick|--mode M] [--enforce on|off] [--base REF]
+bounds list                        → {subsystems:[{name,role,criticality,description,exposes_count,consumes_count}]}
+bounds describe <name>             → full SubsystemCompact.to_dict() + {validation_status}
+bounds describe <name> --deep      → same + {semantic: {...}}  (Tier-3 stub: {"note":"LLM enrichment not enabled"})
+bounds validate [--quick|--mode M] [--enforce on|off] [--base REF]
                                    → ValidationReport.to_dict()
-compact preflight                  → ValidationReport (mode=preflight) + per-check summary
-compact overview                   → {project, subsystems, roles:{...}, criticality:{...}, edges, cycles, health:{...}}
-compact init --root                → scaffolds .compact/root.yaml
-compact init --subsystem <name>    → scaffolds .compact/manifests/<name>.yaml
+bounds preflight                   → ValidationReport (mode=preflight) + per-check summary
+bounds overview                    → {project, subsystems, roles:{...}, criticality:{...}, edges, cycles, health:{...}}
+bounds init --root                 → scaffolds .bounds/root.yaml
+bounds init --subsystem <name>     → scaffolds .bounds/manifests/<name>.yaml
 ```
 
-Every command's JSON includes top-level `"validation_status"` where meaningful and `"ok": bool`. Fatal `CompactError` → `{"error":{code,message,fix}}` on stdout + exit 2.
-
----
-
-## 10. Build sequencing & parallelization
-
-Dependency DAG (→ = "depends on"):
-```
-config, errors            (no deps)            ← FOUNDATION, write first, by hand
-models                    → (none)             ← FOUNDATION
-output      → models, errors
-gitutil     → (stdlib only)
-manifest/*  → models, errors, config
-extract/*   → models, config           ┐
-cache/*     → models, extract           │ parallel-safe once foundation locked
-                                        ┘
-validate/*  → models, manifest, extract, cache, config   ← integration core
-cli         → everything                                  ← last
-tests       → everything                                  ← parallel per module
-```
-
-**Orchestration plan (ultracode):**
-- **Stage A (hand-authored):** `pyproject.toml`, `__init__.py`, `config.py`, `errors.py`, `models.py` — these *are* the contract; coherence > fan-out.
-- **Stage B (parallel workflow):** independent leaf modules against the locked foundation — `manifest/{loader,schema}`, `extract/{base,registry,python,typescript}`, `cache/store`, `gitutil`, `output`. One agent per module.
-- **Stage C (hand-authored):** `validate/{propagation,checks,engine}` + `cli.py` — the integration core; written with full context, then run.
-- **Stage D:** integrate, run `compact` end-to-end, fix mismatches.
-- **Stage E (parallel workflow):** one test module per source module + integration test; then adversarial review.
-- **Stage F:** bootstrap `.compact/` for Compact itself + sample project (Phase 5 verify).
-
-**Acceptance criteria (definition of done):**
-- `pip install -e .` succeeds; `compact --help` works.
-- `compact init --root` then `compact list` round-trips.
-- `compact validate` on the sample project returns deterministic JSON with each of the 6 checks exercised by at least one fixture.
-- `compact validate --quick` re-extracts only git-changed files (verified via cache-hit stats).
-- `compact` validates **itself** (bootstrap) with status `fresh` (or known, explained warnings).
-- `pytest` green.
+Every command's JSON includes top-level `"validation_status"` where meaningful and `"ok": bool`. Fatal `BoundsError` → `{"error":{code,message,fix}}` on stdout + exit 2.

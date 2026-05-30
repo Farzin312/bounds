@@ -12,7 +12,7 @@ import json
 import sys
 
 from . import config
-from .errors import CompactError
+from .errors import BoundsError
 from .models import ValidationReport
 
 # Severity groups, in the order they render and rank.
@@ -60,7 +60,7 @@ def _render_report_ci(payload: dict) -> str:
     Designed for ``grep``/``awk`` in CI logs: the bare error code is its own field, so
     ``grep E_BOUNDARY_VIOLATION`` matches cleanly. A clean report emits a single
     ``ok\t<status>`` line so a passing run is never indistinguishable from a crash.
-    A fatal ``CompactError`` payload (``{"error": {...}}``) emits one ``fatal`` line so a
+    A fatal ``BoundsError`` payload (``{"error": {...}}``) emits one ``fatal`` line so a
     CI parser sees the failure code instead of a misleading ``ok``.
     """
     err = payload.get("error")
@@ -124,8 +124,8 @@ def exit_code_for(report: ValidationReport, mode: str, enforce: str) -> int:
     return config.EXIT_OK
 
 
-def emit_error(err: CompactError, human: bool, stream=None) -> None:
-    """Render a fatal ``CompactError`` as JSON (default) or a one-line human message."""
+def emit_error(err: BoundsError, human: bool, stream=None) -> None:
+    """Render a fatal ``BoundsError`` as JSON (default) or a one-line human message."""
     if stream is None:
         stream = sys.stderr
     if not human:

@@ -1,7 +1,7 @@
-"""Stable error-code registry and the CompactError exception.
+"""Stable error-code registry and the BoundsError exception.
 
 Codes are part of the public contract — never renumber or repurpose. Severities:
-  fatal   -> raised as CompactError, aborts the command (exit 2)
+  fatal   -> raised as BoundsError, aborts the command (exit 2)
   error   -> blocking Issue (blocks preflight always; full only when enforce=on)
   warning -> non-blocking Issue
 """
@@ -47,7 +47,7 @@ SEVERITY = {
 }
 
 
-class CompactError(Exception):
+class BoundsError(Exception):
     """A fatal, user-facing error. Carries a stable code and an actionable fix."""
 
     def __init__(self, code: str, message: str, fix: str | None = None) -> None:
@@ -58,3 +58,8 @@ class CompactError(Exception):
 
     def to_dict(self) -> dict:
         return {"error": {"code": self.code, "message": self.message, "fix": self.fix}}
+
+
+# Deprecated alias for the pre-rename name. Kept so external callers importing
+# ``CompactError`` keep working; prefer ``BoundsError`` in new code.
+CompactError = BoundsError

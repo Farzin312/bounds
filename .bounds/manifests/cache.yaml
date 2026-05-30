@@ -1,9 +1,9 @@
 name: cache
 role: library
 criticality: connector
-description: Content-addressable per-file extraction cache persisted to .compact/state.json.
+description: Content-addressable per-file extraction cache persisted to .bounds/state.json.
 paths:
-  - src/compact/cache
+  - src/bounds/cache
 exposes:
   - { name: load_state, kind: function }
   - { name: save_state, kind: function }

@@ -3,7 +3,7 @@ role: service
 criticality: connector
 description: Click-based command-line entry point — list, describe, validate, preflight, overview, init.
 paths:
-  - src/compact/cli.py
+  - src/bounds/cli.py
 exposes:
   - { name: main, kind: function }
 consumes:

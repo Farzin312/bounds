@@ -1,4 +1,4 @@
-"""The Compact data model.
+"""The Bounds data model.
 
 Three tiers:
   * Manifest tier (declared, human-written): Interface, Consumes, SubsystemCompact, RootManifest

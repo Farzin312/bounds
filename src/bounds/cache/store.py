@@ -5,8 +5,9 @@ repo-relative POSIX path. Records carry both the content hash (sha256 of raw
 bytes) and the structure hash (sha256 of the symbol/import shape) so the engine
 can cheaply decide whether a file's *structure* changed without re-extracting.
 
-Persistence is a single ``.compact/state.json`` written atomically with sorted
-keys and no timestamps, so the on-disk bytes are deterministic across runs.
+Persistence is a single ``.bounds/state.json`` (or legacy ``.compact/state.json``)
+written atomically with sorted keys and no timestamps, so the on-disk bytes are
+deterministic across runs.
 Loading is tolerant: a missing, corrupt, or version-mismatched file yields an
 empty :class:`State` rather than an error — the engine simply re-extracts.
 """
@@ -134,14 +135,15 @@ class State:
 
 
 def load_state(project_root: Path) -> State:
-    """Read ``<project_root>/.compact/state.json`` into a :class:`State`.
+    """Read ``<project_root>/.bounds/state.json`` into a :class:`State`.
 
+    Reads the legacy ``.compact/state.json`` instead when only that layout is present.
     Tolerant by design: a missing file, unreadable file, malformed JSON, or a
     version that does not match :data:`config.STATE_VERSION` all yield a fresh
     empty State. This never raises — a stale or broken cache simply forces a
     full re-extraction downstream.
     """
-    state_path = project_root / config.COMPACT_DIR / config.STATE_FILE
+    state_path = config.config_dir(project_root) / config.STATE_FILE
     try:
         raw = state_path.read_text(encoding="utf-8")
         data = json.loads(raw)
@@ -155,18 +157,19 @@ def load_state(project_root: Path) -> State:
 
 
 def save_state(project_root: Path, state: State) -> None:
-    """Atomically persist ``state`` to ``<project_root>/.compact/state.json``.
+    """Atomically persist ``state`` to the project's config dir as ``state.json``.
 
-    The JSON is written with ``indent=2`` and ``sort_keys=True`` for byte-stable
-    output (no timestamps anywhere). Writing goes to a sibling ``.tmp`` file
-    which is then ``os.replace``d over the target, so a crash mid-write can
-    never leave a half-written cache.
+    Writes into the active config directory (``.bounds/``, or legacy ``.compact/`` when
+    that is the layout in use). The JSON is written with ``indent=2`` and
+    ``sort_keys=True`` for byte-stable output (no timestamps anywhere). Writing goes to a
+    sibling ``.tmp`` file which is then ``os.replace``d over the target, so a crash
+    mid-write can never leave a half-written cache.
     """
-    compact_dir = project_root / config.COMPACT_DIR
-    compact_dir.mkdir(parents=True, exist_ok=True)
+    cfg_dir = config.config_dir(project_root)
+    cfg_dir.mkdir(parents=True, exist_ok=True)
 
-    final_path = compact_dir / config.STATE_FILE
-    tmp_path = compact_dir / (config.STATE_FILE + ".tmp")
+    final_path = cfg_dir / config.STATE_FILE
+    tmp_path = cfg_dir / (config.STATE_FILE + ".tmp")
 
     tmp_path.write_text(
         json.dumps(state.to_dict(), indent=2, sort_keys=True),

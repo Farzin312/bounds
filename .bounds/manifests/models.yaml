@@ -1,9 +1,9 @@
 name: models
 role: library
 criticality: core
-description: The Compact data model — manifest, extraction, and validation dataclasses shared everywhere.
+description: The Bounds data model — manifest, extraction, and validation dataclasses shared everywhere.
 paths:
-  - src/compact/models.py
+  - src/bounds/models.py
 exposes:
   - { name: Interface, kind: class }
   - { name: Consumes, kind: class }

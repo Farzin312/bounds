@@ -1,12 +1,12 @@
 ---
 name: Bug report
-about: Report a reproducible bug in Compact
+about: Report a reproducible bug in Bounds
 title: ""
 labels: bug
 assignees: ""
 ---
 
-**Compact version** (output of `compact --version`):
+**Bounds version** (output of `bounds --version`):
 **Python version**: 3.x
 **OS**: Linux / macOS / Windows
 
@@ -14,7 +14,7 @@ assignees: ""
 A clear, concise description of the bug.
 
 **Steps to reproduce**
-1. Run `compact ...`
+1. Run `bounds ...`
 2. See error
 
 **Expected behaviour**

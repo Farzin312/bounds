@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea for Compact
+about: Suggest an idea for Bounds
 title: ""
 labels: enhancement
 assignees: ""
@@ -10,7 +10,7 @@ assignees: ""
 A clear, concise description of the problem. E.g. "I'm always frustrated when [...]"
 
 **Describe the solution you'd like**
-What should Compact do differently?
+What should Bounds do differently?
 
 **Describe alternatives you've considered**
 Any workarounds or other approaches.

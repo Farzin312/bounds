@@ -1,9 +1,9 @@
 name: manifest
 role: library
 criticality: connector
-description: Discovery, loading, and schema validation of root.yaml and subsystem compact.yaml manifests.
+description: Discovery, loading, and schema validation of root.yaml and subsystem manifest files.
 paths:
-  - src/compact/manifest
+  - src/bounds/manifest
 exposes:
   - { name: find_root, kind: function }
   - { name: load_all, kind: function }

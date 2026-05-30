@@ -1,29 +1,29 @@
-# Compact agent-instructions template — Cursor (.cursorrules).
+# Bounds agent-instructions template — Cursor (.cursorrules).
 #
 # Copy this file to your project root as .cursorrules, or adapt it into a project rule at
-# .cursor/rules/compact.mdc (set "alwaysApply: true" in that file's frontmatter). Cursor
+# .cursor/rules/bounds.mdc (set "alwaysApply: true" in that file's frontmatter). Cursor
 # loads these rules into every request, so keep the guidance short and action-oriented.
 
-## Architecture: Compact
+## Architecture: Bounds
 
-This project uses Compact (https://compact.dev) for architecture modeling — subsystem
+This project uses Bounds (https://bounds.dev) for architecture modeling — subsystem
 boundary contracts validated against source with tree-sitter (zero LLM). Manifests live in
-the hidden .compact/ directory (.compact/manifests/<name>.yaml). Do not open them directly;
-use the `compact` CLI, which emits JSON by default.
+the hidden .bounds/ directory (.bounds/manifests/<name>.yaml). Do not open them directly;
+use the `bounds` CLI, which emits JSON by default.
 
 Before significant edits:
-- Run `compact list` to see the subsystems and how they connect.
-- Run `compact describe <subsystem>` for the public surface (exposes), dependencies
+- Run `bounds list` to see the subsystems and how they connect.
+- Run `bounds describe <subsystem>` for the public surface (exposes), dependencies
   (consumes), and dependents (consumed_by) of the subsystem you are about to change.
   Read this instead of raw source to understand a boundary.
-- Run `compact describe --namespace <ns>` to describe a whole domain group at once.
-- Run `compact overview` for file counts, language breakdown, and validation status.
+- Run `bounds describe --namespace <ns>` to describe a whole domain group at once.
+- Run `bounds overview` for file counts, language breakdown, and validation status.
 
 After changing exports or cross-subsystem imports:
-- Run `compact validate --quick` (sub-200ms). If validation_status is not "fresh", update
+- Run `bounds validate --quick` (sub-200ms). If validation_status is not "fresh", update
   the affected manifest so the contract matches the source again.
-- Run `compact preflight` before opening a PR for boundary, contract, cycle, and orphan
+- Run `bounds preflight` before opening a PR for boundary, contract, cycle, and orphan
   checks.
 
 When validation_status is "fresh", trust the manifest and skip reading source. When it is
-"stale" or "unresolved", run `compact validate` first, then trust.
+"stale" or "unresolved", run `bounds validate` first, then trust.

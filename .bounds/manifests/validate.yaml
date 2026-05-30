@@ -3,7 +3,7 @@ role: platform
 criticality: connector
 description: Validation engine — mode dispatch, cached extraction, reference propagation, and the 6 checks.
 paths:
-  - src/compact/validate
+  - src/bounds/validate
 exposes:
   - { name: run, kind: function }
   - { name: CheckContext, kind: class }

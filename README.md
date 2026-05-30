@@ -1,10 +1,10 @@
 <div align="center">
 
-# Compact
+# Bounds
 
 ### Architecture contracts your AI agents can trust
 
-**Compact** is a CLI that turns your codebase's architecture into deterministic, machine-readable
+**Bounds** is a CLI that turns your codebase's architecture into deterministic, machine-readable
 manifests — validated against source with **tree-sitter (zero LLM)**. AI coding agents read a 10-line
 subsystem contract instead of 10 source files, and get structural validation they can trust, in
 milliseconds, for zero tokens.
@@ -33,9 +33,9 @@ But an agent doesn't need every function in `auth.ts`. It needs:
 
 That fits in five lines of YAML — and a machine can reason about it **deterministically**.
 
-## What Compact does
+## What Bounds does
 
-Compact maintains a hidden `.compact/` directory of **subsystem boundary manifests**: tiny YAML files
+Bounds maintains a hidden `.bounds/` directory of **subsystem boundary manifests**: tiny YAML files
 that declare each subsystem's role, its public interfaces (exposes), and its cross-boundary
 dependencies (consumes). It then uses **tree-sitter** (never an LLM) to extract the *actual* exported
 symbols and imports from your source and **validates the manifests against reality** — in both
@@ -43,60 +43,50 @@ directions.
 
 The result is a structural contract an agent can query, and a CI pipeline can enforce:
 
-- **`compact describe`** — hand an agent a subsystem's exact public surface as JSON, instead of raw files.
-- **`compact validate`** — catch drift the moment exports stop matching the manifest. 6 checks, zero LLM.
-- **`compact validate --quick`** — git-diff incremental validation, safe for every commit.
-- **`compact preflight`** — 6 pre-PR checks: drift, boundaries, contracts, cycles, orphans, cross-subsystem impact.
+- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, instead of raw files.
+- **`bounds validate`** — catch drift the moment exports stop matching the manifest. 6 checks, zero LLM.
+- **`bounds validate --quick`** — git-diff incremental validation, safe for every commit.
+- **`bounds preflight`** — 6 pre-PR checks: drift, boundaries, contracts, cycles, orphans, cross-subsystem impact.
 - **Deterministic** — same input, same bytes out. No tokens, no network, no flakiness.
 
 ---
 
 ## Why not another code graph?
 
-Compact exists in a crowded space of code intelligence tools (CodeGraph, tree-sitter-analyzer,
+Bounds exists in a crowded space of code intelligence tools (CodeGraph, tree-sitter-analyzer,
 roam-code, CodeSage). Every prior approach shares the same assumption: **parse everything, build a
-graph, let the AI figure it out.** This creates three problems Compact solves:
+graph, let the AI figure it out.** This creates three problems Bounds solves:
 
 ### 1. Token bloat
 
 A full code graph of a Django codebase can be 50K+ tokens. An agent pays this cost just to find
-where `login()` is defined. Compact gives you the answer in ~1,200 bytes of JSON — one CLI call.
+where `login()` is defined. Bounds gives you the answer in ~1,200 bytes of JSON — one CLI call.
 
 ### 2. No intent signal
 
-A graph tells you what IS, not what SHOULD BE. Every symbol is equal. Compact distinguishes public
-contracts from private implementation by design — the developer declares the boundary, and Compact
+A graph tells you what IS, not what SHOULD BE. Every symbol is equal. Bounds distinguishes public
+contracts from private implementation by design — the developer declares the boundary, and Bounds
 enforces it.
 
 ### 3. No drift detection
 
 A graph is always correct by definition (it reflects reality). It cannot tell you that someone
 added an export without declaring it, or removed an interface another subsystem depends on.
-Compact's validation is the difference between *declared intent* and *extracted reality*.
+Bounds's validation is the difference between *declared intent* and *extracted reality*.
 
-### Compact vs code graphs
+### In short
 
-| Dimension | CodeGraph / TSA / roam-code | Compact |
-|-----------|---------------------------|---------|
-| Core approach | Extract graph from source | Declare intent in YAML, validate against source |
-| What you get | What code exists | What code SHOULD exist |
-| Granularity | Functions, classes, imports | Subsystem boundaries, contracts, dependencies |
-| Token cost | O(full symbol count) | O(public API count) — 5-20 lines per subsystem |
-| Validation | None (graph = truth) | Drift detection, contract compliance, boundary checks |
-| LLM dependency | High (embeddings, semantic search) | Zero for structural path |
-| CI integration | Analysis step | Gate step — can block PRs |
-| Setup time | Server config, embedding indexing | `pip install compact` + `compact init` |
+Code graphs are too large and noisy for an agent to consume cheaply, they capture what *is* without
+any signal of human-declared intent or boundaries, and they drift from the code the moment something
+changes with no way to flag it. Bounds targets exactly those three gaps: a tiny per-subsystem
+contract instead of a full symbol graph, an explicit declared boundary instead of an undifferentiated
+graph, and two-directional validation that catches drift between declared intent and extracted
+reality. The two are complementary, not competitive — use a code graph to *explore* ("what's in this
+codebase?") and Bounds to *validate* ("what should this architecture look like?"). An agent that
+reads the Bounds map first then digs into specific symbols uses any graph tool more efficiently.
 
-### Complementary, not competitive
-
-Compact does not compete with CodeGraph. These are complementary tools at different layers:
-
-- **CodeGraph/TSA/roam-code** answer: "What's in this codebase?" — detailed, expensive, exploratory.
-- **Compact** answers: "What SHOULD this codebase's architecture look like?" — concise, deterministic, enforceable.
-
-The workflow: use CodeGraph to explore, use Compact to validate. An AI agent that knows the boundaries
-(via Compact) uses CodeGraph more efficiently — it reads the map first, then digs into specific
-symbols rather than searching blindly.
+<sub>A full side-by-side comparison table is in the [appendix](#appendix-bounds-vs-code-graphs) at the
+end of this README.</sub>
 
 ---
 
@@ -106,21 +96,21 @@ symbols rather than searching blindly.
 
 ```bash
 # Recommended: isolated CLI install
-pipx install compact
+pipx install bounds
 
 # Or into the current environment
-pip install compact
+pip install bounds
 ```
 
 <details>
 <summary><b>Install from source</b></summary>
 
 ```bash
-pipx install "git+https://github.com/Farzin312/compact.git"
+pipx install "git+https://github.com/Farzin312/bounds.git"
 
 # Or from a local clone
-git clone https://github.com/Farzin312/compact.git
-cd compact
+git clone https://github.com/Farzin312/bounds.git
+cd bounds
 pip install -e ".[dev]"
 ```
 </details>
@@ -129,56 +119,56 @@ pip install -e ".[dev]"
 <summary><b>Homebrew (planned — v0.2.0)</b></summary>
 
 ```bash
-brew install Farzin312/compact/compact   # once the tap is published
+brew install Farzin312/bounds/bounds   # once the tap is published
 ```
 
 Until then, `pipx` is the cleanest cross-platform path.
 </details>
 
 ```bash
-compact --help    # verify the install
+bounds --help    # verify the install
 ```
 
 ### Initialize a project
 
 ```bash
 cd your-project
-compact init --root                  # scaffold .compact/root.yaml
-compact init --subsystem auth        # add .compact/manifests/auth.yaml
+bounds init --root                  # scaffold .bounds/root.yaml
+bounds init --subsystem auth        # add .bounds/manifests/auth.yaml
 # edit the manifest to declare paths, exposes, consumes...
 ```
 
 ### Explore and validate
 
 ```bash
-compact list                         # discover all subsystems           (JSON)
-compact describe auth                # one subsystem's full surface      (JSON)
-compact validate --quick             # fast incremental check            (JSON)
-compact validate --human             # same data, human-readable
-compact preflight                    # 6 pre-PR checks, blocking
-compact overview                     # project health dashboard
+bounds list                         # discover all subsystems           (JSON)
+bounds describe auth                # one subsystem's full surface      (JSON)
+bounds validate --quick             # fast incremental check            (JSON)
+bounds validate --human             # same data, human-readable
+bounds preflight                    # 6 pre-PR checks, blocking
+bounds overview                     # project health dashboard
 ```
 
-> `.compact/` is hidden and **only** touched by the `compact` CLI — nothing auto-loads it, so it
+> `.bounds/` is hidden and **only** touched by the `bounds` CLI — nothing auto-loads it, so it
 > never silently inflates an agent's context.
 
 ---
 
 ## Token Cost Comparison
 
-The core claim: Compact reduces the context an AI agent needs to understand your codebase from
+The core claim: Bounds reduces the context an AI agent needs to understand your codebase from
 thousands of tokens to hundreds of bytes.
 
 ### Real measured data
 
 ```bash
-$ .venv/bin/compact describe models | wc -c
+$ .venv/bin/bounds describe models | wc -c
 1210 bytes
 
-$ wc -c src/compact/models.py
+$ wc -c src/bounds/models.py
 8475 bytes
 
-$ wc -c .compact/manifests/models.yaml
+$ wc -c .bounds/manifests/models.yaml
 554 bytes
 ```
 
@@ -189,21 +179,21 @@ That is an **85.7% reduction** in context.
 For the full architecture across all 8 subsystems:
 
 ```bash
-$ .venv/bin/compact list | wc -c
+$ .venv/bin/bounds list | wc -c
 1916 bytes
 ```
 
 **1,916 bytes** describes the complete architecture: 8 subsystems, their roles, criticality,
-dependency graph, and interface counts. Without Compact: grepping 18+ source files and mentally
+dependency graph, and interface counts. Without Bounds: grepping 18+ source files and mentally
 reconstructing the architecture.
 
-| Scenario | Without Compact | With Compact | Savings |
+| Scenario | Without Bounds | With Bounds | Savings |
 |----------|----------------|-------------|---------|
-| Understand one subsystem | Read 1-5 source files (2K-15K tokens) | `compact describe <name>` (~1,210 bytes) | ~85-99% |
-| Map all subsystems | Grep for `class\|def\|export` across codebase | `compact list` (~1,916 bytes) | Near-infinite |
-| Detect architecture drift | Manual code review | `compact validate` (structured report) | Subjective to deterministic |
-| CI gate for boundary violations | No automated option exists | `compact preflight` | Previously impossible |
-| Dependency blast radius | Trace imports manually | `compact describe` shows `consumed_by` | ~99% time reduction |
+| Understand one subsystem | Read 1-5 source files (2K-15K tokens) | `bounds describe <name>` (~1,210 bytes) | ~85-99% |
+| Map all subsystems | Grep for `class\|def\|export` across codebase | `bounds list` (~1,916 bytes) | Near-infinite |
+| Detect architecture drift | Manual code review | `bounds validate` (structured report) | Subjective to deterministic |
+| CI gate for boundary violations | No automated option exists | `bounds preflight` | Previously impossible |
+| Dependency blast radius | Trace imports manually | `bounds describe` shows `consumed_by` | ~99% time reduction |
 
 ---
 
@@ -214,10 +204,10 @@ Real wall-clock times (including Python interpreter startup) on M3 Pro, all meas
 
 | Command | Measured | Target | Status |
 |---------|----------|--------|--------|
-| `compact validate --quick` | ~353ms | <200ms | Near target (startup overhead included) |
-| `compact validate` (full) | ~207ms | <500ms | Pass |
-| `compact list` | ~250ms | <20ms | Headroom for optimization |
-| `compact describe <name>` | ~307ms | <50ms | Headroom for optimization |
+| `bounds validate --quick` | ~353ms | <200ms | Near target (startup overhead included) |
+| `bounds validate` (full) | ~207ms | <500ms | Pass |
+| `bounds list` | ~250ms | <20ms | Headroom for optimization |
+| `bounds describe <name>` | ~307ms | <50ms | Headroom for optimization |
 
 > Measurements include Python interpreter startup (~150ms). The actual validation logic completes
 > in ~130-200ms. Run on a warm cache, `--quick` mode re-extracts zero files when nothing has
@@ -251,8 +241,8 @@ YAML manifests ──parse──────> Declared exports  ───┘
 ```
 
 The engine checks both directions:
-- **Stale manifest**: compact claims an export the source doesn't provide.
-- **Incomplete manifest**: source exports something the compact doesn't declare.
+- **Stale manifest**: the manifest claims an export the source doesn't provide.
+- **Incomplete manifest**: source exports something the manifest doesn't declare.
 - **Cross-subsystem drift**: consumer declares an interface the provider no longer exports.
 
 ### Quick mode (incremental)
@@ -280,22 +270,27 @@ The engine checks both directions:
 
 ## For AI coding agents
 
-Compact is a plain CLI that emits JSON, so **any agent that can run a shell command can use it
+Bounds is a plain CLI that emits JSON, so **any agent that can run a shell command can use it
 today**. The universal instruction is the same:
 
-> Prefer `compact describe <name>` / `compact list` over reading raw source to understand
-> architecture. Output is JSON by default — parse it. Run `compact validate --quick` after edits
+> Prefer `bounds describe <name>` / `bounds list` over reading raw source to understand
+> architecture. Output is JSON by default — parse it. Run `bounds validate --quick` after edits
 > and treat a non-`fresh` `validation_status` as a signal to update the manifests.
+
+> **Claude Code plugin auto-detection.** Claude Code (and compatible agents) can auto-detect a
+> project's `.bounds/` directory and use the `bounds` CLI to load subsystem manifests on demand —
+> no manual wiring needed. When the directory is present, the agent reads boundary contracts
+> instead of raw source automatically.
 
 ### Integration by tool
 
 | Tool | Integration Method | Configuration File | Status |
 |------|-------------------|-------------------|--------|
 | **Claude Code** | Bash tool + project instructions | `CLAUDE.md` + `.claude/settings.json` | Verified |
-| **OpenCode** | Custom tool or slash command | `.opencode/tool/compact.ts` or `AGENTS.md` | Verified |
+| **OpenCode** | Custom tool or slash command | `.opencode/tool/bounds.ts` or `AGENTS.md` | Verified |
 | **Codex CLI** | Direct shell commands | `AGENTS.md` | Verified |
-| **Cursor** | Project rule (always-on) | `.cursor/rules/compact.mdc` | Verified |
-| **Windsurf** | Workspace rule | `.windsurf/rules/compact.md` | Verified |
+| **Cursor** | Project rule (always-on) | `.cursor/rules/bounds.mdc` | Verified |
+| **Windsurf** | Workspace rule | `.windsurf/rules/bounds.md` | Verified |
 | **Generic agents** | Standing instructions | `AGENTS.md` (cross-tool standard) | Verified |
 
 ### Drop-in instruction templates
@@ -306,21 +301,21 @@ Ready-to-copy agent-instruction templates live in [`templates/`](templates/):
 |------|-----|------------|
 | [`templates/AGENTS.md`](templates/AGENTS.md) | Codex CLI, OpenCode, generic agents | Copy the block into your project's `AGENTS.md` |
 | [`templates/CLAUDE.md`](templates/CLAUDE.md) | Claude Code | Append the section to your project's `CLAUDE.md` |
-| [`templates/.cursorrules`](templates/.cursorrules) | Cursor | Copy to `.cursorrules`, or adapt into `.cursor/rules/compact.mdc` |
+| [`templates/.cursorrules`](templates/.cursorrules) | Cursor | Copy to `.cursorrules`, or adapt into `.cursor/rules/bounds.mdc` |
 
-Each template tells the agent to query `compact describe` / `compact list` instead of
-reading raw source, and to run `compact validate --quick` after edits. The instructions are
+Each template tells the agent to query `bounds describe` / `bounds list` instead of
+reading raw source, and to run `bounds validate --quick` after edits. The instructions are
 identical in substance — only the file format differs per tool.
 
 Full integration guides with example configuration files are in
-[ARCHITECTURE.md](ARCHITECTURE.md). A native MCP server (`compact mcp`) is on the
+[ARCHITECTURE.md](ARCHITECTURE.md). A native MCP server (`bounds mcp`) is on the
 [roadmap](ROADMAP.md) for v0.3.
 
 ---
 
 ## Security
 
-Compact is designed with 7 security principles that are enforced from day one:
+Bounds is designed with 7 security principles that are enforced from day one:
 
 | # | Principle | Detail |
 |---|-----------|--------|
@@ -328,7 +323,7 @@ Compact is designed with 7 security principles that are enforced from day one:
 | 2 | **No network at runtime** | Zero telemetry, analytics, API calls, or phone-home. No opt-out toggle needed |
 | 3 | **No credential handling** | Never asks for, stores, or transmits API keys, tokens, or secrets |
 | 4 | **No eval/exec** | tree-sitter for parsing (safe C bindings), PyYAML for manifests |
-| 5 | **Hidden directory safety** | Writes only within `.compact/` — never outside the project root |
+| 5 | **Hidden directory safety** | Writes only within `.bounds/` — never outside the project root |
 | 6 | **Dependency minimums** | Minimum versions specified, not pinned — users get latest compatible deps |
 | 7 | **Signed releases (future)** | sigstore/cosign attestations planned for v0.2.0 |
 
@@ -340,19 +335,19 @@ For the full disclosure policy and distribution integrity details, see [SECURITY
 
 | Command | What it returns |
 |---------|-----------------|
-| `compact init --root` | Scaffolds `.compact/root.yaml` with project defaults |
-| `compact init --subsystem <name>` | Scaffolds `.compact/manifests/<name>.yaml`. `--namespace <ns>` tags it |
-| `compact list` | All subsystems with role, criticality, exposes, consumes, consumed_by. `--namespace <ns>` filters |
-| `compact describe <name>` | One subsystem's full manifest as JSON. `--namespace <ns>` describes every subsystem in a group instead |
-| `compact validate` | Full validation — all 6 checks. `--quick`, `--mode <m>`, `--enforce on\|off` |
-| `compact preflight` | 6 pre-PR checks in blocking mode |
-| `compact overview` | Project dashboard: subsystem health, file counts, language breakdown |
+| `bounds init --root` | Scaffolds `.bounds/root.yaml` with project defaults |
+| `bounds init --subsystem <name>` | Scaffolds `.bounds/manifests/<name>.yaml`. `--namespace <ns>` tags it |
+| `bounds list` | All subsystems with role, criticality, exposes, consumes, consumed_by. `--namespace <ns>` filters |
+| `bounds describe <name>` | One subsystem's full manifest as JSON. `--namespace <ns>` describes every subsystem in a group instead |
+| `bounds validate` | Full validation — all 6 checks. `--quick`, `--mode <m>`, `--enforce on\|off` |
+| `bounds preflight` | 6 pre-PR checks in blocking mode |
+| `bounds overview` | Project dashboard: subsystem health, file counts, language breakdown |
 
 `validate` and `preflight` also take file-selection and output toggles (all default off):
 
 | Flag | Effect |
 |------|--------|
-| `--include-ignored` | Scan files normally excluded by `.compactignore` |
+| `--include-ignored` | Scan files normally excluded by `.boundsignore` |
 | `--include-gitignored` | Scan files excluded by `.gitignore` |
 | `--follow-symlinks` | Follow external symlinks instead of skipping them with a warning |
 | `--fail-on-unowned` | Treat tracked source files outside every subsystem as a blocking error |
@@ -368,19 +363,19 @@ exit 1. Error codes are stable — see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 | Channel | Command | Status |
 |---------|---------|--------|
-| **pip** | `pip install compact` | Available |
-| **pipx** | `pipx install compact` | Available |
-| **Clone + pip** | `pip install git+https://github.com/Farzin312/compact.git` | Available |
-| **curl** | `curl -sSL https://compact.dev/install.sh \| bash` | Planned (v0.2.0) |
-| **Homebrew** | `brew install compact` | Planned (v0.2.0) |
-| **conda-forge** | `conda install compact` | Planned (v0.2.0) |
-| **Docker** | `docker pull compact/compact` | Planned (v0.2.0) |
+| **pip** | `pip install bounds` | Available |
+| **pipx** | `pipx install bounds` | Available |
+| **Clone + pip** | `pip install git+https://github.com/Farzin312/bounds.git` | Available |
+| **curl** | `curl -sSL https://bounds.dev/install.sh \| bash` | Planned (v0.2.0) |
+| **Homebrew** | `brew install bounds` | Planned (v0.2.0) |
+| **conda-forge** | `conda install bounds` | Planned (v0.2.0) |
+| **Docker** | `docker pull bounds/bounds` | Planned (v0.2.0) |
 
 ---
 
 ## Cross-platform support
 
-Fully supported on **Linux, macOS, and Windows**, Python **3.10--3.14**. Internally Compact uses
+Fully supported on **Linux, macOS, and Windows**, Python **3.10--3.14**. Internally Bounds uses
 `pathlib` everywhere and stores POSIX-normalized relative paths, so manifests are identical across
 operating systems.
 
@@ -404,7 +399,7 @@ Prebuilt tree-sitter grammars ship for every platform — installs never require
 | [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
 | [SECURITY.md](SECURITY.md) | Security principles, vulnerability disclosure, distribution integrity |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, coding standards, testing, PR workflow |
-| [CLAUDE.md](CLAUDE.md) | Project memory for agents and contributors working *on* Compact |
+| [CLAUDE.md](CLAUDE.md) | Project memory for agents and contributors working *on* Bounds |
 | [templates/](templates/) | Drop-in agent-instruction templates (AGENTS.md, CLAUDE.md, .cursorrules) |
 | [benchmarks/](benchmarks/v0.1.0/README.md) | Raw benchmark data, token cost analysis, performance measurements |
 
@@ -415,8 +410,8 @@ Prebuilt tree-sitter grammars ship for every platform — installs never require
 | Version | Focus | Key additions |
 |---------|-------|--------------|
 | **v0.1** (current) | Core engine, zero-LLM validation | Manifests, tree-sitter extraction, 6 checks, cache, quick mode, agent integration |
-| **v0.2** | Semantic tier + ergonomics | LLM enrichment (`--deep`), Go/Rust adapters, `compact migrate`, configurable ignores |
-| **v0.3** | Distribution + ecosystem | MCP server, GitHub Action, Homebrew formula, standalone binaries, `compact watch` |
+| **v0.2** | Semantic tier + ergonomics | LLM enrichment (`--deep`), Go/Rust adapters, `bounds migrate`, configurable ignores |
+| **v0.3** | Distribution + ecosystem | MCP server, GitHub Action, Homebrew formula, standalone binaries, `bounds watch` |
 
 Full details in [ROADMAP.md](ROADMAP.md).
 
@@ -424,10 +419,37 @@ Full details in [ROADMAP.md](ROADMAP.md).
 
 ## Contributing
 
-Compact is MIT-licensed and built to be extended. Adding a language adapter is one class
+Bounds is MIT-licensed and built to be extended. Adding a language adapter is one class
 (`extract.base.LanguageAdapter`) plus a registry entry. See [CONTRIBUTING.md](CONTRIBUTING.md)
 and [CLAUDE.md](CLAUDE.md) for development setup, coding standards, testing guide, and PR workflow.
-Issues and PRs welcome at [github.com/Farzin312/compact](https://github.com/Farzin312/compact).
+Issues and PRs welcome at [github.com/Farzin312/bounds](https://github.com/Farzin312/bounds).
+
+## Appendix: Bounds vs code graphs
+
+<details>
+<summary><b>Full side-by-side comparison</b></summary>
+
+| Dimension | CodeGraph / TSA / roam-code | Bounds |
+|-----------|---------------------------|---------|
+| Core approach | Extract graph from source | Declare intent in YAML, validate against source |
+| What you get | What code exists | What code SHOULD exist |
+| Granularity | Functions, classes, imports | Subsystem boundaries, contracts, dependencies |
+| Token cost | O(full symbol count) | O(public API count) — 5-20 lines per subsystem |
+| Validation | None (graph = truth) | Drift detection, contract compliance, boundary checks |
+| LLM dependency | High (embeddings, semantic search) | Zero for structural path |
+| CI integration | Analysis step | Gate step — can block PRs |
+| Setup time | Server config, embedding indexing | `pip install bounds` + `bounds init` |
+
+**Complementary, not competitive.** Bounds does not compete with CodeGraph — these are tools at
+different layers. CodeGraph/TSA/roam-code answer "What's in this codebase?" (detailed, expensive,
+exploratory); Bounds answers "What SHOULD this codebase's architecture look like?" (concise,
+deterministic, enforceable). The workflow: use CodeGraph to explore, use Bounds to validate. An AI
+agent that knows the boundaries (via Bounds) uses CodeGraph more efficiently — it reads the map
+first, then digs into specific symbols rather than searching blindly.
+
+</details>
+
+---
 
 ## License
 

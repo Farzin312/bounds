@@ -6,7 +6,7 @@ import json
 
 from click.testing import CliRunner
 
-from compact.cli import main
+from bounds.cli import main
 
 
 def _json(result):
@@ -66,7 +66,7 @@ def test_describe_unknown_subsystem(sample_project, monkeypatch):
 def test_describe_namespace_groups(py_project, monkeypatch):
     # Tag both subsystems into one namespace, then describe the group.
     for n in ("models", "svc"):
-        p = py_project / ".compact" / "manifests" / f"{n}.yaml"
+        p = py_project / ".bounds" / "manifests" / f"{n}.yaml"
         p.write_text("namespace: core\n" + p.read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.chdir(py_project)
     result = CliRunner().invoke(main, ["describe", "--namespace", "core"])
@@ -110,7 +110,7 @@ def test_validate_ci_output(sample_project, monkeypatch):
 
 
 def test_validate_ci_fatal_stays_plaintext(tmp_path, monkeypatch):
-    # No .compact/ is fatal; under --ci it must stay tab-delimited, not fall back to JSON.
+    # No .bounds/ is fatal; under --ci it must stay tab-delimited, not fall back to JSON.
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["validate", "--ci"])
     assert result.exit_code == 2
@@ -135,7 +135,7 @@ def test_validate_fail_on_unowned(py_project, git_init, monkeypatch):
 
 def _add_entry_points(root, *globs):
     """Append an `entry_points:` list to a project's root.yaml in place."""
-    rootf = root / ".compact" / "root.yaml"
+    rootf = root / ".bounds" / "root.yaml"
     line = "entry_points: [" + ", ".join(globs) + "]\n"
     rootf.write_text(rootf.read_text(encoding="utf-8") + line, encoding="utf-8")
 
@@ -222,12 +222,12 @@ def test_init_root_then_subsystem(tmp_path, monkeypatch):
 
     r1 = runner.invoke(main, ["init", "--root"])
     assert r1.exit_code == 0
-    assert (tmp_path / ".compact" / "root.yaml").exists()
+    assert (tmp_path / ".bounds" / "root.yaml").exists()
     assert _json(r1)["created"]
 
     r2 = runner.invoke(main, ["init", "--subsystem", "widgets"])
     assert r2.exit_code == 0
-    assert (tmp_path / ".compact" / "manifests" / "widgets.yaml").exists()
+    assert (tmp_path / ".bounds" / "manifests" / "widgets.yaml").exists()
 
     # the scaffolded project is now discoverable
     r3 = runner.invoke(main, ["list"])
@@ -247,7 +247,7 @@ def test_init_root_idempotent(tmp_path, monkeypatch):
     runner.invoke(main, ["init", "--root"])
     second = runner.invoke(main, ["init", "--root"])
     assert second.exit_code == 0
-    assert (tmp_path / ".compact" / "root.yaml") in [
-        tmp_path / ".compact" / "root.yaml"
+    assert (tmp_path / ".bounds" / "root.yaml") in [
+        tmp_path / ".bounds" / "root.yaml"
     ]  # exists, unchanged
     assert _json(second)["skipped"]  # reported as skipped, not recreated

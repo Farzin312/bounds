@@ -1,4 +1,4 @@
-# Compact — Roadmap
+# Bounds — Roadmap
 
 What's in the box today, and where it's going. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design
 and [README.md](README.md) for usage.
@@ -15,12 +15,12 @@ call and trust. Everything here is shipped and tested.
 - Python (tree-sitter-python)
 
 **Commands**
-- `compact init --root` / `compact init --subsystem <name>` — scaffold `.compact/`
-- `compact list` — discover subsystems
-- `compact describe <name>` — one subsystem as JSON (`--deep` reserved; see below)
-- `compact validate` — full validation (`--quick`, `--mode <m>`, `--enforce on|off`, `--base <ref>`)
-- `compact preflight` — the 6 pre-PR checks, blocking
-- `compact overview` — project health dashboard
+- `bounds init --root` / `bounds init --subsystem <name>` — scaffold `.bounds/`
+- `bounds list` — discover subsystems
+- `bounds describe <name>` — one subsystem as JSON (`--deep` reserved; see below)
+- `bounds validate` — full validation (`--quick`, `--mode <m>`, `--enforce on|off`, `--base <ref>`)
+- `bounds preflight` — the 6 pre-PR checks, blocking
+- `bounds overview` — project health dashboard
 
 **Engine**
 - 6 checks: structural drift, boundary compliance, contract compliance, cross-subsystem impact,
@@ -44,31 +44,31 @@ call and trust. Everything here is shipped and tested.
 
 - **Tier 3 for real:** `describe --deep` calls a provider-agnostic LLM to add type signatures and intent
   summaries to declared interfaces. Cached, opt-in, token-metered. Never on a structural path.
-- `compact migrate` — schema version upgrades for `.compact/` manifests.
+- `bounds migrate` — schema version upgrades for `.bounds/` manifests.
 - Configurable ignores / include globs in `root.yaml`.
 - More languages: Go, Rust, Java (new `LanguageAdapter` subclasses).
 - Undeclared-export hints promoted from info → optional enforcement.
 
 ## v0.3 — distribution & ecosystem
 
-- **MCP server wrapper** (`compact mcp`) exposing `list` / `describe` / `validate` as MCP tools, so
-  MCP-native agents (Claude Code, Cursor, Windsurf, Codex) can call Compact without shelling out.
+- **MCP server wrapper** (`bounds mcp`) exposing `list` / `describe` / `validate` as MCP tools, so
+  MCP-native agents (Claude Code, Cursor, Windsurf, Codex) can call Bounds without shelling out.
 - Official **GitHub Action** and **pre-commit hook** for the preflight gate.
 - **Homebrew formula** and prebuilt standalone binaries (pipx remains the cross-platform default).
-- `compact watch` — re-validate on file change.
+- `bounds watch` — re-validate on file change.
 
 ## Later / exploratory
 
 - Nested subsystem topology (current model is intentionally flat).
 - Web dashboard for `overview` (interactive subsystem graph).
 - Language-server integration for in-editor boundary diagnostics.
-- Auto-suggest manifests from a first scan (`compact init --infer`).
+- Auto-suggest manifests from a first scan (`bounds init --infer`).
 
 ---
 
 ## Non-goals (by design)
 
-- Compact is **not** a linter, type checker, or test runner — it validates *architecture boundaries*,
+- Bounds is **not** a linter, type checker, or test runner — it validates *architecture boundaries*,
   not code correctness.
 - The structural engine will **never** depend on an LLM. Determinism and zero token cost are the point.
-- `.compact/` is **not** auto-discovered by other tooling — access is CLI-only and explicit.
+- `.bounds/` is **not** auto-discovered by other tooling — access is CLI-only and explicit.

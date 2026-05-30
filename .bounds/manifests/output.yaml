@@ -3,7 +3,7 @@ role: library
 criticality: leaf
 description: JSON and human-readable rendering of reports and structured errors, plus exit-code mapping.
 paths:
-  - src/compact/output.py
+  - src/bounds/output.py
 exposes:
   - { name: emit, kind: function }
 consumes:

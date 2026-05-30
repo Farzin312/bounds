@@ -23,5 +23,5 @@ jobs:
           pip install .[dev]
       - name: Run tests
         run: pytest -v -n auto
-      - name: Self-test (validate Compact on Compact)
-        run: compact validate --quick
+      - name: Self-test (validate Bounds on Bounds)
+        run: bounds validate --quick

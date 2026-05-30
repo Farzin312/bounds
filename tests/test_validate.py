@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from compact import errors
-from compact.cache import store
-from compact.manifest import loader, schema
-from compact.models import (
+from bounds import config, errors
+from bounds.cache import store
+from bounds.manifest import loader, schema
+from bounds.models import (
     Consumes,
     ExtractResult,
     ImportRef,
@@ -18,9 +18,9 @@ from compact.models import (
     RootManifest,
     Symbol,
 )
-from compact.models import SubsystemCompact as Sub
-from compact.validate import engine
-from compact.validate.checks import (
+from bounds.models import SubsystemCompact as Sub
+from bounds.validate import engine
+from bounds.validate.checks import (
     CheckContext,
     check_boundary,
     check_contract,
@@ -30,7 +30,7 @@ from compact.validate.checks import (
     check_structural_drift,
     resolve_import,
 )
-from compact.validate.propagation import build_consumer_index, propagate
+from bounds.validate.propagation import build_consumer_index, propagate
 
 
 def _ctx(subsystems, extracts=None, file_owner=None, dirty=None, propagated=None):
@@ -67,15 +67,70 @@ def test_load_all_and_consumed_by(sample_project):
 
 
 def test_load_root_missing_raises(tmp_path):
-    with pytest.raises(errors.CompactError) as exc:
+    with pytest.raises(errors.BoundsError) as exc:
         loader.load_root(tmp_path)
     assert exc.value.code == errors.E_MANIFEST_NOT_FOUND
 
 
 def test_load_subsystem_unknown_raises(sample_project):
-    with pytest.raises(errors.CompactError) as exc:
+    with pytest.raises(errors.BoundsError) as exc:
         loader.load_subsystem(sample_project, "ghost")
     assert exc.value.code == errors.E_SUBSYSTEM_NOT_FOUND
+
+
+# ===========================================================================
+# Backward compatibility — legacy `.compact/` layout
+# ===========================================================================
+def _write_legacy_project(root: Path) -> None:
+    """Scaffold a minimal one-subsystem project under the legacy ``.compact/`` dir."""
+    (root / ".compact" / "manifests").mkdir(parents=True)
+    (root / ".compact" / "root.yaml").write_text(
+        'version: "1"\nproject: legacy\nlanguages: [python]\nenforce: "off"\n'
+        "subsystems: [models]\n",
+        encoding="utf-8",
+    )
+    (root / ".compact" / "manifests" / "models.yaml").write_text(
+        "name: models\nrole: library\ncriticality: core\npaths: [src/models]\n"
+        "exposes:\n  - { name: Thing, kind: class }\nconsumes: []\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "models").mkdir(parents=True)
+    (root / "src" / "models" / "thing.py").write_text("class Thing:\n    pass\n", encoding="utf-8")
+
+
+def test_legacy_compact_dir_is_discovered(tmp_path):
+    # A project carrying only the pre-rename .compact/ layout is still found and resolved.
+    proj = tmp_path / "legacy"
+    proj.mkdir()
+    _write_legacy_project(proj)
+    assert loader.find_root(proj / "src" / "models") == proj
+    assert config.uses_legacy_layout(proj) is True
+    assert config.config_dir(proj).name == config.LEGACY_DIR
+
+
+def test_legacy_compact_dir_warns_once(tmp_path, capsys, monkeypatch):
+    # Resolving a legacy layout prints exactly one deprecation notice to stderr.
+    proj = tmp_path / "legacy"
+    proj.mkdir()
+    _write_legacy_project(proj)
+    # Reset the one-shot guard via monkeypatch so it auto-restores and this test stays
+    # order-independent regardless of other legacy-layout tests in the session.
+    monkeypatch.setattr(config, "_legacy_warning_emitted", False)
+    config.config_dir(proj)
+    config.config_dir(proj)  # repeated resolution must not warn again
+    err = capsys.readouterr().err
+    assert err.count("deprecated") == 1
+    assert config.LEGACY_DIR in err and config.BOUNDS_DIR in err
+
+
+def test_legacy_compact_dir_validates(tmp_path):
+    # The validation engine runs end-to-end against a legacy .compact/ project.
+    proj = tmp_path / "legacy"
+    proj.mkdir()
+    _write_legacy_project(proj)
+    report = engine.run(proj, mode="full")
+    assert report.status == "fresh"
+    assert report.errors() == []
 
 
 # ===========================================================================
@@ -125,8 +180,8 @@ def test_resolve_relative_typescript_index():
 
 
 def test_resolve_python_dotted_relative():
-    known = {"src/compact/models": "src/compact/models.py"}
-    assert resolve_import("src/compact/extract/base.py", "..models", known) == "src/compact/models.py"
+    known = {"src/bounds/models": "src/bounds/models.py"}
+    assert resolve_import("src/bounds/extract/base.py", "..models", known) == "src/bounds/models.py"
 
 
 def test_resolve_external_is_none():
@@ -330,8 +385,8 @@ def test_cache_load_tolerates_missing(tmp_path):
 
 
 def test_cache_load_tolerates_corrupt(tmp_path):
-    (tmp_path / ".compact").mkdir()
-    (tmp_path / ".compact" / "state.json").write_text("{ not valid json", encoding="utf-8")
+    (tmp_path / ".bounds").mkdir()
+    (tmp_path / ".bounds" / "state.json").write_text("{ not valid json", encoding="utf-8")
     assert store.load_state(tmp_path).files == {}
 
 
@@ -389,7 +444,7 @@ def test_engine_entry_point_not_blocking(py_project, git_init):
     # the orphan blocks (error), the entry point is reported but never blocks (warning).
     (py_project / "app.py").write_text("def main():\n    pass\n", encoding="utf-8")
     (py_project / "orphan.py").write_text("def stray():\n    pass\n", encoding="utf-8")
-    rootf = py_project / ".compact" / "root.yaml"
+    rootf = py_project / ".bounds" / "root.yaml"
     rootf.write_text(rootf.read_text(encoding="utf-8") + "entry_points: [app.py]\n", encoding="utf-8")
     git_init(py_project)
 
@@ -404,7 +459,7 @@ def test_engine_entry_point_not_blocking(py_project, git_init):
 def test_engine_entry_point_alone_is_clean(py_project, git_init):
     # When the only unowned file is an entry point, --fail-on-unowned does not block.
     (py_project / "manage.py").write_text("def main():\n    pass\n", encoding="utf-8")
-    rootf = py_project / ".compact" / "root.yaml"
+    rootf = py_project / ".bounds" / "root.yaml"
     rootf.write_text(rootf.read_text(encoding="utf-8") + "entry_points: [manage.py]\n", encoding="utf-8")
     git_init(py_project)
 

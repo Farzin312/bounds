@@ -1,4 +1,4 @@
-# CLAUDE.md — project memory for Compact
+# CLAUDE.md — project memory for Bounds
 
 Working guide for agents and contributors in this repo. **This is not the product doc or the design doc.**
 - Product pitch, install, agent integration → [README.md](README.md)
@@ -7,18 +7,18 @@ Working guide for agents and contributors in this repo. **This is not the produc
 
 ## What this repo is
 
-Compact is a zero-LLM CLI that extracts a codebase's structural surface (exported symbols + imports)
-with tree-sitter and validates it against human-declared subsystem manifests in `.compact/`. Python,
-`src/` layout, package `compact`, console entry `compact = compact.cli:main`.
+Bounds is a zero-LLM CLI that extracts a codebase's structural surface (exported symbols + imports)
+with tree-sitter and validates it against human-declared subsystem manifests in `.bounds/`. Python,
+`src/` layout, package `bounds`, console entry `bounds = bounds.cli:main`.
 
 ## Dev environment & commands
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"          # editable install + pytest
-compact --help                   # smoke test the CLI
+bounds --help                    # smoke test the CLI
 pytest                           # run the test suite
-compact validate --human         # run Compact on itself (bootstrap demo)
+bounds validate --human          # run Bounds on itself (bootstrap demo)
 ```
 
 A `.venv/` already exists in this workspace; prefer `.venv/bin/python` / `.venv/bin/pytest`.
@@ -39,10 +39,10 @@ A `.venv/` already exists in this workspace; prefer `.venv/bin/python` / `.venv/
   hard-coded `/` or `\`. Globbing skips `config.DEFAULT_IGNORES`.
 - **Fail soft, report hard.** A single unparsable/unsupported file becomes an `Issue`
   (`E_EXTRACTION_FAILED` / `E_UNSUPPORTED_LANGUAGE`), never a crash. Only genuinely fatal conditions
-  (no `.compact/`, bad YAML, unknown subsystem) raise `CompactError`.
+  (no `.bounds/`, bad YAML, unknown subsystem) raise `BoundsError`.
 - **Dataclasses.** Every model in `models.py` carries `to_dict()`; manifest-tier models also carry
   `from_dict()`. Cache round-trips go through `FileRecord.from_result`/`to_result`.
-- **Hidden `.compact/`.** Created only by `compact init`; discovered only by walking up from CWD
+- **Hidden `.bounds/`.** Created only by `bounds init`; discovered only by walking up from CWD
   (`manifest.loader.find_root`). Never auto-load it from other tooling.
 
 ## Where things live

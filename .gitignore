@@ -21,7 +21,8 @@ __editable__.*
 .mypy_cache/
 .ruff_cache/
 
-# Compact's own cache (state is regenerated; never committed)
+# Bounds' own cache (state is regenerated; never committed)
+.bounds/state.json
 .compact/state.json
 
 # OS / editor

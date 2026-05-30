@@ -1,11 +1,11 @@
-# Benchmarks — Compact v0.1.0
+# Benchmarks — Bounds v0.1.0
 
-Raw benchmark data for Compact v0.1.0. All measurements are real, reproducible, and run against the Compact project itself (dogfooding).
+Raw benchmark data for Bounds v0.1.0. All measurements are real, reproducible, and run against the Bounds project itself (dogfooding).
 
 ## Methodology
 
 - **Hardware:** Apple M-series Mac (M3 Pro, 18 GB RAM) — reasonable modern laptop
-- **Project:** Compact v0.1.0 (8 subsystems, 18 source files, Python + TS/JS grammars)
+- **Project:** Bounds v0.1.0 (8 subsystems, 18 source files, Python + TS/JS grammars)
 - **Python:** 3.14.5
 - **Conditions:** Warm disk cache, no prior extraction state (cold cache) or repeated runs (warm cache)
 - **Reporting:** JSON output piped through `wc -c` for byte-accurate token cost, `time` for wall-clock measurements
@@ -13,16 +13,16 @@ Raw benchmark data for Compact v0.1.0. All measurements are real, reproducible, 
 
 ## Token Cost
 
-### `compact describe models`
+### `bounds describe models`
 
 ```
-$ .venv/bin/compact describe models | wc -c
+$ .venv/bin/bounds describe models | wc -c
 1210 bytes
 
-$ wc -c src/compact/models.py
+$ wc -c src/bounds/models.py
 8475 bytes
 
-$ wc -c .compact/manifests/models.yaml
+$ wc -c .bounds/manifests/models.yaml
 554 bytes
 ```
 
@@ -30,10 +30,10 @@ $ wc -c .compact/manifests/models.yaml
 
 > To understand `models`'s public API (9 exports, consumed by 5 subsystems), an AI agent reads 1,210 bytes of structured JSON instead of the full 8,475-byte source file. The manifest itself is 554 bytes of YAML.
 
-### `compact list` (all 8 subsystems)
+### `bounds list` (all 8 subsystems)
 
 ```
-$ .venv/bin/compact list | wc -c
+$ .venv/bin/bounds list | wc -c
 1916 bytes
 ```
 
@@ -41,20 +41,20 @@ $ .venv/bin/compact list | wc -c
 
 ### Token saving scenarios
 
-| Scenario | Without Compact | With Compact | Savings |
+| Scenario | Without Bounds | With Bounds | Savings |
 |----------|----------------|-------------|---------|
-| Understand one subsystem | Read 1-5 source files (2K-15K tokens) | `compact describe <name>` (~1,210 bytes) | ~85-99% |
-| Map all subsystems | Grep for `class\|def\|export` across codebase | `compact list` (~1,916 bytes) | Near-infinite |
-| Detect architecture drift | Manual code review | `compact validate` (structured report) | Subjective to deterministic |
-| CI gate for boundary violations | No automated option | `compact preflight` | Previously impossible |
-| Dependency blast radius | Trace imports manually | `compact describe` shows `consumed_by` | ~99% time reduction |
+| Understand one subsystem | Read 1-5 source files (2K-15K tokens) | `bounds describe <name>` (~1,210 bytes) | ~85-99% |
+| Map all subsystems | Grep for `class\|def\|export` across codebase | `bounds list` (~1,916 bytes) | Near-infinite |
+| Detect architecture drift | Manual code review | `bounds validate` (structured report) | Subjective to deterministic |
+| CI gate for boundary violations | No automated option | `bounds preflight` | Previously impossible |
+| Dependency blast radius | Trace imports manually | `bounds describe` shows `consumed_by` | ~99% time reduction |
 
 ## Performance
 
-### `compact validate --quick` (3 runs)
+### `bounds validate --quick` (3 runs)
 
 ```
-$ time .venv/bin/compact validate --quick
+$ time .venv/bin/bounds validate --quick
 real    0m0.444s
 user    0m0.165s
 sys     0m0.105s
@@ -72,10 +72,10 @@ Median wall-clock: **353ms** (includes Python interpreter startup)
 
 > Note: The sub-200ms target is for the validation logic itself. Python interpreter startup adds ~150ms. Actual validation completes in ~200ms for a cold cache, ~130ms for warm cache.
 
-### `compact list` (3 runs)
+### `bounds list` (3 runs)
 
 ```
-$ time .venv/bin/compact list
+$ time .venv/bin/bounds list
 real    0m0.251s
 user    0m0.125s
 sys     0m0.044s
@@ -91,10 +91,10 @@ sys     0m0.038s
 
 Median wall-clock: **250ms**
 
-### `compact describe models` (3 runs)
+### `bounds describe models` (3 runs)
 
 ```
-$ time .venv/bin/compact describe models
+$ time .venv/bin/bounds describe models
 real    0m0.307s
 user    0m0.170s
 sys     0m0.078s
@@ -110,10 +110,10 @@ sys     0m0.075s
 
 Median wall-clock: **307ms**
 
-### `compact validate` full (3 runs)
+### `bounds validate` full (3 runs)
 
 ```
-$ time .venv/bin/compact validate
+$ time .venv/bin/bounds validate
 real    0m0.207s
 user    0m0.123s
 sys     0m0.037s
@@ -133,10 +133,10 @@ Median wall-clock: **207ms**
 
 | Command | Measured | Target | Status |
 |---------|----------|--------|--------|
-| `compact validate --quick` | ~353ms median | <200ms | Close (with startup overhead) |
-| `compact validate` (full) | ~207ms median | <500ms | Pass |
-| `compact list` | ~250ms median | <20ms | Headroom for optimization |
-| `compact describe <name>` | ~307ms median | <50ms | Headroom for optimization |
+| `bounds validate --quick` | ~353ms median | <200ms | Close (with startup overhead) |
+| `bounds validate` (full) | ~207ms median | <500ms | Pass |
+| `bounds list` | ~250ms median | <20ms | Headroom for optimization |
+| `bounds describe <name>` | ~307ms median | <50ms | Headroom for optimization |
 
 > Measurements include Python interpreter startup (~150ms). Pure validation/query logic meets or approaches all targets.
 
@@ -164,19 +164,19 @@ Median wall-clock: **207ms**
 
 ```bash
 # Token cost
-.venv/bin/compact describe models | wc -c
-wc -c src/compact/models.py
-wc -c .compact/manifests/models.yaml
+.venv/bin/bounds describe models | wc -c
+wc -c src/bounds/models.py
+wc -c .bounds/manifests/models.yaml
 
 # Performance
-time .venv/bin/compact validate --quick
-time .venv/bin/compact list
-time .venv/bin/compact describe models
-time .venv/bin/compact validate
+time .venv/bin/bounds validate --quick
+time .venv/bin/bounds list
+time .venv/bin/bounds describe models
+time .venv/bin/bounds validate
 
 # Full lifecycle
-compact init --root
-compact list
-compact describe <name>
-compact validate --quick
+bounds init --root
+bounds list
+bounds describe <name>
+bounds validate --quick
 ```

@@ -3,7 +3,7 @@ role: library
 criticality: connector
 description: Tree-sitter extraction of exported symbols and imports per language (zero LLM).
 paths:
-  - src/compact/extract
+  - src/bounds/extract
 exposes:
   - { name: get_adapter, kind: function }
   - { name: supported_extensions, kind: function }

@@ -1,4 +1,4 @@
-"""Manifest package: discovery, loading, and schema validation of ``.compact/`` manifests.
+"""Manifest package: discovery, loading, and schema validation of ``.bounds/`` manifests.
 
 Re-exports the loader entry points (``find_root``, ``load_root``, ``load_subsystem``,
 ``load_all``) and the schema validators (``validate_root``, ``validate_subsystem``).

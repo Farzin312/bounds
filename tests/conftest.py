@@ -11,11 +11,11 @@ import pytest
 TESTS_DIR = Path(__file__).parent
 SAMPLE_PROJECT = TESTS_DIR / "fixtures" / "sample_project"
 
-_GIT_ENV = ["-c", "user.email=test@compact.dev", "-c", "user.name=Compact Test"]
+_GIT_ENV = ["-c", "user.email=test@bounds.dev", "-c", "user.name=Bounds Test"]
 
 
 def _strip_state(root: Path) -> None:
-    state = root / ".compact" / "state.json"
+    state = root / ".bounds" / "state.json"
     if state.exists():
         state.unlink()
 
@@ -42,18 +42,18 @@ def git_sample_project(sample_project: Path) -> Path:
 def py_project(tmp_path: Path) -> Path:
     """A minimal two-subsystem Python project: `models` (core) consumed by `svc` (service)."""
     root = tmp_path / "proj"
-    (root / ".compact" / "manifests").mkdir(parents=True)
-    (root / ".compact" / "root.yaml").write_text(
+    (root / ".bounds" / "manifests").mkdir(parents=True)
+    (root / ".bounds" / "root.yaml").write_text(
         'version: "1"\nproject: proj\nlanguages: [python]\nenforce: "off"\n'
         "subsystems: [models, svc]\n",
         encoding="utf-8",
     )
-    (root / ".compact" / "manifests" / "models.yaml").write_text(
+    (root / ".bounds" / "manifests" / "models.yaml").write_text(
         "name: models\nrole: library\ncriticality: core\npaths: [src/models]\n"
         "exposes:\n  - { name: Thing, kind: class }\nconsumes: []\n",
         encoding="utf-8",
     )
-    (root / ".compact" / "manifests" / "svc.yaml").write_text(
+    (root / ".bounds" / "manifests" / "svc.yaml").write_text(
         "name: svc\nrole: service\ncriticality: leaf\npaths: [src/svc]\nexposes: []\n"
         "consumes:\n  - { subsystem: models, via: models, interfaces: [Thing] }\n",
         encoding="utf-8",

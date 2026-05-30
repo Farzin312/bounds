@@ -89,7 +89,7 @@ def validate_root(data: dict) -> list[Issue]:
 
 
 def validate_subsystem(name: str, data: dict) -> list[Issue]:
-    """Validate a subsystem-compact dict, returning schema Issues (never raises).
+    """Validate a subsystem-manifest dict, returning schema Issues (never raises).
 
     Enforces: ``name`` present (inferred from ``name`` arg if YAML omits it),
     ``role`` in ``config.VALID_ROLES``, ``criticality`` optional but valid if present
@@ -101,9 +101,9 @@ def validate_subsystem(name: str, data: dict) -> list[Issue]:
             Issue(
                 code=errors.E_SCHEMA_INVALID,
                 severity="error",
-                message=f"subsystem '{name}' compact.yaml must be a YAML mapping",
+                message=f"subsystem '{name}' manifest must be a YAML mapping",
                 subsystem=name,
-                fix="rewrite compact.yaml as a top-level mapping with name/role keys",
+                fix="rewrite the subsystem manifest as a top-level mapping with name/role keys",
             )
         ]
 
@@ -117,7 +117,7 @@ def validate_subsystem(name: str, data: dict) -> list[Issue]:
                 severity="error",
                 message="subsystem missing required key 'name'",
                 subsystem=name or None,
-                fix="add `name: <subsystem>` to compact.yaml",
+                fix="add `name: <subsystem>` to the subsystem manifest",
             )
         )
 

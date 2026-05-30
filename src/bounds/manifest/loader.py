@@ -1,12 +1,13 @@
-"""Discover the ``.compact/`` directory and load root + subsystem manifests.
+"""Discover the ``.bounds/`` directory and load root + subsystem manifests.
 
-Discovery walks up from a starting directory looking for ``.compact/root.yaml``.
-Loading reads YAML with :func:`yaml.safe_load`, maps it onto the manifest dataclasses,
-and (for :func:`load_all`) runs schema validation and back-fills the auto-derived
-``consumed_by`` inverse of each subsystem's ``consumes`` edges.
+Discovery walks up from a starting directory looking for ``.bounds/root.yaml`` (or the
+legacy ``.compact/root.yaml`` — see :func:`bounds.config.config_dir`). Loading reads YAML
+with :func:`yaml.safe_load`, maps it onto the manifest dataclasses, and (for
+:func:`load_all`) runs schema validation and back-fills the auto-derived ``consumed_by``
+inverse of each subsystem's ``consumes`` edges.
 
 Fatal cases — a missing root manifest, a YAML parse failure, or a missing subsystem
-requested by name — raise :class:`CompactError`. Within :func:`load_all`, a subsystem
+requested by name — raise :class:`BoundsError`. Within :func:`load_all`, a subsystem
 that is declared in the root but cannot be loaded degrades to an ``Issue`` rather than
 aborting the whole load.
 """
@@ -23,40 +24,44 @@ from . import schema
 
 
 def find_root(start: Path) -> Path | None:
-    """Walk ``start`` and its parents for the first dir holding ``.compact/root.yaml``.
+    """Walk ``start`` and its parents for the first dir holding ``.bounds/root.yaml``.
 
-    Returns the directory that *holds* ``.compact`` (the project root), or ``None`` if no
-    such ancestor exists. ``start`` may be a file or directory; its real directory is used.
+    Returns the directory that *holds* ``.bounds`` (the project root), or ``None`` if no
+    such ancestor exists. The legacy ``.compact/root.yaml`` is also accepted for backward
+    compatibility, with ``.bounds`` preferred when both are present at the same ancestor.
+    ``start`` may be a file or directory; its real directory is used.
     """
     start = Path(start)
     base = start if start.is_dir() else start.parent
     base = base.resolve()
     for candidate in (base, *base.parents):
-        if (candidate / config.COMPACT_DIR / config.ROOT_FILE).is_file():
-            return candidate
+        for dirname in (config.BOUNDS_DIR, config.LEGACY_DIR):
+            if (candidate / dirname / config.ROOT_FILE).is_file():
+                return candidate
     return None
 
 
 def load_root(project_root: Path) -> RootManifest:
-    """Load ``<project_root>/.compact/root.yaml`` into a :class:`RootManifest`.
+    """Load ``<project_root>/.bounds/root.yaml`` into a :class:`RootManifest`.
 
-    Raises :class:`CompactError` with ``E_MANIFEST_NOT_FOUND`` if the file is absent or
+    Reads the legacy ``.compact/root.yaml`` instead when only it is present. Raises
+    :class:`BoundsError` with ``E_MANIFEST_NOT_FOUND`` if the file is absent or
     ``E_MANIFEST_PARSE_ERROR`` if YAML parsing fails.
     """
-    path = Path(project_root) / config.COMPACT_DIR / config.ROOT_FILE
+    path = config.config_dir(project_root) / config.ROOT_FILE
     data = _load_yaml_mapping(
         path,
         not_found_code=errors.E_MANIFEST_NOT_FOUND,
         not_found_message=f"no root manifest at {path.as_posix()}",
-        not_found_fix="run `compact init --root` to scaffold .compact/root.yaml",
+        not_found_fix="run `bounds init --root` to scaffold .bounds/root.yaml",
     )
     return RootManifest.from_dict(data, source_path=path.as_posix())
 
 
 def load_subsystem(project_root: Path, name: str) -> SubsystemCompact:
-    """Load `.compact/manifests/<name>.yaml` into a :class:`SubsystemCompact`.
+    """Load `.bounds/manifests/<name>.yaml` into a :class:`SubsystemCompact`.
 
-    Raises :class:`CompactError` with ``E_SUBSYSTEM_NOT_FOUND`` if the file is absent or
+    Raises :class:`BoundsError` with ``E_SUBSYSTEM_NOT_FOUND`` if the file is absent or
     ``E_MANIFEST_PARSE_ERROR`` if YAML parsing fails. The returned subsystem's ``name``
     defaults to ``name`` when the YAML omits it.
     """
@@ -65,7 +70,7 @@ def load_subsystem(project_root: Path, name: str) -> SubsystemCompact:
         path,
         not_found_code=errors.E_SUBSYSTEM_NOT_FOUND,
         not_found_message=f"no subsystem '{name}' at {path.as_posix()}",
-        not_found_fix=f"run `compact init --subsystem {name}` to scaffold it",
+        not_found_fix=f"run `bounds init --subsystem {name}` to scaffold it",
     )
     if not data.get("name"):
         data = {**data, "name": name}
@@ -111,12 +116,7 @@ def load_all(
 # Internal helpers
 # ---------------------------------------------------------------------------
 def _subsystem_path(project_root: Path, name: str) -> Path:
-    return (
-        Path(project_root)
-        / config.COMPACT_DIR
-        / config.MANIFESTS_DIR
-        / f"{name}.yaml"
-    )
+    return config.config_dir(project_root) / config.MANIFESTS_DIR / f"{name}.yaml"
 
 
 def _load_yaml_mapping(
@@ -126,14 +126,14 @@ def _load_yaml_mapping(
     not_found_message: str,
     not_found_fix: str,
 ) -> dict:
-    """Read and parse a YAML mapping file, raising :class:`CompactError` on failure."""
+    """Read and parse a YAML mapping file, raising :class:`BoundsError` on failure."""
     if not path.is_file():
-        raise errors.CompactError(not_found_code, not_found_message, fix=not_found_fix)
+        raise errors.BoundsError(not_found_code, not_found_message, fix=not_found_fix)
     try:
         text = path.read_text(encoding="utf-8")
         data = yaml.safe_load(text)
     except (OSError, yaml.YAMLError) as exc:
-        raise errors.CompactError(
+        raise errors.BoundsError(
             errors.E_MANIFEST_PARSE_ERROR,
             f"failed to parse {path.as_posix()}: {exc}",
             fix="fix the YAML syntax in this manifest",
@@ -141,7 +141,7 @@ def _load_yaml_mapping(
     if data is None:
         data = {}
     if not isinstance(data, dict):
-        raise errors.CompactError(
+        raise errors.BoundsError(
             errors.E_MANIFEST_PARSE_ERROR,
             f"{path.as_posix()} must contain a YAML mapping, got {type(data).__name__}",
             fix="rewrite this manifest as a top-level mapping",
@@ -158,7 +158,7 @@ def _read_yaml_or_issue(name: str, path: Path, issues: list[Issue]) -> dict | No
                 severity="error",
                 message=f"subsystem '{name}' declared in root but missing at {path.as_posix()}",
                 subsystem=name,
-                fix=f"create the compact.yaml or remove '{name}' from root.subsystems",
+                fix=f"create the manifest file or remove '{name}' from root.subsystems",
             )
         )
         return None
@@ -182,9 +182,9 @@ def _read_yaml_or_issue(name: str, path: Path, issues: list[Issue]) -> dict | No
             Issue(
                 code=errors.E_SCHEMA_INVALID,
                 severity="error",
-                message=f"subsystem '{name}' compact.yaml must be a YAML mapping",
+                message=f"subsystem '{name}' manifest must be a YAML mapping",
                 subsystem=name,
-                fix="rewrite compact.yaml as a top-level mapping",
+                fix="rewrite the subsystem manifest as a top-level mapping",
             )
         )
         return None
@@ -193,7 +193,7 @@ def _read_yaml_or_issue(name: str, path: Path, issues: list[Issue]) -> dict | No
 
 def _validate_root_yaml(project_root: Path) -> list[Issue]:
     """Re-read the root YAML as a raw dict and run schema validation against it."""
-    path = Path(project_root) / config.COMPACT_DIR / config.ROOT_FILE
+    path = config.config_dir(project_root) / config.ROOT_FILE
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):

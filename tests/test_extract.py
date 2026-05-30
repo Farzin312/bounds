@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from compact.extract import (
+from bounds.extract import (
     content_hash,
     get_adapter,
     supported_extensions,

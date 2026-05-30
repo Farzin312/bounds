@@ -1,6 +1,6 @@
 """Git repository detection and changed-file discovery (stdlib only).
 
-These helpers back ``compact validate --quick``: the caller intersects the set of
+These helpers back ``bounds validate --quick``: the caller intersects the set of
 changed files with subsystem paths to decide what to re-extract. Everything here is
 *fail soft* — if ``git`` is missing, the path is not a repo, or a git command errors,
 the not-a-repo helpers return ``False``/``None`` and :func:`changed_files` returns an

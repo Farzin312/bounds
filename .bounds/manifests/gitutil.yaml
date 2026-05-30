@@ -3,7 +3,7 @@ role: library
 criticality: leaf
 description: Git repository detection and changed-file diffing for quick-mode validation.
 paths:
-  - src/compact/gitutil.py
+  - src/bounds/gitutil.py
 exposes:
   - { name: repo_root, kind: function }
   - { name: changed_files, kind: function }

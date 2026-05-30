@@ -37,7 +37,7 @@ def run(
     callers (e.g. ``describe``) pass ``persist=False`` to avoid mutating the cache.
 
     File-selection toggles (all default off, matching the vault's "scan less, by default"
-    posture): ``include_ignored`` disables ``.compactignore``; ``include_gitignored`` scans
+    posture): ``include_ignored`` disables ``.boundsignore``; ``include_gitignored`` scans
     files excluded by ``.gitignore``; ``follow_symlinks`` includes external symlinks instead
     of skipping them with a warning; ``fail_on_unowned`` promotes tracked source files outside
     every subsystem from silent to a blocking ``E_UNOWNED_FILE`` error — except files matching
@@ -45,7 +45,7 @@ def run(
     """
     started = time.perf_counter()
     if mode not in config.VALID_MODES:
-        raise errors.CompactError(
+        raise errors.BoundsError(
             errors.E_USAGE,
             f"unknown validation mode '{mode}'",
             fix=f"use one of: {', '.join(sorted(config.VALID_MODES))}",
@@ -71,7 +71,7 @@ def run(
     entry_matcher = IgnoreMatcher(root.entry_points)
 
     # ---- File selection: every supported file under each subsystem's paths ----
-    # External symlinks and .compactignore matches are filtered here; .gitignore is
+    # External symlinks and .boundsignore matches are filtered here; .gitignore is
     # applied in one batched git call afterwards.
     file_owner: dict[str, str] = {}
     files: list[tuple[str, Path, str]] = []  # (rel posix, abs path, owner)
@@ -161,7 +161,7 @@ def run(
                     f"could not parse '{rel}': {result.error}",
                     subsystem=owner,
                     file=rel,
-                    fix="check the file for syntax errors; Compact skipped it",
+                    fix="check the file for syntax errors; Bounds skipped it",
                 )
             )
         # A structural change (vs the prior cache) marks the owning subsystem dirty.
@@ -320,7 +320,7 @@ def _unowned_issues(
     """One ``E_UNOWNED_FILE`` Issue per tracked source file outside every subsystem.
 
     The universe is git-tracked source files (or a filesystem walk when not a repo),
-    minus ``.compactignore`` matches and the hard-coded ignore directories. Anything in
+    minus ``.boundsignore`` matches and the hard-coded ignore directories. Anything in
     that universe not claimed by a subsystem's ``paths``/``files`` is unowned.
 
     Files matching a ``root.entry_points`` glob are known bootstrap files (main.py,
@@ -353,7 +353,7 @@ def _unowned_issues(
                 f"source file '{rel}' is owned by no subsystem",
                 file=rel,
                 fix=(
-                    f"add '{rel}' to a subsystem's paths/files, exclude it via .compactignore, "
+                    f"add '{rel}' to a subsystem's paths/files, exclude it via .boundsignore, "
                     "or declare it an entry point in root.entry_points"
                 ),
             )

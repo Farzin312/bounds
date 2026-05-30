@@ -1,7 +1,7 @@
 """Deterministic, zero-LLM extraction of a file's interface surface.
 
 Tree-sitter adapters turn source bytes into exported symbols and import
-references (the :class:`~compact.models.ExtractResult` tier). The registry
+references (the :class:`~bounds.models.ExtractResult` tier). The registry
 resolves an adapter by file extension or language name.
 
 Public API:

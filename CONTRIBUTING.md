@@ -1,6 +1,6 @@
-# Contributing to Compact
+# Contributing to Bounds
 
-Thank you for your interest! Compact is an open-source tool for AI-native codebase
+Thank you for your interest! Bounds is an open-source tool for AI-native codebase
 understanding via subsystem boundary manifests. We welcome contributions of all
 kinds — bug reports, feature requests, documentation, and code.
 
@@ -12,7 +12,7 @@ code of conduct. By participating you agree to abide by its terms.
 ## How to File Issues
 
 - **Bug report**: Use the [bug report template](.github/ISSUE_TEMPLATE/bug_report.md).
-  Include Compact version, Python version, OS, reproduction steps, and expected vs
+  Include Bounds version, Python version, OS, reproduction steps, and expected vs
   actual behaviour.
 - **Feature request**: Use the [feature request template](.github/ISSUE_TEMPLATE/feature_request.md).
   Describe the problem, the proposed solution, and any alternatives you've considered.
@@ -22,8 +22,8 @@ code of conduct. By participating you agree to abide by its terms.
 
 ```bash
 # Clone the repository
-git clone https://github.com/Farzin312/compact.git
-cd compact
+git clone https://github.com/Farzin312/bounds.git
+cd bounds
 
 # Create a virtual environment
 python -m venv .venv
@@ -34,15 +34,15 @@ source .venv/bin/activate   # Linux/macOS
 pip install -e ".[dev]"
 
 # Verify the CLI works
-compact --help
+bounds --help
 ```
 
 ## Project Structure
 
 ```
-compact/
+bounds/
 ├── .github/workflows/      # CI/CD workflows
-├── src/compact/
+├── src/bounds/
 │   ├── cache/              # Content-addressable extraction cache
 │   ├── extract/            # Tree-sitter language adapters
 │   ├── manifest/           # Manifest loader + schema validation
@@ -72,7 +72,7 @@ compact/
 - **Imports**: Standard library, third-party, then local. One import per line.
 - **Naming**: `snake_case` for functions/variables, `PascalCase` for classes,
   `UPPER_CASE` for constants.
-- **Error handling**: Use `CompactError` for expected failure paths. Prefer
+- **Error handling**: Use `BoundsError` for expected failure paths. Prefer
   explicit exception types over bare `except:`.
 
 ### All Files
@@ -92,15 +92,15 @@ pytest -v -n auto
 # With coverage
 coverage run -m pytest && coverage report
 
-# Self-test: validate Compact on its own manifests
-compact validate --quick
+# Self-test: validate Bounds on its own manifests
+bounds validate --quick
 ```
 
 All tests must pass. If you add a new feature, include tests.
 
 ### Writing Tests
 
-- Tests live in `tests/` and mirror the `src/compact/` package structure.
+- Tests live in `tests/` and mirror the `src/bounds/` package structure.
 - Use `pytest` fixtures from `tests/conftest.py` for temporary projects.
 - The `py_project` fixture creates a minimal two-subsystem Python project.
 - CLI tests use CliRunner from Click.
@@ -110,20 +110,20 @@ All tests must pass. If you add a new feature, include tests.
 1. **Branch**: Create a feature branch from `main`. Name it descriptively:
    `feat/add-go-adapter`, `fix/describe-human-formatter`.
 2. **Develop**: Make your changes. Keep them focused on one concern.
-3. **Test**: Run the test suite and the self-test (`compact validate --quick`).
+3. **Test**: Run the test suite and the self-test (`bounds validate --quick`).
 4. **Commit**: Write clear commit messages. Reference the issue number if applicable.
 5. **PR**: Open a pull request to `main`. Use the PR template. Link the issue.
    Squash-merge when approved.
 
 ## Adding a Language Adapter
 
-Tree-sitter adapters live in `src/compact/extract/`. To add a new language:
+Tree-sitter adapters live in `src/bounds/extract/`. To add a new language:
 
-1. Create a file `src/compact/extract/<language>.py`.
+1. Create a file `src/bounds/extract/<language>.py`.
 2. Subclass `LanguageAdapter` from `.base`. Set `language_name` and `extensions`.
 3. Implement `extract(self, rel_path, source) -> ExtractResult` to walk the
    tree-sitter tree for exported symbols and import references.
-4. Register the adapter in `src/compact/extract/registry.py`.
+4. Register the adapter in `src/bounds/extract/registry.py`.
 5. Add the tree-sitter grammar to `pyproject.toml` dependencies.
 6. Write tests in `tests/test_extract.py`.
 
@@ -134,7 +134,7 @@ Tree-sitter adapters live in `src/compact/extract/`. To add a new language:
 3. Tag the release: `git tag v0.2.0 && git push origin v0.2.0`.
 4. The [release workflow](.github/workflows/release.yml) builds and publishes
    to PyPI automatically.
-5. Verify: `pip install compact==<version>` and `compact --version`.
+5. Verify: `pip install bounds==<version>` and `bounds --version`.
 
 ## Documentation
 
@@ -154,5 +154,5 @@ When contributing documentation changes:
 
 ## Questions?
 
-Open a [Discussion](https://github.com/Farzin312/compact/discussions) or file
+Open a [Discussion](https://github.com/Farzin312/bounds/discussions) or file
 an issue. We're friendly.
