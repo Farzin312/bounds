@@ -1,0 +1,13 @@
+name: cache
+role: library
+criticality: connector
+description: Content-addressable per-file extraction cache persisted to .compact/state.json.
+paths:
+  - src/compact/cache
+exposes:
+  - { name: load_state, kind: function }
+  - { name: save_state, kind: function }
+  - { name: State, kind: class }
+  - { name: FileRecord, kind: class }
+consumes:
+  - { subsystem: models, via: models, interfaces: [ExtractResult, Symbol, ImportRef] }

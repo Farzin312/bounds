@@ -1,0 +1,15 @@
+name: models
+role: library
+criticality: core
+description: The Compact data model — manifest, extraction, and validation dataclasses shared everywhere.
+paths:
+  - src/compact/models.py
+exposes:
+  - { name: SubsystemCompact, kind: class }
+  - { name: RootManifest, kind: class }
+  - { name: Symbol, kind: class }
+  - { name: ImportRef, kind: class }
+  - { name: ExtractResult, kind: class }
+  - { name: Issue, kind: class }
+  - { name: ValidationReport, kind: class }
+consumes: []

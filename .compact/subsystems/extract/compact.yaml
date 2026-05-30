@@ -1,0 +1,12 @@
+name: extract
+role: library
+criticality: connector
+description: Tree-sitter extraction of exported symbols and imports per language (zero LLM).
+paths:
+  - src/compact/extract
+exposes:
+  - { name: get_adapter, kind: function }
+  - { name: supported_extensions, kind: function }
+  - { name: content_hash, kind: function }
+consumes:
+  - { subsystem: models, via: models, interfaces: [Symbol, ImportRef, ExtractResult] }

@@ -1,0 +1,10 @@
+name: output
+role: library
+criticality: leaf
+description: JSON and human-readable rendering of reports and structured errors, plus exit-code mapping.
+paths:
+  - src/compact/output.py
+exposes:
+  - { name: emit, kind: function }
+consumes:
+  - { subsystem: models, via: models, interfaces: [ValidationReport] }

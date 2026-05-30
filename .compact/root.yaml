@@ -1,0 +1,13 @@
+version: "1"
+project: compact
+languages: [python]
+enforce: "off"
+subsystems:
+  - models
+  - manifest
+  - extract
+  - cache
+  - validate
+  - gitutil
+  - output
+  - cli

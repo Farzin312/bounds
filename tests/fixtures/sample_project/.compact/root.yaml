@@ -1,0 +1,8 @@
+version: "1"
+project: shop
+languages: [typescript]
+enforce: "on"
+subsystems:
+  - database
+  - auth
+  - api

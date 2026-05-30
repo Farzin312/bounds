@@ -20,7 +20,7 @@ _SEVERITY_ORDER = ("error", "warning", "info")
 _BULLETS = {"error": "✗", "warning": "⚠", "info": "ℹ"}
 
 
-def emit(payload: dict, human: bool, stream=sys.stdout) -> None:
+def emit(payload: dict, human: bool, stream=None) -> None:
     """Write ``payload`` to ``stream`` as JSON (default) or a human-readable view.
 
     JSON path preserves insertion order (``sort_keys=False``) since producers already
@@ -28,6 +28,11 @@ def emit(payload: dict, human: bool, stream=sys.stdout) -> None:
     the ``validation_status`` key and renders it richly; any other dict is shown as a
     plain key/value listing.
     """
+    # SUPERVISOR-NOTE (review, 2026-05-29): resolve sys.stdout at call time, not as a
+    # default arg — a default binds the stream at import and ignores later redirection
+    # (CliRunner, contextlib.redirect_stdout), which silently dropped all CLI output.
+    if stream is None:
+        stream = sys.stdout
     if not human:
         json.dump(payload, stream, indent=2, sort_keys=False)
         stream.write("\n")
@@ -74,8 +79,10 @@ def exit_code_for(report: ValidationReport, mode: str, enforce: str) -> int:
     return config.EXIT_OK
 
 
-def emit_error(err: CompactError, human: bool, stream=sys.stderr) -> None:
+def emit_error(err: CompactError, human: bool, stream=None) -> None:
     """Render a fatal ``CompactError`` as JSON (default) or a one-line human message."""
+    if stream is None:
+        stream = sys.stderr
     if not human:
         json.dump(err.to_dict(), stream, indent=2, sort_keys=False)
         stream.write("\n")

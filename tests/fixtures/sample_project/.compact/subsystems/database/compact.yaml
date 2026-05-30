@@ -1,0 +1,10 @@
+name: database
+role: library
+criticality: connector
+description: User persistence layer.
+paths:
+  - src/database
+exposes:
+  - { name: findUser, kind: function }
+  - { name: createUser, kind: function }
+consumes: []

@@ -1,0 +1,16 @@
+name: validate
+role: platform
+criticality: connector
+description: Validation engine — mode dispatch, cached extraction, reference propagation, and the 6 checks.
+paths:
+  - src/compact/validate
+exposes:
+  - { name: run, kind: function }
+  - { name: CheckContext, kind: class }
+  - { name: check_cycles, kind: function }
+consumes:
+  - { subsystem: models, via: models, interfaces: [RootManifest, SubsystemCompact, ExtractResult, Issue, ValidationReport] }
+  - { subsystem: manifest, via: loader, interfaces: [load_all] }
+  - { subsystem: extract, via: extract, interfaces: [get_adapter, supported_extensions, content_hash] }
+  - { subsystem: cache, via: store, interfaces: [load_state, save_state, State, FileRecord] }
+  - { subsystem: gitutil, via: gitutil, interfaces: [repo_root, changed_files] }

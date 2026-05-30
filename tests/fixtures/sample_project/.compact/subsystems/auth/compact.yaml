@@ -1,0 +1,12 @@
+name: auth
+role: service
+criticality: connector
+description: Authentication — login, register, verify.
+paths:
+  - src/auth
+exposes:
+  - { name: login, kind: function }
+  - { name: verify, kind: function }
+  - { name: register, kind: function }
+consumes:
+  - { subsystem: database, via: database, interfaces: [findUser, createUser] }

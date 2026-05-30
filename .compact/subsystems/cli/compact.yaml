@@ -1,0 +1,12 @@
+name: cli
+role: service
+criticality: connector
+description: Click-based command-line entry point — list, describe, validate, preflight, overview, init.
+paths:
+  - src/compact/cli.py
+exposes:
+  - { name: main, kind: function }
+consumes:
+  - { subsystem: manifest, via: loader, interfaces: [find_root, load_all] }
+  - { subsystem: validate, via: engine, interfaces: [run, CheckContext, check_cycles] }
+  - { subsystem: output, via: output, interfaces: [emit] }

@@ -1,0 +1,10 @@
+name: api
+role: service
+criticality: leaf
+description: HTTP entrypoint.
+paths:
+  - src/api
+exposes:
+  - { name: startServer, kind: function }
+consumes:
+  - { subsystem: auth, via: auth, interfaces: [login, verify] }
