@@ -2,11 +2,28 @@
 
 ## [Unreleased] — 2026-05-30
 
+### Added
+
+- **`bounds discover`** — bootstrap manifest generation: auto-discovers candidate subsystems from source and proposes `.bounds/` manifests for a new project.
+- **`bounds calibrate`** — reconciles manifests against tree-sitter reality, proposing exports to add or remove. Honors a new per-export `internal` flag (mark a symbol deliberately private and calibration leaves it alone).
+- **`bounds impact <name>`** — transitive blast radius: which subsystems break if the named subsystem changes. Backed by a new `transitive_consumers` graph walk in the propagation engine.
+- **`bounds agent --sync/--detect/--check`** — cross-agent config *generator*. Writes a canonical `BOUNDS.md` plus per-agent config for eight agents (Claude Code, Codex, OpenCode, Gemini, Copilot, Cursor, Aider, Windsurf). Generates committed files; not a hosted integration or plugin registry.
+- **`bounds ci --install`** (`--action`/`--precommit`/`--gitlab`/`--all`) — CI gate config *generator*. Writes a GitHub Action workflow, pre-commit hook, and/or GitLab CI config you commit. Not published Marketplace actions or a published pre-commit repo.
+- **`bounds cache --migrate/--inspect/--prune`** — manage the binary extraction cache.
+- **Schema flexibility** — `root.yaml` now accepts extensible roles and criticality values rather than a fixed enum.
+- **Per-export `internal` flag** — exposes can be marked `internal: true` to exempt them from calibration add/remove and signal a deliberately-private symbol.
+- **Install artifacts** — `install.sh` (pip/pipx, with `BOUNDS_REF` for git installs), a Homebrew `Formula/bounds.rb`, and a `Makefile` (`make install/dev/test/validate/benchmark`).
+
 ### Changed
 
+- **Cache format changed from `state.json` (JSON) to `.bounds/cache.db` (binary SQLite).** The new cache adds context-armor integrity. Bounds **auto-migrates** an existing `state.json` to `cache.db` on first run; `bounds cache --migrate` does the same on demand. SQLite is Python stdlib, so no new dependency was added.
 - **Renamed the project, CLI, and Python package from `compact` to `bounds`.** The console entry point is now `bounds` (was `compact`); install with `pip install bounds`. The Python package import path is now `bounds` (was `compact`).
 - **Config directory moved from `.compact/` to `.bounds/`.** A backward-compatible fallback is in place: if `.bounds/` is absent, Bounds still reads a legacy `.compact/` directory and prints a deprecation notice to stderr when it does.
 - **`CompactError` exception renamed to `BoundsError`.** The old `CompactError` name is kept as a deprecated alias for backward compatibility.
+
+### Tests
+
+- **147 tests across 10 files** now pass (up from the v0.1.0 figure), covering the new `discover`, `calibrate`, `impact`, `agent`, `ci`, and SQLite-cache surfaces in addition to extraction, validation, and schema flexibility.
 
 ## [0.1.0] — 2026-05-29
 
@@ -44,4 +61,4 @@ Bounds brings AI-native codebase understanding via subsystem boundary manifests 
 ### Notes
 
 - Bounds validates ITSELF (`bounds validate --human` on the Bounds project) — fully dogfooding from day one.
-- All 61+ tests pass with pytest-xdist parallel execution.
+- The full suite (147 tests across 10 files as of the Unreleased gen-3 work) passes with pytest-xdist parallel execution.

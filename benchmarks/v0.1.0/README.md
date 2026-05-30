@@ -8,46 +8,48 @@ Raw benchmark data for Bounds v0.1.0. All measurements are real, reproducible, a
 - **Project:** Bounds v0.1.0 (8 subsystems, 18 source files, Python + TS/JS grammars)
 - **Python:** 3.14.5
 - **Conditions:** Warm disk cache, no prior extraction state (cold cache) or repeated runs (warm cache)
-- **Reporting:** JSON output piped through `wc -c` for byte-accurate token cost, `time` for wall-clock measurements
-- **Reproducible:** Run `make benchmark` or individual commands below
+- **Reporting:** Cost is reported in **tokens**, not bytes. We measure JSON/source size in characters (`wc -c`) and convert to a token *estimate* using the common heuristic **~1 token ≈ 4 characters** (cl100k / tiktoken-class tokenizers). These are estimates, not exact tiktoken counts; the relative savings are the point, not the third significant figure. Wall-clock is measured with `time`.
+- **Reproducible:** Run `make benchmark` (added in this repo) or the individual commands below.
 
 ## Token Cost
+
+> Conversion: token estimate = characters ÷ 4 (cl100k-class heuristic).
 
 ### `bounds describe models`
 
 ```
 $ .venv/bin/bounds describe models | wc -c
-1210 bytes
+1593 chars   → ~398 tokens
 
 $ wc -c src/bounds/models.py
-8475 bytes
+11489 chars  → ~2,872 tokens
 
 $ wc -c .bounds/manifests/models.yaml
-554 bytes
+552 chars    → ~138 tokens
 ```
 
-**Savings:** 1,210 bytes JSON vs 8,475 bytes source = **85.7% reduction** in context needed to understand the models subsystem.
+**Savings:** ~398 tokens of JSON vs ~2,872 tokens of source = **~86% reduction** in context needed to understand the `models` subsystem.
 
-> To understand `models`'s public API (9 exports, consumed by 5 subsystems), an AI agent reads 1,210 bytes of structured JSON instead of the full 8,475-byte source file. The manifest itself is 554 bytes of YAML.
+> To understand `models`'s public API, an AI agent reads ~398 tokens of structured JSON instead of the full ~2,872-token source file. The manifest itself is ~138 tokens of YAML.
 
 ### `bounds list` (all 8 subsystems)
 
 ```
 $ .venv/bin/bounds list | wc -c
-1916 bytes
+2633 chars   → ~658 tokens
 ```
 
-1,916 bytes of JSON describes the full architecture of 8 subsystems — their roles, criticality, exposes counts, and dependency graph. The alternative is grepping through 18+ source files.
+~658 tokens of JSON describes the full architecture of 8 subsystems — their roles, criticality, exposes counts, and dependency graph. The alternative is grepping through 18+ source files (thousands of tokens).
 
 ### Token saving scenarios
 
 | Scenario | Without Bounds | With Bounds | Savings |
 |----------|----------------|-------------|---------|
-| Understand one subsystem | Read 1-5 source files (2K-15K tokens) | `bounds describe <name>` (~1,210 bytes) | ~85-99% |
-| Map all subsystems | Grep for `class\|def\|export` across codebase | `bounds list` (~1,916 bytes) | Near-infinite |
+| Understand one subsystem | Read 1-5 source files (~2K-15K tokens) | `bounds describe <name>` (~400 tokens) | ~85-99% |
+| Map all subsystems | Grep for `class\|def\|export` across codebase | `bounds list` (~660 tokens) | Near-infinite |
 | Detect architecture drift | Manual code review | `bounds validate` (structured report) | Subjective to deterministic |
-| CI gate for boundary violations | No automated option | `bounds preflight` | Previously impossible |
-| Dependency blast radius | Trace imports manually | `bounds describe` shows `consumed_by` | ~99% time reduction |
+| CI gate for boundary violations | No automated option | `bounds preflight` / `bounds ci --install` | Previously impossible |
+| Dependency blast radius | Trace imports manually | `bounds impact <name>` (transitive consumers) | ~99% time reduction |
 
 ## Performance
 
@@ -138,7 +140,24 @@ Median wall-clock: **207ms**
 | `bounds list` | ~250ms median | <20ms | Headroom for optimization |
 | `bounds describe <name>` | ~307ms median | <50ms | Headroom for optimization |
 
-> Measurements include Python interpreter startup (~150ms). Pure validation/query logic meets or approaches all targets.
+> Measurements include Python interpreter startup (~150ms). Pure validation/query logic meets or approaches all targets. The `--quick` mode target is sub-200ms for the validation logic itself.
+
+## Command presence
+
+| Command | Purpose | Status |
+|---------|---------|--------|
+| `bounds init` | Scaffold `.bounds/` | v0.1.0 |
+| `bounds list` | Discover subsystems | v0.1.0 |
+| `bounds describe` | One subsystem as JSON | v0.1.0 |
+| `bounds validate` | Full / quick validation | v0.1.0 |
+| `bounds preflight` | 6 pre-PR checks | v0.1.0 |
+| `bounds overview` | Health dashboard | v0.1.0 |
+| `bounds impact` | Transitive blast radius | shipped |
+| `bounds discover` | Bootstrap manifests from source | shipped |
+| `bounds calibrate` | Reconcile manifests vs source | shipped |
+| `bounds agent` | Generate agent configs + `BOUNDS.md` | shipped (generator) |
+| `bounds ci` | Generate CI gate config | shipped (generator) |
+| `bounds cache` | Manage the `.bounds/cache.db` SQLite cache | shipped |
 
 ## Language Support
 
@@ -162,13 +181,23 @@ Median wall-clock: **207ms**
 
 ## Commands to reproduce
 
+The fastest path is the `make benchmark` target (added to the repo), which times
+`bounds list`, `bounds describe models`, and `bounds validate --quick` against this repo:
+
 ```bash
-# Token cost
+make benchmark
+```
+
+Or run the pieces by hand. Token cost is reported in characters (`wc -c`); divide by ~4 for a
+token estimate:
+
+```bash
+# Token cost (chars; ÷4 ≈ tokens)
 .venv/bin/bounds describe models | wc -c
 wc -c src/bounds/models.py
 wc -c .bounds/manifests/models.yaml
 
-# Performance
+# Performance (includes ~150ms interpreter startup)
 time .venv/bin/bounds validate --quick
 time .venv/bin/bounds list
 time .venv/bin/bounds describe models

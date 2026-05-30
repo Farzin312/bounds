@@ -5,16 +5,21 @@
 ### Architecture contracts your AI agents can trust
 
 **Bounds** is a CLI that turns your codebase's architecture into deterministic, machine-readable
-manifests — validated against source with **tree-sitter (zero LLM)**. AI coding agents read a 10-line
-subsystem contract instead of 10 source files, and get structural validation they can trust, in
-milliseconds, for zero tokens.
+manifests — validated against source with **tree-sitter (zero LLM)**. An AI coding agent reads a
+~300-token subsystem contract instead of a dozen source files (thousands of tokens), and gets
+structural validation it can trust, in milliseconds.
+
+An agent's only real cost is **tokens into context**. Bounds is built around one thesis: agents
+should spend tokens *deliberately* (one cheap CLI call returns a verified contract) and never
+*accidentally* (the `.bounds/` directory is hidden, and its cache is a binary SQLite file an agent
+can't blindly slurp into context).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](#cross-platform-support)
 [![Zero LLM](https://img.shields.io/badge/structural%20validation-zero%20LLM-brightgreen.svg)](#how-it-works)
 
-[Quick start](#quick-start) · [Why not another code graph?](#why-not-another-code-graph) · [Token cost comparison](#token-cost-comparison) · [For AI agents](#for-ai-coding-agents) · [How it works](#how-it-works) · [Security](#security) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md)
+[Quick start](#quick-start) · [Why not another code graph?](#why-not-another-code-graph) · [Token cost comparison](#token-cost-comparison) · [For AI agents](#for-ai-coding-agents) · [How it works](#how-it-works) · [Security](#security) · [Architecture](ARCHITECTURE.md) · [Roadmap](#roadmap)
 
 </div>
 
@@ -43,11 +48,14 @@ directions.
 
 The result is a structural contract an agent can query, and a CI pipeline can enforce:
 
-- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, instead of raw files.
+- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, instead of raw files. Every interface is flagged `verified: true/false` (tree-sitter confirmed) so the agent can trust the manifest without opening source.
 - **`bounds validate`** — catch drift the moment exports stop matching the manifest. 6 checks, zero LLM.
 - **`bounds validate --quick`** — git-diff incremental validation, safe for every commit.
 - **`bounds preflight`** — 6 pre-PR checks: drift, boundaries, contracts, cycles, orphans, cross-subsystem impact.
-- **Deterministic** — same input, same bytes out. No tokens, no network, no flakiness.
+- **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface changes.
+- **`bounds discover` / `bounds calibrate`** — onboard an un-bounded repo in one command, then keep manifests honest against tree-sitter reality.
+- **`bounds agent --sync`** — wire Bounds into eight coding agents (Claude Code, Codex, Cursor, …) with one command.
+- **Deterministic** — same input, same byte-stable output. No network, no flakiness, no accidental token spend.
 
 ---
 
@@ -59,8 +67,9 @@ graph, let the AI figure it out.** This creates three problems Bounds solves:
 
 ### 1. Token bloat
 
-A full code graph of a Django codebase can be 50K+ tokens. An agent pays this cost just to find
-where `login()` is defined. Bounds gives you the answer in ~1,200 bytes of JSON — one CLI call.
+A full code graph of a Django codebase can be tens of thousands of tokens. An agent pays this cost
+just to find where `login()` is defined. Bounds gives you the answer in a few hundred tokens of
+JSON — one CLI call.
 
 ### 2. No intent signal
 
@@ -94,106 +103,139 @@ end of this README.</sub>
 
 ### Install
 
+**Works today — install from a git ref** (the PyPI release workflow is configured but the package
+is not published yet, so install directly from the repo):
+
 ```bash
-# Recommended: isolated CLI install
-pipx install bounds
+# Recommended: isolated CLI install from the repo (pipx sidesteps PEP 668)
+pipx install "git+https://github.com/Farzin312/bounds.git"
 
 # Or into the current environment
-pip install bounds
+pip install "git+https://github.com/Farzin312/bounds.git"
 ```
 
 <details>
-<summary><b>Install from source</b></summary>
+<summary><b>From a local clone (development)</b></summary>
 
 ```bash
-pipx install "git+https://github.com/Farzin312/bounds.git"
-
-# Or from a local clone
 git clone https://github.com/Farzin312/bounds.git
 cd bounds
-pip install -e ".[dev]"
+pip install -e ".[dev]"     # editable install + pytest
 ```
 </details>
 
 <details>
-<summary><b>Homebrew (planned — v0.2.0)</b></summary>
+<summary><b>Bootstrap installer (<code>install.sh</code>)</b></summary>
+
+`install.sh` is the PEP-668-safe bootstrap (pipx-preferred). It targets the PyPI package by default —
+so it fully works **once `bounds` is published to PyPI** — but you can point it at a git ref today:
 
 ```bash
-brew install Farzin312/bounds/bounds   # once the tap is published
+BOUNDS_REF=main ./install.sh   # installs git+https://github.com/Farzin312/bounds@main
 ```
 
-Until then, `pipx` is the cleanest cross-platform path.
+The installer never does `curl | sh` remote execution, `eval`, or `sudo` — it only runs `pipx`/`pip`
+against the package name.
+</details>
+
+<details>
+<summary><b>Homebrew & curl (bootstrapped — pending PyPI publish)</b></summary>
+
+A Homebrew tap formula (`Formula/bounds.rb`) and a `curl | bash` flow are wired up, but both resolve
+the package from PyPI and so depend on the PyPI publish landing first. The formula currently ships
+placeholder `url`/`sha256` for exactly that reason.
+
+```bash
+brew install Farzin312/bounds/bounds   # works once the tap + PyPI release are published
+```
+
+**Standalone signed binaries** (no Python required) are planned for **v0.2.0**.
 </details>
 
 ```bash
 bounds --help    # verify the install
 ```
 
-### Initialize a project
+### Onboard a project (one command)
 
 ```bash
 cd your-project
+bounds discover                     # preview auto-generated manifests   (dry-run)
+bounds discover --apply             # write root.yaml + manifests
+bounds agent --sync                 # wire Bounds into your coding agents
+```
+
+`bounds discover` groups source files by directory, scores candidates, tree-sitter-extracts each
+subsystem's verified `exposes`, infers `consumes` from the cross-candidate import graph, and seeds a
+`role`/`criticality` from graph degree. It never overwrites existing manifests.
+
+<details>
+<summary><b>Or scaffold manually</b></summary>
+
+```bash
 bounds init --root                  # scaffold .bounds/root.yaml
 bounds init --subsystem auth        # add .bounds/manifests/auth.yaml
 # edit the manifest to declare paths, exposes, consumes...
 ```
+</details>
 
-### Explore and validate
+### Explore, validate, keep honest
 
 ```bash
-bounds list                         # discover all subsystems           (JSON)
-bounds describe auth                # one subsystem's full surface      (JSON)
-bounds validate --quick             # fast incremental check            (JSON)
+bounds list                         # whole-system map: every subsystem  (JSON)
+bounds describe auth                # one subsystem's verified surface    (JSON)
+bounds impact auth                  # who breaks if auth's surface changes
+bounds validate --quick             # fast incremental check              (JSON)
 bounds validate --human             # same data, human-readable
 bounds preflight                    # 6 pre-PR checks, blocking
 bounds overview                     # project health dashboard
+bounds calibrate                    # reconcile manifests vs source (diff; --apply to write)
 ```
 
-> `.bounds/` is hidden and **only** touched by the `bounds` CLI — nothing auto-loads it, so it
-> never silently inflates an agent's context.
+> `.bounds/` is hidden and **only** touched by the `bounds` CLI — nothing auto-loads it. Its
+> extraction cache is a **binary SQLite file** (`.bounds/cache.db`), so an agent that naively reads
+> it gets binary gibberish, not a parseable token blob dumped into context. Bounds never silently
+> inflates an agent's context.
 
 ---
 
 ## Token Cost Comparison
 
-The core claim: Bounds reduces the context an AI agent needs to understand your codebase from
-thousands of tokens to hundreds of bytes.
+An agent's cost is **tokens into context**, so that is the only unit that matters here. The core
+claim: Bounds reduces the context an agent needs to understand your codebase from thousands of
+tokens to a few hundred.
 
-### Real measured data
+### Measured on this repo
 
-```bash
-$ .venv/bin/bounds describe models | wc -c
-1210 bytes
+> Token figures are estimates from the byte size at ~4 chars/token (a standard rough rule for
+> JSON/source). They are estimates, not exact tokenizer counts.
 
-$ wc -c src/bounds/models.py
-8475 bytes
+To understand the `models` subsystem's public API (9 exports, consumed by 5 subsystems):
 
-$ wc -c .bounds/manifests/models.yaml
-554 bytes
-```
+| Read this | Size | Token estimate |
+|-----------|------|----------------|
+| `bounds describe models` (verified JSON contract) | 1,593 bytes | **~400 tokens** |
+| `src/bounds/models.py` (the full source file) | 11,489 bytes | **~2,900 tokens** |
 
-To understand the models subsystem's public API (9 exports, consumed by 5 subsystems), an AI
-agent reads **1,210 bytes** of structured JSON instead of the full **8,475-byte** source file.
-That is an **85.7% reduction** in context.
+The agent gets the verified public surface for **~400 tokens** instead of **~2,900 tokens** of
+source — and in real cases a subsystem spans several files, so the source side is usually far larger.
 
-For the full architecture across all 8 subsystems:
+For the whole-system map across all 8 subsystems:
 
-```bash
-$ .venv/bin/bounds list | wc -c
-1916 bytes
-```
+| Read this | Size | Token estimate |
+|-----------|------|----------------|
+| `bounds list` (every subsystem: role, criticality, graph, interface counts) | 2,633 bytes | **~660 tokens** |
 
-**1,916 bytes** describes the complete architecture: 8 subsystems, their roles, criticality,
-dependency graph, and interface counts. Without Bounds: grepping 18+ source files and mentally
-reconstructing the architecture.
+`bounds list` is the cheap whole-system map: **~660 tokens** for the complete architecture instead
+of grepping a dozen-plus source files and mentally reconstructing it.
 
-| Scenario | Without Bounds | With Bounds | Savings |
-|----------|----------------|-------------|---------|
-| Understand one subsystem | Read 1-5 source files (2K-15K tokens) | `bounds describe <name>` (~1,210 bytes) | ~85-99% |
-| Map all subsystems | Grep for `class\|def\|export` across codebase | `bounds list` (~1,916 bytes) | Near-infinite |
-| Detect architecture drift | Manual code review | `bounds validate` (structured report) | Subjective to deterministic |
-| CI gate for boundary violations | No automated option exists | `bounds preflight` | Previously impossible |
-| Dependency blast radius | Trace imports manually | `bounds describe` shows `consumed_by` | ~99% time reduction |
+| Scenario | Without Bounds | With Bounds | Token savings |
+|----------|----------------|-------------|---------------|
+| Understand one subsystem | Read 1–15 source files (thousands of tokens) | `bounds describe <name>` (~250–400 tokens of verified contract) | ~85–99% |
+| Map all subsystems | Grep `class\|def\|export` across the tree | `bounds list` (~660 tokens) | Near-total |
+| Dependency blast radius | Trace imports by hand | `bounds impact <name>` (transitive consumers + relied-on interfaces) | ~99% |
+| Detect architecture drift | Manual code review | `bounds validate` (structured report, 0 LLM) | Subjective → deterministic |
+| CI gate for boundary violations | No automated option | `bounds preflight --ci` | Previously impossible |
 
 ---
 
@@ -225,10 +267,23 @@ Only the top tier ever costs a token:
 |------|--------|------|------------------|
 | **Deterministic** | tree-sitter extraction | **Zero LLM** | Exported symbol names, file paths, import statements |
 | **Declared** | Human-written YAML | **Zero LLM** | Descriptions, boundary definitions, contract metadata |
-| **Semantic** | LLM, on demand (`--deep`, roadmap) | Tokens per use | Type signatures, intent summaries |
+| **Semantic** | LLM, on demand (`--deep`) | Tokens per use | Type signatures, intent summaries |
 
-The core validation loop runs Tiers 1 + 2 only — never touches an LLM. Tier 3 is enrichment,
-triggered when an agent needs deeper context.
+The core validation loop runs Tiers 1 + 2 only — never touches an LLM. `bounds describe` **merges
+Tiers 1 + 2**: every `exposes` entry carries its `file`, an `entry_point: true` flag when it sits in
+a root `entry_points` glob, and a `verified: true/false` flag (true = tree-sitter confirmed it
+exists). That merge is what lets an agent trust the manifest without reading source. Tier 3 is opt-in
+enrichment (`describe --deep`); the LLM call is **stubbed in the MVP** — no structural path ever
+touches an LLM.
+
+### The cache is binary by design
+
+Extraction results are cached in `.bounds/cache.db`, a **binary SQLite file** (SQLite ships with
+Python — no new dependency). This is deliberate context armor: an agent that naively `cat`s the
+cache gets binary gibberish rather than a giant parseable token blob. The cache is subsystem-indexed
+(partial per-subsystem reads), gitignored, and managed by `bounds cache` — `--inspect` prints a
+token-lean counts-only summary (never symbol dumps), `--prune` drops dead rows, and `--migrate`
+converts a legacy `state.json` cache (auto-migrated on first load anyway).
 
 ### Validation engine
 
@@ -259,12 +314,14 @@ The engine checks both directions:
 
 | Language | Extraction | Describe Merge | Validate | Status |
 |----------|-----------|---------------|----------|--------|
-| **Python** | Full (functions, classes, decorators) | Yes | Yes | Implemented |
-| **TypeScript / JavaScript** | Full (exports, classes, interfaces) | Yes | Yes | Implemented |
-| **Go** | Functions, methods, exported symbols | Planned | Planned | v0.2.0 target |
-| **Rust** | `pub fn`, `pub struct`, `pub enum`, traits | Planned | Planned | v0.2.0 target |
-| **Java** | Classes, interfaces, public methods | Planned | Planned | v0.3.0 target |
+| **Python** | Full (functions, classes, decorators) | Yes | Yes | **Implemented** |
+| **TypeScript / JavaScript** | Full (exports, classes, interfaces) | Yes | Yes | **Implemented** |
+| **Go** | Functions, methods, exported symbols | Planned | Planned | Future (v0.2.0 target) |
+| **Rust** | `pub fn`, `pub struct`, `pub enum`, traits | Planned | Planned | Future (v0.2.0 target) |
+| **Java** | Classes, interfaces, public methods | Planned | Planned | Future (v0.3.0 target) |
 | **Fallback** | YAML-only metadata, no tree-sitter | No merge | Data integrity only | Available always |
+
+Adding a language is one class (`extract.base.LanguageAdapter`) plus a registry entry.
 
 ---
 
@@ -282,34 +339,35 @@ today**. The universal instruction is the same:
 > no manual wiring needed. When the directory is present, the agent reads boundary contracts
 > instead of raw source automatically.
 
-### Integration by tool
+### One-command agent setup: `bounds agent --sync`
 
-| Tool | Integration Method | Configuration File | Status |
-|------|-------------------|-------------------|--------|
-| **Claude Code** | Bash tool + project instructions | `CLAUDE.md` + `.claude/settings.json` | Verified |
-| **OpenCode** | Custom tool or slash command | `.opencode/tool/bounds.ts` or `AGENTS.md` | Verified |
-| **Codex CLI** | Direct shell commands | `AGENTS.md` | Verified |
-| **Cursor** | Project rule (always-on) | `.cursor/rules/bounds.mdc` | Verified |
-| **Windsurf** | Workspace rule | `.windsurf/rules/bounds.md` | Verified |
-| **Generic agents** | Standing instructions | `AGENTS.md` (cross-tool standard) | Verified |
+No more manual copy-paste. `bounds agent --sync` writes a canonical `BOUNDS.md` contract plus the
+right config file for **eight** coding agents — telling each one to query `bounds describe` /
+`bounds list` instead of reading raw source, and to run `bounds validate --quick` after edits:
 
-### Drop-in instruction templates
+| Agent | Config file written |
+|-------|---------------------|
+| **Claude Code** | `.claude/commands/bounds.md` |
+| **Codex CLI** + **OpenCode** | shared `AGENTS.md` |
+| **Gemini** | `GEMINI.md` |
+| **GitHub Copilot** | `.github/copilot-instructions.md` |
+| **Cursor** | `.cursor/rules/bounds.mdc` |
+| **Aider** | `.aider.conf.yml` |
+| **Windsurf** | `.windsurf/rules/bounds.md` |
 
-Ready-to-copy agent-instruction templates live in [`templates/`](templates/):
+Shared files (`AGENTS.md`, `GEMINI.md`) get a marked Bounds block that leaves your other content
+intact; hand-written configs are never clobbered. Companion flags:
 
-| File | For | How to use |
-|------|-----|------------|
-| [`templates/AGENTS.md`](templates/AGENTS.md) | Codex CLI, OpenCode, generic agents | Copy the block into your project's `AGENTS.md` |
-| [`templates/CLAUDE.md`](templates/CLAUDE.md) | Claude Code | Append the section to your project's `CLAUDE.md` |
-| [`templates/.cursorrules`](templates/.cursorrules) | Cursor | Copy to `.cursorrules`, or adapt into `.cursor/rules/bounds.mdc` |
+```bash
+bounds agent --detect          # list which agents are present in this project
+bounds agent --check           # verify each detected agent has a Bounds config
+bounds agent --sync --claude   # scope --sync/--check to one agent (--codex, --cursor, …)
+```
 
-Each template tells the agent to query `bounds describe` / `bounds list` instead of
-reading raw source, and to run `bounds validate --quick` after edits. The instructions are
-identical in substance — only the file format differs per tool.
-
-Full integration guides with example configuration files are in
-[ARCHITECTURE.md](ARCHITECTURE.md). A native MCP server (`bounds mcp`) is on the
-[roadmap](ROADMAP.md) for v0.3.
+`bounds agent --sync` is the single supported path — the canonical contract lives in
+[`BOUNDS.md`](BOUNDS.md) (committed) and every per-tool config is generated from it, so there's no
+template to copy or keep in sync. A native MCP server (`bounds mcp`) is on the
+[roadmap](#roadmap) for v0.3.
 
 ---
 
@@ -335,13 +393,18 @@ For the full disclosure policy and distribution integrity details, see [SECURITY
 
 | Command | What it returns |
 |---------|-----------------|
-| `bounds init --root` | Scaffolds `.bounds/root.yaml` with project defaults |
-| `bounds init --subsystem <name>` | Scaffolds `.bounds/manifests/<name>.yaml`. `--namespace <ns>` tags it |
+| `bounds init` | Scaffolds `.bounds/`. `--root`, `--subsystem <name>`, `--namespace <ns>`, `--root <path>` |
 | `bounds list` | All subsystems with role, criticality, exposes, consumes, consumed_by. `--namespace <ns>` filters |
-| `bounds describe <name>` | One subsystem's full manifest as JSON. `--namespace <ns>` describes every subsystem in a group instead |
-| `bounds validate` | Full validation — all 6 checks. `--quick`, `--mode <m>`, `--enforce on\|off` |
+| `bounds describe <name>` | One subsystem's merged Tier-1+2 surface as JSON (`verified`/`file`/`entry_point` per expose). `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
+| `bounds impact <name>` | Transitive consumer blast radius + which interfaces each direct consumer relies on. Zero LLM |
+| `bounds validate` | Full validation — all 6 checks. `--quick`, `--mode quick\|full\|preflight\|hotfix\|audit`, `--enforce on\|off`, `--base <ref>` |
 | `bounds preflight` | 6 pre-PR checks in blocking mode |
 | `bounds overview` | Project dashboard: subsystem health, file counts, language breakdown |
+| `bounds discover` | Auto-generate candidate manifests from un-bounded source. `--apply`, `--namespace <ns>`, `--merge-into 'name=p1,p2'` |
+| `bounds calibrate` | Reconcile manifests vs tree-sitter reality (ADD / REMOVE / NEEDS_REVIEW / `consumes` fixes). `--apply`, `--subsystem <n>` |
+| `bounds agent` | Wire Bounds into eight coding agents. `--sync`, `--detect`, `--check`, per-agent flags |
+| `bounds ci` | Generate CI gate config. `--install`, `--action`, `--precommit`, `--gitlab`, `--all` |
+| `bounds cache` | Manage the binary `.bounds/cache.db`. `--inspect`, `--prune`, `--migrate` |
 
 `validate` and `preflight` also take file-selection and output toggles (all default off):
 
@@ -357,35 +420,57 @@ Every command prints **JSON to stdout by default** and accepts `--human` for rea
 output. Fatal errors print `{"error": {"code", "message", "fix"}}` and exit 2; blocking failures
 exit 1. Error codes are stable — see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+### CI gates in one command
+
+`bounds ci --install` generates ready-to-commit gate config (idempotent, path-gated):
+
+- **`.github/workflows/bounds.yml`** — runs `bounds preflight --ci`, and uses `actions/cache@v4`
+  keyed on `root.yaml` + the manifests so a fresh branch reuses main's warm cache.
+- **`.pre-commit-config.yaml`** — a local `bounds validate --quick --ci` hook.
+- **`.gitlab-ci.yml`** — the GitLab equivalent.
+
+`--action` / `--precommit` / `--gitlab` / `--all` select targets. Putting `[skip bounds]` in a commit
+message is the documented skip convention.
+
+### Custom roles & criticality
+
+By default the four built-in roles (`service` / `platform` / `connector` / `library`) and the
+`core` / `connector` / `leaf` criticality levels apply. `root.yaml` can declare custom `roles:`
+(each `extends:` a built-in base, optionally overriding `orphan_exposes`) and custom `criticality:`
+levels (each `{depth: <int>}`; `-1` unbounded, `0` none, `N` hops). With no custom block the
+built-ins apply, so this is fully backward compatible; an invalid label gets a typo suggestion in
+the error `fix`.
+
 ---
 
 ## Install channels
 
 | Channel | Command | Status |
 |---------|---------|--------|
-| **pip** | `pip install bounds` | Available |
-| **pipx** | `pipx install bounds` | Available |
-| **Clone + pip** | `pip install git+https://github.com/Farzin312/bounds.git` | Available |
-| **curl** | `curl -sSL https://bounds.dev/install.sh \| bash` | Planned (v0.2.0) |
-| **Homebrew** | `brew install bounds` | Planned (v0.2.0) |
-| **conda-forge** | `conda install bounds` | Planned (v0.2.0) |
-| **Docker** | `docker pull bounds/bounds` | Planned (v0.2.0) |
+| **pipx (git)** | `pipx install "git+https://github.com/Farzin312/bounds.git"` | **Works today** |
+| **pip (git)** | `pip install "git+https://github.com/Farzin312/bounds.git"` | **Works today** |
+| **Clone + editable** | `pip install -e ".[dev]"` | **Works today** |
+| **install.sh** | `BOUNDS_REF=main ./install.sh` (git ref) | **Works today** (PyPI default mode pending publish) |
+| **pip / pipx (PyPI)** | `pipx install bounds` | Release workflow configured — pending PyPI publish |
+| **Homebrew** | `brew install Farzin312/bounds/bounds` | Bootstrapped — depends on PyPI publish |
+| **curl** | `curl -sSL .../install.sh \| bash` | Bootstrapped — depends on PyPI publish |
+| **Standalone signed binary** | (no Python required) | Planned (v0.2.0) |
+| **conda-forge / Docker** | `conda install` / `docker pull` | Planned (v0.2.0) |
 
 ---
 
 ## Cross-platform support
 
-Fully supported on **Linux, macOS, and Windows**, Python **3.10--3.14**. Internally Bounds uses
-`pathlib` everywhere and stores POSIX-normalized relative paths, so manifests are identical across
-operating systems.
+Runs on **Linux, macOS, and Windows**, Python **3.10–3.14**. Internally Bounds uses `pathlib`
+everywhere and stores POSIX-normalized relative paths, so manifests are byte-identical across
+operating systems. The tree-sitter grammar dependencies ship prebuilt wheels for these platforms, so
+a git/PyPI install never needs a C compiler.
 
 | Platform | Notes |
 |----------|-------|
-| **Linux** | glibc (`manylinux2014` x86_64/aarch64) and musl/Alpine (`musllinux` x86_64) wheels |
-| **macOS** | Apple Silicon (arm64) and Intel (x86_64) wheels — no Xcode required |
-| **Windows** | `win_amd64`/`win_arm64` wheels — no Visual C++ Build Tools needed. `--quick` needs Git for Windows on PATH |
-
-Prebuilt tree-sitter grammars ship for every platform — installs never require a C compiler.
+| **Linux** | glibc (`manylinux` x86_64/aarch64) and musl/Alpine (`musllinux` x86_64) |
+| **macOS** | Apple Silicon (arm64) and Intel (x86_64) — no Xcode required |
+| **Windows** | `win_amd64`/`win_arm64` — no Visual C++ Build Tools needed. `--quick` needs Git for Windows on PATH |
 
 ---
 
@@ -395,12 +480,11 @@ Prebuilt tree-sitter grammars ship for every platform — installs never require
 |------|---------|
 | [README.md](README.md) | This file — product pitch, quickstart, agent integration |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Engineering contract: modules, data model, checks, error codes, JSON shapes |
-| [ROADMAP.md](ROADMAP.md) | What is in MVP v0.1 vs what is coming (v0.2, v0.3) |
 | [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
 | [SECURITY.md](SECURITY.md) | Security principles, vulnerability disclosure, distribution integrity |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, coding standards, testing, PR workflow |
 | [CLAUDE.md](CLAUDE.md) | Project memory for agents and contributors working *on* Bounds |
-| [templates/](templates/) | Drop-in agent-instruction templates (AGENTS.md, CLAUDE.md, .cursorrules) |
+| [BOUNDS.md](BOUNDS.md) | Canonical agent contract — generated by `bounds agent --sync`, source for every per-tool config |
 | [benchmarks/](benchmarks/v0.1.0/README.md) | Raw benchmark data, token cost analysis, performance measurements |
 
 ---
@@ -409,11 +493,11 @@ Prebuilt tree-sitter grammars ship for every platform — installs never require
 
 | Version | Focus | Key additions |
 |---------|-------|--------------|
-| **v0.1** (current) | Core engine, zero-LLM validation | Manifests, tree-sitter extraction, 6 checks, cache, quick mode, agent integration |
-| **v0.2** | Semantic tier + ergonomics | LLM enrichment (`--deep`), Go/Rust adapters, `bounds migrate`, configurable ignores |
-| **v0.3** | Distribution + ecosystem | MCP server, GitHub Action, Homebrew formula, standalone binaries, `bounds watch` |
+| **v0.1** (current) | Core engine + onboarding + ecosystem wiring | 13 commands; tree-sitter extraction (Python + TS/JS); 6 checks; binary SQLite cache; `--quick` mode; `discover`/`calibrate`/`impact`; `agent --sync` (8 agents); `ci --install`; custom roles/criticality |
+| **v0.2** | Semantic tier + more languages | Live LLM enrichment (`--deep`, currently stubbed), Go/Rust adapters, signed standalone binaries, PyPI/Homebrew release |
+| **v0.3** | Distribution + ecosystem | MCP server (`bounds mcp`), `bounds watch`, Java adapter |
 
-Full details in [ROADMAP.md](ROADMAP.md).
+The living, dated roadmap is tracked in [GitHub Issues and Milestones](https://github.com/Farzin312/bounds/milestones) — this table is the high-level summary.
 
 ---
 
@@ -438,7 +522,7 @@ Issues and PRs welcome at [github.com/Farzin312/bounds](https://github.com/Farzi
 | Validation | None (graph = truth) | Drift detection, contract compliance, boundary checks |
 | LLM dependency | High (embeddings, semantic search) | Zero for structural path |
 | CI integration | Analysis step | Gate step — can block PRs |
-| Setup time | Server config, embedding indexing | `pip install bounds` + `bounds init` |
+| Setup time | Server config, embedding indexing | `pipx install` + `bounds discover` |
 
 **Complementary, not competitive.** Bounds does not compete with CodeGraph — these are tools at
 different layers. CodeGraph/TSA/roam-code answer "What's in this codebase?" (detailed, expensive,

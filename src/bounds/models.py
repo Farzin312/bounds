@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import config
+
 
 # ===========================================================================
 # Manifest tier (declared)
@@ -24,22 +26,26 @@ class Interface:
     name: str
     kind: str = "unknown"  # function|class|const|type|interface|variable|unknown
     signature: str | None = None  # Tier-3 (LLM) enrichment; None in MVP
+    internal: bool = False  # s-16: exempt from calibration add/remove (deliberately private)
 
     def to_dict(self) -> dict:
         d = {"name": self.name, "kind": self.kind}
         if self.signature is not None:
             d["signature"] = self.signature
+        if self.internal:
+            d["internal"] = True
         return d
 
     @classmethod
     def from_dict(cls, data) -> "Interface":
-        # Accept either a bare string ("login") or a mapping ({name, kind, signature}).
+        # Accept either a bare string ("login") or a mapping ({name, kind, signature, internal}).
         if isinstance(data, str):
             return cls(name=data)
         return cls(
             name=str(data.get("name", "")),
             kind=str(data.get("kind", "unknown")),
             signature=data.get("signature"),
+            internal=bool(data.get("internal", False)),
         )
 
 
@@ -120,10 +126,14 @@ class RootManifest:
     enforce: str = "off"
     subsystems: list[str] = field(default_factory=list)
     entry_points: list[str] = field(default_factory=list)  # root-level bootstrap globs
+    # Optional developer-defined schema extensions (s-17). Raw YAML mappings; resolved
+    # lazily via role_registry()/criticality_registry(). Empty -> built-in enums apply.
+    roles: dict = field(default_factory=dict)
+    criticality: dict = field(default_factory=dict)
     source_path: str = ""
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "version": self.version,
             "project": self.project,
             "languages": list(self.languages),
@@ -131,6 +141,11 @@ class RootManifest:
             "subsystems": list(self.subsystems),
             "entry_points": list(self.entry_points),
         }
+        if self.roles:
+            d["roles"] = self.roles
+        if self.criticality:
+            d["criticality"] = self.criticality
+        return d
 
     @classmethod
     def from_dict(cls, data: dict, source_path: str = "") -> "RootManifest":
@@ -141,8 +156,53 @@ class RootManifest:
             enforce=str(data.get("enforce", "off")),
             subsystems=[str(s) for s in (data.get("subsystems") or [])],
             entry_points=[str(g) for g in (data.get("entry_points") or [])],
+            roles=dict(data.get("roles") or {}),
+            criticality=dict(data.get("criticality") or {}),
             source_path=source_path,
         )
+
+    def role_registry(self) -> dict[str, dict]:
+        """Resolve the valid roles -> their base behavior (s-17).
+
+        With no custom ``roles:`` block, returns the four built-ins, each mapping to itself
+        as base. With a custom block, returns *only* the declared roles (built-ins are not
+        auto-included — the spec's "no two competing naming systems" rule); each custom role
+        inherits its base's behavior (``extends:`` or ``type:``), overridable per-flag.
+        """
+        if not self.roles:
+            return {
+                name: {"base": name, **config.ROLE_BASE_BEHAVIOR[name]}
+                for name in config.BUILTIN_ROLES
+            }
+        registry: dict[str, dict] = {}
+        for name, spec in self.roles.items():
+            spec = spec if isinstance(spec, dict) else {}
+            base = str(spec.get("extends") or spec.get("type") or "").strip()
+            behavior = dict(config.ROLE_BASE_BEHAVIOR.get(base, {"orphan_exposes": False}))
+            if "orphan_exposes" in spec:
+                behavior["orphan_exposes"] = bool(spec["orphan_exposes"])
+            registry[str(name)] = {"base": base, **behavior}
+        return registry
+
+    def criticality_registry(self) -> dict[str, int]:
+        """Resolve the valid criticality labels -> propagation depth (s-17).
+
+        With no custom ``criticality:`` block, returns the built-in core/connector/leaf
+        depths. With a custom block, each label's ``depth:`` integer drives propagation
+        (-1 unbounded, 0 none, N hops).
+        """
+        if not self.criticality:
+            return dict(config.BUILTIN_CRITICALITY_DEPTH)
+        registry: dict[str, int] = {}
+        for name, spec in self.criticality.items():
+            depth = 0
+            if isinstance(spec, dict) and "depth" in spec:
+                try:
+                    depth = int(spec["depth"])
+                except (TypeError, ValueError):
+                    depth = 0
+            registry[str(name)] = depth
+        return registry
 
 
 # ===========================================================================

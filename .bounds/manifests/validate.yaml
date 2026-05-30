@@ -8,6 +8,9 @@ exposes:
   - { name: run, kind: function }
   - { name: CheckContext, kind: class }
   - { name: check_cycles, kind: function }
+  - { name: resolve_import, kind: function }
+  - { name: build_consumer_index, kind: function }
+  - { name: transitive_consumers, kind: function }
 consumes:
   - { subsystem: models, via: models, interfaces: [RootManifest, SubsystemCompact, ExtractResult, Issue, ValidationReport] }
   - { subsystem: manifest, via: loader, interfaces: [load_all] }

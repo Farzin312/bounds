@@ -85,17 +85,93 @@ def validate_root(data: dict) -> list[Issue]:
             )
         )
 
+    issues.extend(_validate_role_defs(data.get("roles")))
+    issues.extend(_validate_criticality_defs(data.get("criticality")))
     return issues
 
 
-def validate_subsystem(name: str, data: dict) -> list[Issue]:
+def _validate_role_defs(roles) -> list[Issue]:
+    """Validate an optional custom ``roles:`` block (s-17): each must extend a base role."""
+    if roles is None:
+        return []
+    if not isinstance(roles, dict):
+        return [
+            Issue(
+                code=errors.E_SCHEMA_INVALID,
+                severity="error",
+                message="root manifest 'roles' must be a mapping of name -> definition",
+                fix="define each custom role with `extends:` or `type:` a built-in base "
+                f"({sorted(config.BUILTIN_ROLES)})",
+            )
+        ]
+    issues: list[Issue] = []
+    for name, spec in roles.items():
+        spec = spec if isinstance(spec, dict) else {}
+        base = str(spec.get("extends") or spec.get("type") or "").strip()
+        if base not in config.BUILTIN_ROLES:
+            issues.append(
+                Issue(
+                    code=errors.E_SCHEMA_INVALID,
+                    severity="error",
+                    message=(
+                        f"custom role '{name}' must `extends`/`type` a built-in base role, "
+                        f"got {base!r}"
+                    ),
+                    fix=f"set `extends:` (or `type:`) to one of {sorted(config.BUILTIN_ROLES)}",
+                )
+            )
+    return issues
+
+
+def _validate_criticality_defs(crit) -> list[Issue]:
+    """Validate an optional custom ``criticality:`` block (s-17): each needs a ``depth:`` int."""
+    if crit is None:
+        return []
+    if not isinstance(crit, dict):
+        return [
+            Issue(
+                code=errors.E_SCHEMA_INVALID,
+                severity="error",
+                message="root manifest 'criticality' must be a mapping of name -> {depth: int}",
+                fix="define each label as `<name>: {depth: <int>}` (-1 unbounded, 0 none, N hops)",
+            )
+        ]
+    issues: list[Issue] = []
+    for name, spec in crit.items():
+        depth = spec.get("depth") if isinstance(spec, dict) else spec
+        if not isinstance(depth, int) or isinstance(depth, bool):
+            issues.append(
+                Issue(
+                    code=errors.E_SCHEMA_INVALID,
+                    severity="error",
+                    message=f"custom criticality '{name}' must declare an integer 'depth', got {depth!r}",
+                    fix=f"write `{name}: {{ depth: 1 }}` (-1 unbounded, 0 none, N hops)",
+                )
+            )
+    return issues
+
+
+def validate_subsystem(
+    name: str,
+    data: dict,
+    valid_roles: set[str] | None = None,
+    valid_criticality: set[str] | None = None,
+) -> list[Issue]:
     """Validate a subsystem-manifest dict, returning schema Issues (never raises).
 
     Enforces: ``name`` present (inferred from ``name`` arg if YAML omits it),
-    ``role`` in ``config.VALID_ROLES``, ``criticality`` optional but valid if present
-    (default ``leaf``), ``paths`` a list, each ``exposes`` entry carrying a name and
+    ``role`` in ``valid_roles``, ``criticality`` optional but in ``valid_criticality`` if
+    present (default ``leaf``), ``paths`` a list, each ``exposes`` entry carrying a name and
     each ``consumes`` entry carrying a subsystem. Issues carry ``subsystem=name``.
+
+    ``valid_roles``/``valid_criticality`` come from the resolved root registries (s-17);
+    they default to the built-in enums so callers without a root context stay backward
+    compatible.
     """
+    valid_roles = valid_roles if valid_roles is not None else set(config.BUILTIN_ROLES)
+    valid_criticality = (
+        valid_criticality if valid_criticality is not None else set(config.BUILTIN_CRITICALITY)
+    )
     if not isinstance(data, dict):
         return [
             Issue(
@@ -122,29 +198,29 @@ def validate_subsystem(name: str, data: dict) -> list[Issue]:
         )
 
     role = data.get("role")
-    if role is None or role not in config.VALID_ROLES:
+    if role is None or role not in valid_roles:
         issues.append(
             Issue(
                 code=errors.E_SCHEMA_INVALID,
                 severity="error",
-                message=f"subsystem '{declared_name}' role must be one of {sorted(config.VALID_ROLES)}, got {role!r}",
+                message=f"subsystem '{declared_name}' role must be one of {sorted(valid_roles)}, got {role!r}",
                 subsystem=name,
-                fix="set `role:` to service|platform|connector|library",
+                fix=_unknown_label_fix("role", role, valid_roles),
             )
         )
 
     criticality = data.get("criticality")
-    if criticality is not None and criticality not in config.VALID_CRITICALITY:
+    if criticality is not None and criticality not in valid_criticality:
         issues.append(
             Issue(
                 code=errors.E_SCHEMA_INVALID,
                 severity="error",
                 message=(
                     f"subsystem '{declared_name}' criticality must be one of "
-                    f"{sorted(config.VALID_CRITICALITY)}, got {criticality!r}"
+                    f"{sorted(valid_criticality)}, got {criticality!r}"
                 ),
                 subsystem=name,
-                fix="set `criticality:` to core|connector|leaf (or omit for leaf)",
+                fix=_unknown_label_fix("criticality", criticality, valid_criticality),
             )
         )
 
@@ -211,6 +287,53 @@ def validate_subsystem(name: str, data: dict) -> list[Issue]:
                     )
 
     return issues
+
+
+def _unknown_label_fix(kind: str, got, valid: set[str]) -> str:
+    """Build a fix hint for an invalid role/criticality, suggesting a near-miss if any (s-17)."""
+    base = (
+        f"set `{kind}:` to one of {sorted(valid)}, "
+        f"or define a custom {kind} in root.yaml under '{kind}s' (s-17)"
+        if kind == "role"
+        else f"set `{kind}:` to one of {sorted(valid)}, or define a custom {kind} in root.yaml"
+    )
+    suggestion = _closest(str(got or ""), valid)
+    return f"did you mean '{suggestion}'? {base}" if suggestion else base
+
+
+def _closest(value: str, candidates: set[str]) -> str | None:
+    """Return a candidate within edit-distance 1 of ``value`` (cheap typo detection)."""
+    if not value:
+        return None
+    for cand in sorted(candidates):
+        if _within_one_edit(value, cand):
+            return cand
+    return None
+
+
+def _within_one_edit(a: str, b: str) -> bool:
+    """True if ``a`` and ``b`` differ by at most one insert/delete/substitution."""
+    if a == b:
+        return False
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:  # single substitution
+        return sum(x != y for x, y in zip(a, b)) == 1
+    # one insertion/deletion: walk the shorter against the longer
+    short, long = (a, b) if la < lb else (b, a)
+    i = j = 0
+    skipped = False
+    while i < len(short) and j < len(long):
+        if short[i] == long[j]:
+            i += 1
+            j += 1
+        elif skipped:
+            return False
+        else:
+            skipped = True
+            j += 1
+    return True
 
 
 def _entry_name(entry) -> str:

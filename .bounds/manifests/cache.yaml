@@ -1,12 +1,15 @@
 name: cache
 role: library
 criticality: connector
-description: Content-addressable per-file extraction cache persisted to .bounds/state.json.
+description: Content-addressable per-file extraction cache persisted as binary SQLite (.bounds/cache.db); context armor + per-subsystem partial reads.
 paths:
   - src/bounds/cache
 exposes:
   - { name: load_state, kind: function }
   - { name: save_state, kind: function }
+  - { name: migrate_json_to_sqlite, kind: function }
+  - { name: prune_missing, kind: function }
+  - { name: inspect, kind: function }
   - { name: State, kind: class }
   - { name: FileRecord, kind: class }
 consumes:

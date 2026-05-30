@@ -43,21 +43,25 @@ bounds --help
 bounds/
 ├── .github/workflows/      # CI/CD workflows
 ├── src/bounds/
-│   ├── cache/              # Content-addressable extraction cache
-│   ├── extract/            # Tree-sitter language adapters
+│   ├── cache/              # Binary SQLite extraction cache (cache.db)
+│   ├── extract/            # Tree-sitter language adapters (+ scan.py shared helpers)
 │   ├── manifest/           # Manifest loader + schema validation
-│   ├── validate/           # Validation engine + checks
-│   ├── cli.py              # Click CLI entry point
-│   ├── config.py           # Global constants
+│   ├── validate/           # Validation engine + checks + propagation
+│   ├── cli.py              # Click CLI entry point (all commands)
+│   ├── config.py           # Global constants + role/criticality registries
 │   ├── errors.py           # Error codes
 │   ├── gitutil.py          # Git helpers
+│   ├── ignore.py           # .boundsignore matcher + @generated detection
 │   ├── models.py           # Data model dataclasses
-│   └── output.py           # JSON / human rendering
-├── tests/                  # Pytest test suite
+│   ├── output.py           # JSON / human / CI rendering
+│   ├── discover.py         # Bootstrap discovery (s-14)
+│   ├── calibrate.py        # Manifest↔source reconciliation (s-16)
+│   ├── agentsync.py        # Cross-agent config generation (s-18)
+│   └── ciconfig.py         # CI config generation (s-20)
+├── tests/                  # Pytest test suite (10 files, 147 tests)
 ├── ARCHITECTURE.md         # Engineering contract
 ├── CONTRIBUTING.md         # This file
-├── README.md               # Project overview + agent integration
-└── ROADMAP.md              # Future direction
+└── README.md               # Project overview + agent integration (+ Roadmap section)
 ```
 
 ## Coding Standards
@@ -100,9 +104,13 @@ All tests must pass. If you add a new feature, include tests.
 
 ### Writing Tests
 
-- Tests live in `tests/` and mirror the `src/bounds/` package structure.
-- Use `pytest` fixtures from `tests/conftest.py` for temporary projects.
-- The `py_project` fixture creates a minimal two-subsystem Python project.
+- Tests live in `tests/` and are grouped by feature area (10 files, 147 tests):
+  `test_extract.py`, `test_validate.py`, `test_schema_flex.py` (s-17 roles/criticality),
+  `test_cache_sqlite.py`, `test_discover.py`, `test_calibrate.py`, `test_agentsync.py`,
+  `test_ciconfig.py`, `test_cli.py`, and `test_commands_cli.py`.
+- Use `pytest` fixtures from `tests/conftest.py` for temporary projects: `sample_project`
+  (multi-subsystem TS+Py), `py_project` (minimal Python project), `git_sample_project` /
+  `git_init` (git-backed variants for quick-mode tests).
 - CLI tests use CliRunner from Click.
 
 ## Branching and PR Workflow
@@ -122,7 +130,8 @@ Tree-sitter adapters live in `src/bounds/extract/`. To add a new language:
 1. Create a file `src/bounds/extract/<language>.py`.
 2. Subclass `LanguageAdapter` from `.base`. Set `language_name` and `extensions`.
 3. Implement `extract(self, rel_path, source) -> ExtractResult` to walk the
-   tree-sitter tree for exported symbols and import references.
+   tree-sitter tree for exported symbols and import references. Build the result via
+   `base.make_result(...)` so both the content and structure hashes are computed consistently.
 4. Register the adapter in `src/bounds/extract/registry.py`.
 5. Add the tree-sitter grammar to `pyproject.toml` dependencies.
 6. Write tests in `tests/test_extract.py`.
@@ -144,7 +153,7 @@ When contributing documentation changes:
   and competitive positioning. No emoji.
 - **ARCHITECTURE.md** — engineering contract. Every module signature, dataclass field, error code,
   and JSON shape is binding.
-- **ROADMAP.md** — scope and phasing. What is in vs what is deferred.
+- **README "Roadmap" section + GitHub Milestones** — scope and phasing (shipped vs deferred).
 - **SECURITY.md** — security principles (7), vulnerability disclosure policy, install channels.
 - **CHANGELOG.md** — version history. Keep a summary of changes per release.
 - **Benchmarks** — raw data in `benchmarks/v0.1.0/` with full methodology, commands, and
