@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-xdist>=3", "coverage>=7", "build>=1"]
+dev = ["pytest>=9.0.3", "pytest-xdist>=3", "coverage>=7", "build>=1"]
 
 [project.urls]
 Homepage = "https://github.com/Farzin312/bounds"
