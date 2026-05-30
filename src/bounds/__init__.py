@@ -1,3 +1,7 @@
 """Bounds — AI-native codebase understanding via subsystem boundary manifests."""
 
-__version__ = "0.1.0"
+try:
+    from importlib.metadata import version as _version
+    __version__ = _version("bounds")
+except Exception:
+    __version__ = "unknown"

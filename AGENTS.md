@@ -10,6 +10,11 @@ Bounds models this codebase as subsystem boundary manifests. Query them through 
 - `bounds validate --quick` — catch drift after a change
 - `bounds impact <name>` — transitive blast radius before a risky change
 
+### Source of Truth
+- GitHub is the single source of truth.
+- This repo uses `setuptools-scm` for automatic versioning.
+- If the local `bounds` CLI is stale, run: `pipx install --force git+https://github.com/Farzin312/bounds.git`.
+
 ### Hard rules
 - NEVER read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/manifests/*.yaml`, or `.bounds/root.yaml` directly. The cache is binary; the manifests bypass tree-sitter verification.
 - The CLI is the API. Always use `bounds` commands to read architecture.
