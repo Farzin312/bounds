@@ -16,7 +16,7 @@ ROOT_FILE = "root.yaml"
 SUBSYS_DIR = "subsystems"
 SUBSYS_FILE = "bounds.yaml"
 MANIFESTS_DIR = "manifests"
-CACHE_FILE = "cache.db"  # binary SQLite extraction cache (context armor; s-15/s-19)
+CACHE_FILE = "cache.db"  # binary SQLite extraction cache (context armor)
 STATE_FILE = "state.json"  # legacy JSON cache; read once for auto-migration to cache.db
 
 # ---- Schema / versioning ----
@@ -25,7 +25,7 @@ STATE_VERSION = "1"
 
 # ---- Enumerations ----
 # The four built-in roles are *behavior classes*, not just labels. Developers may define
-# custom role names in root.yaml that `extends`/`type` one of these bases (s-17); when no
+# custom role names in root.yaml that `extends`/`type` one of these bases; when no
 # custom roles are declared, these built-ins are the valid set (backward compatible).
 BUILTIN_ROLES = {"service", "platform", "connector", "library"}
 BUILTIN_CRITICALITY = {"core", "connector", "leaf"}
@@ -47,7 +47,7 @@ ROLE_BASE_BEHAVIOR = {
 
 # ---- Extraction ----
 # Hard ceiling on a single source file's size (bytes). A file larger than this is skipped with
-# an E_EXTRACTION_FAILED warning rather than read into memory (s-33 resource bound) — guards
+# an E_EXTRACTION_FAILED warning rather than read into memory (resource bound) — guards
 # against a giant minified/generated blob or a runaway file exhausting memory. 1 MB is far above
 # any hand-written source file; legitimately-huge generated files should be gitignored anyway.
 MAX_FILE_BYTES = 1_000_000
@@ -70,7 +70,7 @@ DEFAULT_IGNORES = {
 # ---- Propagation ----
 # Depth of consumer propagation, keyed by the *changed provider's* criticality.
 #   -1 = unbounded (transitive closure), 0 = none, N = N hops.
-# These are the built-in depths; custom criticality labels (s-17) declare their own
+# These are the built-in depths; custom criticality labels declare their own
 # `depth:` in root.yaml. Used as the fallback when no custom criticality is defined.
 PROPAGATION_DEPTH = {"core": -1, "connector": 1, "leaf": 0}
 BUILTIN_CRITICALITY_DEPTH = PROPAGATION_DEPTH

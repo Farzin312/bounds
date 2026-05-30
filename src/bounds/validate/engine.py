@@ -37,12 +37,12 @@ def run(
     ``persist`` controls whether the extraction cache (``.bounds/cache.db``) is written back;
     read-only callers (e.g. ``describe``) pass ``persist=False`` to avoid mutating the cache.
 
-    File-selection toggles (all default off, matching the vault's "scan less, by default"
+    File-selection toggles (all default off, matching the "scan less, by default"
     posture): ``include_ignored`` disables ``.boundsignore``; ``include_gitignored`` scans
     files excluded by ``.gitignore``; ``follow_symlinks`` includes external symlinks instead
     of skipping them with a warning; ``fail_on_unowned`` promotes tracked source files outside
     every subsystem from silent to a blocking ``E_UNOWNED_FILE`` error — except files matching
-    a ``root.entry_points`` glob, which stay non-blocking warnings (GAP #6, hybrid B+C).
+    a ``root.entry_points`` glob, which stay non-blocking warnings.
     """
     started = time.perf_counter()
     if mode not in config.VALID_MODES:
@@ -138,12 +138,12 @@ def run(
         # Quick mode: a file git says is unchanged is trusted from cache without hashing/parsing.
         if mode == "quick" and rel not in changed_rel and prev is not None:
             extracts[rel] = prev.to_result()
-            prev.subsystem = owner  # keep the cached owner current (s-19 partial reads)
+            prev.subsystem = owner  # keep the cached owner current (partial reads)
             cache_hits += 1
             continue
 
         # Fail loud on an OWNED file we can't read or that's oversized — never silently drop it
-        # (a dropped owned file makes a real symbol look like verified:false). s-33.
+        # (a dropped owned file makes a real symbol look like verified:false).
         try:
             if abs_path.stat().st_size > config.MAX_FILE_BYTES:
                 issues.append(
@@ -174,7 +174,7 @@ def run(
         chash = content_hash(source)
         if prev is not None and prev.content_hash == chash:
             extracts[rel] = prev.to_result()
-            prev.subsystem = owner  # keep the cached owner current (s-19 partial reads)
+            prev.subsystem = owner  # keep the cached owner current (partial reads)
             cache_hits += 1
             continue
 
@@ -202,7 +202,7 @@ def run(
         try:
             cache_store.save_state(project_root, state)
         except (OSError, sqlite3.Error):
-            pass  # cache is an optimization; never fail validation over it (incl. a locked db, s-33)
+            pass  # cache is an optimization; never fail validation over it (incl. a locked db)
 
     propagated = propagation.propagate(dirty, subsystems, root.criticality_registry())
 
@@ -226,8 +226,8 @@ def run(
 
     # ---- Ownership exhaustiveness (opt-in, blocks regardless of mode/enforce) ----
     # Computed after the quick downgrade so --fail-on-unowned stays a hard gate even in
-    # quick mode (the vault's "promote unowned from silent to error" requirement).
-    # Entry-point files (root.entry_points) are reported but never block (GAP #6, hybrid B+C).
+    # quick mode (promote unowned from silent to error).
+    # Entry-point files (root.entry_points) are reported but never block.
     unowned: list[Issue] = []
     entry_points: list[str] = []
     if fail_on_unowned:
@@ -241,7 +241,7 @@ def run(
     blocking = _is_blocking(issues, mode, final_enforce) or unowned_blocks
     duration_ms = int((time.perf_counter() - started) * 1000)
 
-    # s-31 coverage: an honest signal that boundary checking is not as complete as a clean
+    # coverage: an honest signal that boundary checking is not as complete as a clean
     # report implies. unresolved_local_imports is measured only in boundary-checking modes
     # (full/preflight/audit); quick reports 0 (it runs no boundary check).
     coverage = {
@@ -317,7 +317,7 @@ def _unowned_issues(
 
     Files matching a ``root.entry_points`` glob are known bootstrap files (main.py,
     app.py, ...): they degrade from a blocking ``error`` to a non-blocking ``warning`` and
-    are never promoted by ``--fail-on-unowned`` (GAP #6, hybrid B+C). Genuinely unowned
+    are never promoted by ``--fail-on-unowned``. Genuinely unowned
     files stay blocking errors. Returns ``(issues, entry_point_paths)``.
     """
     universe = _source_universe(project_root, repo, exts, matcher)

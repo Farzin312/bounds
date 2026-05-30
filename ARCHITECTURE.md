@@ -16,7 +16,7 @@
 4. **Hidden `.bounds/`.** Never auto-discovered by other tools; walked up from CWD by the CLI only (a legacy `.compact/` is read as a fallback when `.bounds/` is absent).
 5. **Fail soft, report hard.** A single unparsable file degrades to an `Issue`, never a crash. Exit codes encode severity.
 6. **Forward-compatible.** `version` on every manifest + a `PRAGMA user_version` on the cache; unknown fields preserved/ignored, never fatal.
-7. **Context-armored cache.** The extraction cache is a **binary SQLite file** (`.bounds/cache.db`), not human-parseable JSON. An agent that naively `cat`s it gets gibberish rather than a large token blob dumped into its context — the structural defense against accidental context burn (s-15). Human-editable manifests stay YAML; only the *derived* cache is binary.
+7. **Context-armored cache.** The extraction cache is a **binary SQLite file** (`.bounds/cache.db`), not human-parseable JSON. An agent that naively `cat`s it gets gibberish rather than a large token blob dumped into its context — the structural defense against accidental context burn. Human-editable manifests stay YAML; only the *derived* cache is binary.
 
 ---
 
@@ -33,22 +33,22 @@ bounds/
 │   ├── root.yaml                  # global config: project, languages, enforce, entry_points, subsystems, roles?, criticality?
 │   ├── manifests/                 # one <name>.yaml per subsystem
 │   │   └── <name>.yaml
-│   └── cache.db                   # binary SQLite extraction cache (gitignored; context armor s-15)
+│   └── cache.db                   # binary SQLite extraction cache (gitignored; context armor)
 ├── src/
 │   └── bounds/
 │       ├── __init__.py            # __version__
 │       ├── cli.py                 # click group + all commands (arg-parse + one go() per command)
-│       ├── describe.py            # Tier-1+2 `describe` assembly (s-34; reuses extract/scan + validate engine)
+│       ├── describe.py            # Tier-1+2 `describe` assembly (reuses extract/scan + validate engine)
 │       ├── config.py              # constants: dir names, schema version, defaults, role/criticality registries
 │       ├── errors.py              # BoundsError + stable error-code registry
 │       ├── models.py              # all dataclasses (the data model)
 │       ├── output.py              # JSON / human / CI emit + exit-code mapping
 │       ├── gitutil.py             # git repo detection + changed-file diff + tracked/gitignored queries
 │       ├── ignore.py              # .boundsignore matcher + @generated-marker detection
-│       ├── discover.py            # bootstrap discovery: auto-propose manifests from source (s-14)
-│       ├── calibrate.py           # manifest↔source reconciliation (s-16)
-│       ├── agentsync.py           # cross-agent config generation (s-18)
-│       ├── ciconfig.py            # CI config generation (s-20)
+│       ├── discover.py            # bootstrap discovery: auto-propose manifests from source
+│       ├── calibrate.py           # manifest↔source reconciliation
+│       ├── agentsync.py           # cross-agent config generation
+│       ├── ciconfig.py            # CI config generation
 │       ├── manifest/
 │       │   ├── __init__.py
 │       │   ├── loader.py          # discover .bounds/, load root + subsystems, fill consumed_by
@@ -153,7 +153,7 @@ class Interface:
     name: str
     kind: str = "unknown"          # function|class|const|type|interface|variable|unknown
     signature: str | None = None   # Tier-3 (LLM) enrichment; None in MVP
-    internal: bool = False         # s-16: exempt this expose from calibration add/remove (deliberately private)
+    internal: bool = False         # exempt this expose from calibration add/remove (deliberately private)
 
 @dataclass
 class Consumes:
@@ -164,8 +164,8 @@ class Consumes:
 @dataclass
 class SubsystemCompact:
     name: str
-    role: str = "library"          # built-in service|platform|connector|library, or a custom role (s-17)
-    criticality: str = "leaf"      # built-in core|connector|leaf, or a custom label (s-17); drives propagation depth
+    role: str = "library"          # built-in service|platform|connector|library, or a custom role
+    criticality: str = "leaf"      # built-in core|connector|leaf, or a custom label; drives propagation depth
     description: str = ""
     namespace: str = ""            # optional grouping tag (list/describe --namespace)
     paths: list[str] = []          # dirs/globs (relative to repo root) owned by this subsystem
@@ -183,11 +183,11 @@ class RootManifest:
     enforce: str = "off"           # on|off  (whether full-mode issues are blocking)
     subsystems: list[str] = []     # subsystem names (each has its own bounds.yaml)
     entry_points: list[str] = []   # root-level bootstrap globs exempt from --fail-on-unowned
-    roles: dict = {}               # s-17: optional custom-role defs; resolved via role_registry()
-    criticality: dict = {}         # s-17: optional custom-criticality defs; resolved via criticality_registry()
+    roles: dict = {}               # optional custom-role defs; resolved via role_registry()
+    criticality: dict = {}         # optional custom-criticality defs; resolved via criticality_registry()
     source_path: str = ""
 
-    # s-17 resolution helpers:
+    # custom role/criticality resolution helpers:
     def role_registry(self) -> dict[str, dict]
         # label -> {base, orphan_exposes, ...}. No custom `roles:` → the 4 built-ins
         # (config.ROLE_BASE_BEHAVIOR). A custom block returns ONLY declared roles, each
@@ -238,7 +238,7 @@ class ValidationReport:
     issues: list[Issue] = []
     stats: dict = {}               # {files_total, files_parsed, cache_hits, subsystems, dirty, propagated,
                                    #  enforce, skipped_*, unowned, entry_points, coverage, duration_ms}
-                                   # coverage (s-31): {files_owned, unresolved_local_imports, extraction_failures}
+                                   # coverage: {files_owned, unresolved_local_imports, extraction_failures}
                                    # — an honest signal that boundary checking is not as complete as a clean
                                    #   report implies (unresolved_local_imports is measured in boundary modes:
                                    #   full/preflight/audit; quick reports 0).
@@ -260,12 +260,12 @@ LEGACY_DIR = ".compact"          # pre-rename layout; still read for backward co
 ROOT_FILE = "root.yaml"
 MANIFESTS_DIR = "manifests"      # subsystem manifests live here: .bounds/manifests/<name>.yaml
 SUBSYS_FILE = "bounds.yaml"
-CACHE_FILE = "cache.db"          # binary SQLite extraction cache (context armor; s-15/s-19)
+CACHE_FILE = "cache.db"          # binary SQLite extraction cache (context armor)
 STATE_FILE = "state.json"        # legacy JSON cache; read once for auto-migration to cache.db
 SCHEMA_VERSION = "1"
 STATE_VERSION = "1"              # cache schema version, mirrored in PRAGMA user_version
 
-# Built-in role/criticality enums (s-17). With no custom block in root.yaml these are the
+# Built-in role/criticality enums. With no custom block in root.yaml these are the
 # valid sets (backward compatible); a custom block replaces them via the root registries.
 BUILTIN_ROLES = {"service","platform","connector","library"}
 BUILTIN_CRITICALITY = {"core","connector","leaf"}
@@ -285,7 +285,7 @@ ROLE_BASE_BEHAVIOR = {
 
 DEFAULT_IGNORES = {"node_modules",".git","dist","build","__pycache__",".venv","venv",
                    ".bounds",".compact",".mypy_cache",".pytest_cache"}
-MAX_FILE_BYTES = 1_000_000       # s-33: a larger source file is skipped + E_EXTRACTION_FAILED (never read in)
+MAX_FILE_BYTES = 1_000_000       # a larger source file is skipped + E_EXTRACTION_FAILED (never read in)
 # propagation depth by criticality of the *changed* provider (fallback for the built-ins):
 PROPAGATION_DEPTH = {"core": -1, "connector": 1, "leaf": 0}   # -1 = unbounded
 BUILTIN_CRITICALITY_DEPTH = PROPAGATION_DEPTH
@@ -326,7 +326,7 @@ def load_all(project_root: Path) -> tuple[RootManifest, dict[str, SubsystemCompa
 def validate_root(data: dict) -> list[Issue]
     # version+project required; enforce in VALID_ENFORCE; subsystems/entry_points are lists.
     # Also validates optional custom `roles:` (each must `extends`/`type` a built-in base) and
-    # `criticality:` (each needs an integer `depth:`) blocks (s-17).
+    # `criticality:` (each needs an integer `depth:`) blocks.
 def validate_subsystem(name: str, data: dict,
                        valid_roles: set[str] | None = None,
                        valid_criticality: set[str] | None = None) -> list[Issue]
@@ -374,7 +374,7 @@ class FileRecord:
     path: str; content_hash: str; structure_hash: str
     language: str
     symbols: list[dict] = []; imports: list[dict] = []
-    subsystem: str = ""                     # owning subsystem (s-19 partial reads)
+    subsystem: str = ""                     # owning subsystem (partial reads)
     def to_result(self) -> ExtractResult
     @classmethod
     def from_result(cls, r: ExtractResult, subsystem: str = "") -> "FileRecord"
@@ -396,7 +396,7 @@ def save_state(project_root: Path, state: State) -> None
     # Atomic full rewrite inside ONE SQLite transaction (DELETE + executemany, rows in sorted
     # path order). updated_at written empty (no wall-clock). Commits on success, rolls back on error.
 def load_subsystem_records(project_root: Path, subsystem: str) -> list[FileRecord]
-    # s-19 partial read: SELECT ... WHERE subsystem = ? (via idx_cache_subsystem). [] if no SQLite cache.
+    # partial read: SELECT ... WHERE subsystem = ? (via idx_cache_subsystem). [] if no SQLite cache.
 def migrate_json_to_sqlite(project_root: Path) -> dict
     # Eagerly convert legacy state.json → cache.db; removes the json. → {migrated, files, removed_json, note}.
 def prune_missing(project_root: Path) -> dict        # drop rows whose source file is gone → {pruned, remaining}
@@ -415,7 +415,7 @@ def propagate(dirty: set[str], subsystems: dict[str, SubsystemCompact],
               depth_map: dict[str, int] | None = None) -> set[str]
     # BFS over consumer edges; depth bounded per changed-provider criticality. `depth_map`
     # (criticality label -> hop depth) comes from RootManifest.criticality_registry() so custom
-    # labels drive propagation (s-17); defaults to config.PROPAGATION_DEPTH (built-ins).
+    # labels drive propagation; defaults to config.PROPAGATION_DEPTH (built-ins).
     # Returns affected consumer subsystem names (excludes the originally-dirty set).
 ```
 
@@ -466,32 +466,44 @@ def run(project_root: Path, mode: str = "full", base: str = "HEAD",
 ### `extract/scan.py` — shared filesystem→extraction helpers (the single home for fs walks)
 ```python
 def strip_ext(rel: str) -> str                                    # drop the extension (import-resolution stem)
-def in_default_ignores(path: Path, project_root: Path) -> bool    # path under any DEFAULT_IGNORES dir (one home, s-34)
+def in_default_ignores(path: Path, project_root: Path) -> bool    # path under any DEFAULT_IGNORES dir (one home)
 def iter_repo_source(project_root: Path, matcher: IgnoreMatcher | None = None) -> list[str]
     # sorted repo-relative posix paths of every supported source file; skips DEFAULT_IGNORES + .boundsignore.
 def iter_subsystem_files(project_root: Path, sub: SubsystemCompact, exts: set[str]) -> list[Path]
     # the owned-file walk (paths globs + explicit files), deduped by real path + sorted; skips
-    # DEFAULT_IGNORES. The ONE home shared by validate/engine + describe (s-34) so both agree on
+    # DEFAULT_IGNORES. The ONE home shared by validate/engine + describe so both agree on
     # which files a subsystem owns — neither carries its own copy.
 def extract_project(project_root, subsystems, matcher=None) -> tuple[dict, dict, set]
     # project-wide extraction (file_owner, extracts, generated) — the ONE home shared by calibrate,
-    # impact --verify, and `where` (s-34); flat topology (first owner wins), applies .boundsignore.
+    # impact --verify, and `where`; flat topology (first owner wins), applies .boundsignore.
 def extract_file(project_root: Path, rel: str) -> tuple[ExtractResult | None, bool]
     # one file's surface; returns (result_or_None, is_generated). None if unsupported/unreadable/parse-fail.
 ```
 
-### `describe.py` — Tier-1 + Tier-2 `describe` assembly (s-34)
+### `describe.py` — Tier-1 + Tier-2 `describe` assembly
 ```python
-def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], list[str]]
-    # (exported symbol -> owning file, owned files) via scan.iter_subsystem_files + scan.extract_file.
-def describe_one(root, sub, deep, validation_status, entry_matcher) -> dict
-    # merged describe payload: SubsystemCompact.to_dict() + exposes[*].verified/file/entry_point,
-    # files, entry_points, validation_status (+ semantic stub when deep).
-def quick_status(root: Path) -> str                               # project status via a read-only quick run
-# Extracted out of cli.py so command modules stay arg-parse + one go() closure (no business logic).
+def extract_owned(root, sub) -> tuple[dict[str, str], list[str], list[str]]
+    # (exported symbol -> owning file, owned files, unparsed files) via the shared scan helpers.
+def describe_one(root, sub, deep, report, entry_matcher) -> dict
+    # merged payload: SubsystemCompact.to_dict() + exposes[*].verified/file/entry_point, files,
+    # entry_points, unparsed_files?, validation_status (subsystem-scoped), project_status, semantic? (deep).
+def status_report(root) -> ValidationReport | None   # one shared read-only quick run backing status
+def subsystem_status(report, name) -> str            # fresh|stale|unresolved, scoped to one subsystem
+def project_status(report) -> str                    # the project-wide status rollup
+# Kept out of cli.py so command modules stay arg-parse + one go() closure (no business logic).
 ```
 
-### `discover.py` — bootstrap discovery (s-14)
+### `locate.py` — `where` + `impact` queries
+```python
+def run_impact(project_root, name, verify=False) -> dict
+    # blast radius: declared-consumes count (an honest lower bound); --verify adds the resolved
+    # undeclared_consumer_edges. Raises E_SUBSYSTEM_NOT_FOUND for an unknown subsystem.
+def run_where(project_root, symbol, prefix=False) -> dict
+    # locate a symbol's definition(s) + owning subsystem (fresh extraction; Python + TS).
+# Kept out of cli.py (same reason as describe.py); reuses scan.extract_project + the one resolver.
+```
+
+### `discover.py` — bootstrap discovery
 ```python
 def run_discover(project_root, *, apply=False, namespace=None,
                  merges: list[tuple[str, list[str]]] | None = None) -> dict
@@ -503,7 +515,7 @@ def run_discover(project_root, *, apply=False, namespace=None,
     #    exposes,consumes,namespace?}], written, skipped}
 ```
 
-### `calibrate.py` — manifest↔source reconciliation (s-16)
+### `calibrate.py` — manifest↔source reconciliation
 ```python
 def run_calibrate(project_root, *, subsystem: str | None = None, apply=False) -> dict
     # Diff each subsystem's declared exposes/consumes against tree-sitter reality. add (found,
@@ -514,7 +526,7 @@ def run_calibrate(project_root, *, subsystem: str | None = None, apply=False) ->
     #    add_consumes,remove_consumes}}, summary:{added,removed,needs_review,consumes_added,consumes_removed}}
 ```
 
-### `agentsync.py` — cross-agent config generation (s-18)
+### `agentsync.py` — cross-agent config generation
 ```python
 AGENT_KEYS = ("claude","codex","opencode","gemini","copilot","cursor","aider","windsurf")
 def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
@@ -526,7 +538,7 @@ def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
     # Raises E_USAGE for an unknown mode or agent key.
 ```
 
-### `ciconfig.py` — CI gate generation (s-20)
+### `ciconfig.py` — CI gate generation
 ```python
 def run_ci_install(project_root, *, targets: set[str]) -> dict
     # targets ⊆ {"action","precommit","gitlab"}; empty = all three. Idempotent create/append:
@@ -564,7 +576,7 @@ entry_points:                 # root-level bootstrap globs exempt from `bounds v
   - main.py
   - app.py
 
-# Optional schema extensions (s-17). Omit both blocks to use the built-in enums (backward
+# Optional schema extensions. Omit both blocks to use the built-in enums (backward
 # compatible). A custom `roles:` block REPLACES the built-in role set; each custom role must
 # `extends` (or `type`) a built-in base and inherits its behavior. A custom `criticality:`
 # block replaces the built-in labels; each needs an integer `depth:` (-1 unbounded, 0 none, N hops).
@@ -588,7 +600,7 @@ exposes:
   - { name: get_adapter, kind: function }
   - { name: LanguageAdapter, kind: class }
   - { name: ExtractResult, kind: class }
-  - { name: _registry_cache, kind: variable, internal: true }   # s-16: exempt from calibration
+  - { name: _registry_cache, kind: variable, internal: true }   # exempt from calibration
 consumes:
   - { subsystem: models, via: models, interfaces: [Symbol, ImportRef, ExtractResult] }
 ```
@@ -611,12 +623,12 @@ consumes:
 
 ## 7. The 6 checks (logic)
 
-1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files. Declared-but-missing → drift (`error`). Undeclared-but-exported (a symbol in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (s-32, bidirectional drift — not just `core`/unbounded; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). The `info` severity never blocks, so exit codes are unchanged; escalation to `error`/CI is s-37. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
+1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files. Declared-but-missing → drift (`error`). Undeclared-but-exported (a symbol in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (bidirectional drift; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). The `info` severity never blocks, so exit codes are unchanged. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
 2. **Boundary compliance** (`E_BOUNDARY_VIOLATION`, error): for each import in subsystem A resolving to a file owned by subsystem B, the imported names must all be in B's `exposes`. Importing a non-exposed (internal) symbol → violation. Resolution: match import `module` against B's file paths (suffix/relative resolution). Fix: "import only B's exposed interfaces, or add `<name>` to B.exposes".
 3. **Contract compliance** (`E_CONTRACT_MISSING_EXPORT`, error): for each `consumes` entry, every listed interface must appear in the provider's `exposes`. Missing → contract break. Fix: "provider `<B>` does not expose `<iface>`; update consumer or provider".
 4. **Cross-subsystem impact** (`E_STALE_INTERFACE`, error/stale): a provider's `structure_hash` changed (it's in `dirty`) and it has consumers (`consumed_by`) → those consumer interfaces may be stale. Emits one issue per affected consumer. Fix: "re-validate consumer `<C>`; provider `<B>` interface surface changed".
 5. **Cycle detection** (`E_CYCLE_DETECTED`, error): build the directed graph from `consumes`; DFS for back-edges; report each cycle as a chain `A → B → C → A`. Fix: "break the dependency cycle; introduce an interface/inversion".
-6. **Orphan detection** (`E_ORPHAN_EXPORT`, warning): an exposed interface that appears in no subsystem's `consumes`, where the owning subsystem's role does **not** carry `orphan_exposes` (the `service` base, and any custom role extending it, legitimately expose unconsumed surface — resolved via `RootManifest.role_registry()`, s-17). Fix: "interface `<x>` of `<A>` is consumed by no one; consider removing or marking entrypoint".
+6. **Orphan detection** (`E_ORPHAN_EXPORT`, warning): an exposed interface that appears in no subsystem's `consumes`, where the owning subsystem's role does **not** carry `orphan_exposes` (the `service` base, and any custom role extending it, legitimately expose unconsumed surface — resolved via `RootManifest.role_registry()`). Fix: "interface `<x>` of `<A>` is consumed by no one; consider removing or marking entrypoint".
 
 Forward references (a `consumes.subsystem` or path that doesn't resolve to a known subsystem) → `E_UNRESOLVED_REFERENCE` (warning) and set report status `unresolved`.
 
@@ -641,7 +653,7 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_SUBSYSTEM_NOT_FOUND` | fatal | unknown subsystem (raised by `describe <name>`, `impact <name>`, `calibrate --subsystem`) |
 | `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do) |
 | `E_UNSUPPORTED_LANGUAGE` | warning | file extension has no adapter (skipped) |
-| `E_EXTRACTION_FAILED` | warning | could not extract a file — tree-sitter parse error, unreadable, or over `MAX_FILE_BYTES` (s-33). An OWNED file is never silently dropped; it always emits this. |
+| `E_EXTRACTION_FAILED` | warning | could not extract a file — tree-sitter parse error, unreadable, or over `MAX_FILE_BYTES`. An OWNED file is never silently dropped; it always emits this. |
 
 Codes are a public contract — never renumber, rename, or repurpose; only add. The full registry, with the advisory `SEVERITY` map, lives in `errors.py`.
 
@@ -662,8 +674,8 @@ bounds describe <name>             → SubsystemCompact.to_dict() + {files, entr
                                        project_status, unparsed_files?, exposes[*].verified, exposes[*].file?,
                                        exposes[*].entry_point?}
                                        # validation_status is SUBSYSTEM-SCOPED (this subsystem's own issues);
-                                       # project_status is the project-wide rollup, kept additively (s-31).
-                                       # unparsed_files (present only when non-empty, s-33): owned source files
+                                       # project_status is the project-wide rollup, kept additively.
+                                       # unparsed_files (present only when non-empty): owned source files
                                        # Bounds could not extract — so an unreadable/oversized file is reported,
                                        # never silently shown as a missing symbol.
 bounds describe --namespace NS     → {namespace, subsystems:[<describe payload>...]}
@@ -676,13 +688,13 @@ bounds overview                    → {project, subsystems, roles:{...}, critic
 bounds impact <name> [--verify]    → {subsystem, criticality, direct_consumers, transitive_consumers,
                                        blast_radius:int, basis:"declared-consumes",
                                        blast_radius_is_lower_bound:true, note, consumers:[{name,via,interfaces}]}
-                                       # s-29: blast_radius counts ONLY declared `consumes` edges (a lower bound).
+                                       # blast_radius counts ONLY declared `consumes` edges (a lower bound).
                                        # --verify adds undeclared_consumer_edges:[{consumer, files:[...]}] — real
                                        # importers of <name> with no declared consume (resolved import graph; off
                                        # the quick path). (E_SUBSYSTEM_NOT_FOUND if unknown)
 bounds where <symbol> [--prefix]   → {symbol, match:"exact"|"prefix", count,
                                        results:[{symbol, kind, file, line, owning_subsystem, exposed}]}
-                                       # s-30: locate a symbol's definition(s) + owning subsystem; all
+                                       # locate a symbol's definition(s) + owning subsystem; all
                                        # collisions returned, sorted by (file,name,line,kind); fresh extraction
                                        # (never a stale cache); Python + TS. exposed = declared in owner.exposes
 bounds init --root                 → scaffolds .bounds/root.yaml; → {created, skipped, bounds_dir}
@@ -702,29 +714,26 @@ bounds cache (--migrate|--inspect|--prune)
 
 `describe`'s status comes from one read-only quick run (`persist=False`); its issues are re-derived
 into a **subsystem-scoped** `validation_status` (this subsystem's own issues only) and an additive
-project-wide `project_status` (s-31). Both re-derive `fresh`/`stale`/`unresolved` from each issue
-code's *canonical* severity (`errors.SEVERITY`) rather than the quick-downgraded live one, so a
-per-subsystem status can read `stale`. Every command's
-JSON carries `"validation_status"` where meaningful and `"ok": bool` where applicable. Fatal
-`BoundsError` → `{"error":{code,message,fix}}` on stdout + exit 2 (or one `fatal` line under `--ci`).
+project-wide `project_status`. Both re-derive `fresh`/`stale`/`unresolved` from each issue code's
+*canonical* severity (`errors.SEVERITY`) rather than the quick-downgraded live one, so a per-subsystem
+status can read `stale`. Every command's JSON carries `"validation_status"` where meaningful and
+`"ok": bool` where applicable. Fatal `BoundsError` → `{"error":{code,message,fix}}` on stdout + exit 2
+(or one `fatal` line under `--ci`).
 
 ---
 
 ## 10. Extraction cache (`.bounds/cache.db`) — binary SQLite
 
 The cache is the one Bounds artifact that can grow large, so it is stored as a **binary SQLite
-database** rather than JSON. **Context-armor rationale (s-15):** an agent that naively `cat`s a
-binary file gets gibberish instead of a parseable token blob dumped into its context — the
-structural defense against accidental context burn. Human-editable manifests stay YAML; only the
-*derived* cache is binary. `bounds cache --inspect` exposes a token-lean summary (counts only,
-never symbol dumps) for the rare time a human needs to look inside.
+database** rather than JSON (context armor — see principle 7). `bounds cache --inspect` exposes a
+token-lean summary (counts only, never symbol dumps) for the rare time a human needs to look inside.
 
 **Schema** (one row per scanned source file, keyed by repo-relative posix path):
 
 ```sql
 CREATE TABLE cache (
     path           TEXT PRIMARY KEY,
-    subsystem      TEXT NOT NULL DEFAULT '',   -- owning subsystem (s-19 partial reads)
+    subsystem      TEXT NOT NULL DEFAULT '',   -- owning subsystem (partial reads)
     content_hash   TEXT NOT NULL,              -- sha256 of raw bytes → cache validity
     structure_hash TEXT NOT NULL,              -- sha256 of symbol/import shape → propagation trigger
     language       TEXT NOT NULL,
@@ -738,18 +747,17 @@ CREATE INDEX idx_cache_subsystem ON cache(subsystem);
 `PRAGMA user_version` holds the cache schema version (`config.STATE_VERSION`); a mismatch makes
 `load_state` return an empty `State` and forces full re-extraction.
 
-**Determinism — `updated_at` is written empty.** The original spec for this table declared a
-`DEFAULT (datetime('now'))`. That conflicts with the repo's no-wall-clock rule (a timestamp would
-make the cache non-byte-stable across runs). The reconciliation: the column is kept for
-forward-compatibility but Bounds **never writes a value into it** — `save_state` inserts the literal
-empty string. No timestamp, `random`, or set-ordering reaches any serialized output; rows are
-written in sorted path order inside a single transaction.
+**Determinism — `updated_at` is written empty.** A timestamp would make the cache non-byte-stable
+across runs (no-wall-clock rule), so the column is kept for forward-compatibility but Bounds **never
+writes a value into it** — `save_state` inserts the literal empty string. No timestamp, `random`, or
+set-ordering reaches any serialized output; rows are written in sorted path order inside a single
+transaction.
 
 **Format detection + migration.** `load_state` reads the first 16 bytes: if they equal the SQLite
 magic `SQLite format 3\0`, the file is read as SQLite; otherwise a legacy `state.json` is read and
 auto-migrated to `cache.db` on the next `save_state` (or eagerly via `bounds cache --migrate`,
 which also removes the JSON). A missing/corrupt/unreadable cache is tolerated → empty `State`.
 
-**Partial reads (s-19).** The `subsystem` column + `idx_cache_subsystem` let a caller load just one
+**Partial reads.** The `subsystem` column + `idx_cache_subsystem` let a caller load just one
 subsystem's records via `load_subsystem_records(...)` (`SELECT ... WHERE subsystem = ?`) instead of
 the whole cache — keeping a tool/agent from materializing the entire cache to inspect one boundary.

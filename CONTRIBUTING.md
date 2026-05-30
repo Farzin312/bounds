@@ -54,10 +54,10 @@ bounds/
 │   ├── ignore.py           # .boundsignore matcher + @generated detection
 │   ├── models.py           # Data model dataclasses
 │   ├── output.py           # JSON / human / CI rendering
-│   ├── discover.py         # Bootstrap discovery (s-14)
-│   ├── calibrate.py        # Manifest↔source reconciliation (s-16)
-│   ├── agentsync.py        # Cross-agent config generation (s-18)
-│   └── ciconfig.py         # CI config generation (s-20)
+│   ├── discover.py         # Bootstrap discovery
+│   ├── calibrate.py        # Manifest↔source reconciliation
+│   ├── agentsync.py        # Cross-agent config generation
+│   └── ciconfig.py         # CI config generation
 ├── tests/                  # Pytest test suite (10 files, 157 tests)
 ├── docs/                   # Deep-dive documentation (linked from the README entrance)
 ├── ARCHITECTURE.md         # Engineering contract
@@ -113,8 +113,8 @@ are the ones worth keeping.
 
 ## Coding Standards
 
-> **The binding, reviewable checklist lives in [docs/coding-standards.md](docs/coding-standards.md)
-> (s-35).** It encodes the invariants every structural change must hold — determinism, fail-soft /
+> **The binding, reviewable checklist lives in [docs/coding-standards.md](docs/coding-standards.md).**
+> It encodes the invariants every structural change must hold — determinism, fail-soft /
 > report-hard, zero-LLM on the structural path, resource bounds, the additive-only output contract,
 > the single-source severity table, the "one home per concept" DRY rule, and tests-for-new-behavior.
 > Walk its **(blocking)** sections when you review or self-review a PR. The conventions below are the
@@ -159,7 +159,7 @@ All tests must pass. If you add a new feature, include tests.
 ### Writing Tests
 
 - Tests live in `tests/` and are grouped by feature area (10 files, 157 tests):
-  `test_extract.py`, `test_validate.py`, `test_schema_flex.py` (s-17 roles/criticality),
+  `test_extract.py`, `test_validate.py`, `test_schema_flex.py` (roles/criticality),
   `test_cache_sqlite.py`, `test_discover.py`, `test_calibrate.py`, `test_agentsync.py`,
   `test_ciconfig.py`, `test_cli.py`, and `test_commands_cli.py`.
 - Use `pytest` fixtures from `tests/conftest.py` for temporary projects: `sample_project`

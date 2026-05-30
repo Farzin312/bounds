@@ -1,11 +1,11 @@
-"""Calibration (s-16): reconcile declared manifests against tree-sitter reality.
+"""Calibration: reconcile declared manifests against tree-sitter reality.
 
 ``bounds calibrate`` extracts each subsystem's actual interface surface and proposes a diff
 against what its manifest declares — symbols to **add** (found but undeclared), to **remove**
 (declared but gone), and ``consumes`` edges to reconcile against real cross-boundary imports.
 
 Calibration is *not* auto-fix. By default it only prints the proposed diff; ``--apply`` writes
-it. The reconciliation rules encode developer intent (from the absorbed s-16 spec):
+it. The reconciliation rules encode developer intent:
 
 * A declared expose that tree-sitter no longer finds is proposed for **removal** — UNLESS
   another subsystem consumes it (then it's a real contract → flagged ``needs_review``, never
@@ -29,10 +29,10 @@ from pathlib import Path
 import yaml
 
 from . import errors
-from .extract.scan import extract_project, strip_ext
+from .extract.scan import extract_project
 from .ignore import load_matcher
 from .manifest import loader as manifest_loader
-from .validate.checks import build_suffix_index, resolve_import
+from .validate.checks import index_extracts, resolve_import
 
 
 def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bool = False) -> dict:
@@ -48,8 +48,7 @@ def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bo
 
     matcher = load_matcher(project_root)
     file_owner, extracts, generated = extract_project(project_root, subs, matcher)
-    known_noext = {strip_ext(rel): rel for rel in sorted(extracts)}
-    suffix_index = build_suffix_index(known_noext)  # built once; O(1) per-import resolution (s-34)
+    known_noext, suffix_index = index_extracts(extracts)  # one shared projection (built once)
 
     # What every subsystem consumes (provider -> set of interface names) and consumed providers.
     consumed_ifaces: dict[tuple[str, str], set[str]] = {}

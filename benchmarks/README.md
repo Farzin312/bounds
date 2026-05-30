@@ -25,11 +25,10 @@ benchmarks/
 ## Why there are no hardware specs
 
 Token cost, retrieval shape, and drift-detection correctness are properties of
-the *codebase and the tokenizer*, not of the CPU or RAM. A token reduction of
-this magnitude is the same on a laptop or a server. Reporting "MacBook, 16 GB RAM" would
-imply hardware is a variable that matters here — it is not. The only
-machine-relative number we report at all is wall-clock latency, and it is
-explicitly de-emphasized and stated without any hardware spec (see Metric 3).
+the *codebase and the tokenizer*, not of the CPU or RAM — a token reduction of
+this magnitude is the same on a laptop or a server. The only machine-relative
+number we report is wall-clock latency, which is de-emphasized and stated
+without a hardware spec (see Metric 3).
 
 ## State the tokenizer
 
@@ -68,11 +67,11 @@ grows, not less.
 - Reading source to understand a subsystem is roughly **O(files)** — it grows
   with the codebase.
 
-Crucially, LLMs degrade as their context fills: the "lost-in-the-middle" /
+LLMs also degrade as their context fills: the "lost-in-the-middle" /
 context-rot effect means a model attends less reliably to information buried in
 a large context window. So dumping more source into context is doubly bad — it
-costs more tokens *and* it lowers the quality of the model's attention over
-those tokens. Minimal, targeted retrieval therefore matters **more** at scale.
+costs more tokens *and* lowers the model's attention over them. Minimal,
+targeted retrieval therefore matters **more** at scale.
 
 Illustration — tokens to understand one subsystem as a repo grows (Bounds stays
 flat because the public API is unchanged; source reading grows with the files
@@ -95,10 +94,10 @@ retrieval. The whole-map case is the same story sharpened: on this repo
 Wall-clock per command, framed only as: **is it fast enough for a pre-commit
 hook?** The quick path targets sub-200ms for the validation logic itself
 (Python interpreter startup adds overhead on top). We report a median and
-nothing more. These numbers are machine-relative and intentionally carry **no
-hardware spec** — do not read latency as a comparison axis between submissions.
-`run.py` deliberately keeps latency out of its deterministic table; it is an
-optional, separately-labeled note in a results file.
+nothing more. These numbers are machine-relative and carry **no hardware
+spec** — don't read latency as a comparison axis between submissions. `run.py`
+keeps it out of the deterministic table; it is an optional, separately-labeled
+note in a results file.
 
 ### 4. Determinism & correctness (zero-LLM, model-independent)
 

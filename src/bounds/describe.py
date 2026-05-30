@@ -1,4 +1,4 @@
-"""Tier-1 + Tier-2 ``describe`` assembly (extracted from cli.py — s-34).
+"""Tier-1 + Tier-2 ``describe`` assembly (extracted from cli.py).
 
 ``bounds describe`` merges the declared manifest (Tier 2, human YAML) with tree-sitter
 facts (Tier 1, deterministic) so an agent can trust a subsystem's contract without reading
@@ -29,7 +29,7 @@ def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], li
     reflects the declared surface); only cleanly-extracted exported symbols populate the symbol map
     used to mark ``exposes`` entries ``verified``. A supported owned file that fails to extract
     (unreadable / oversized / parse error) is recorded in ``unparsed_files`` so describe reports it
-    loudly instead of silently showing a real symbol as ``verified:false`` (s-33 fail-loud).
+    loudly instead of silently showing a real symbol as ``verified:false`` (fail-loud).
 
     File selection is the shared owned-file walk, so describe and validate own the same set.
     """
@@ -63,7 +63,7 @@ def describe_one(
     """Build the merged Tier-1 + Tier-2 describe payload for a single subsystem.
 
     ``report`` is the one shared read-only quick run (:func:`status_report`); status is derived
-    from it twice (s-31): ``validation_status`` is **scoped to this subsystem** (so describing a
+    from it twice: ``validation_status`` is **scoped to this subsystem** (so describing a
     clean subsystem reads fresh even when drift lives elsewhere), and ``project_status`` is the
     project-wide rollup kept additively alongside it.
 
@@ -88,7 +88,7 @@ def describe_one(
         f for f in owned_files if entry_matcher and entry_matcher.matches(f)
     )
     # Additive (only when non-empty): owned source files Bounds could not extract — surfaced so an
-    # agent never mistakes an unreadable/oversized file for "symbol absent from source" (s-33).
+    # agent never mistakes an unreadable/oversized file for "symbol absent from source".
     if unparsed_files:
         payload["unparsed_files"] = sorted(unparsed_files)
     payload["validation_status"] = subsystem_status(report, sub.name)
@@ -111,12 +111,12 @@ def status_report(root: Path) -> ValidationReport | None:
 
 
 def _derive_status(issues: list) -> str:
-    """fresh | stale | unresolved from an issue list, using CANONICAL severities (s-31).
+    """fresh | stale | unresolved from an issue list, using CANONICAL severities.
 
     Quick mode downgrades errors→warnings (so it never blocks), which would otherwise make a
     per-subsystem status never read 'stale'. We therefore key off the code's canonical severity
     (``errors.SEVERITY``) rather than the live one — except an issue whose *live* severity is
-    ``info`` (e.g. an undeclared-export drift, s-32) is never error-class.
+    ``info`` (e.g. an undeclared-export drift) is never error-class.
     """
     if any(i.code == errors.E_UNRESOLVED_REFERENCE for i in issues):
         return "unresolved"
@@ -131,7 +131,7 @@ def project_status(report: ValidationReport | None) -> str:
 
 
 def subsystem_status(report: ValidationReport | None, name: str) -> str:
-    """Validation status scoped to one subsystem's own issues (s-31)."""
+    """Validation status scoped to one subsystem's own issues."""
     if report is None:
         return "unresolved"
     return _derive_status([i for i in report.issues if i.subsystem == name])

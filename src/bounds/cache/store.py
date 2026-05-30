@@ -1,17 +1,17 @@
-"""Content-addressable extraction cache — binary SQLite (context armor; s-15/s-19).
+"""Content-addressable extraction cache — binary SQLite (context armor).
 
 The cache stores one :class:`FileRecord` per scanned source file, keyed by its
 repo-relative POSIX path. Records carry both the content hash (sha256 of raw
 bytes) and the structure hash (sha256 of the symbol/import shape) so the engine
 can cheaply decide whether a file's *structure* changed without re-extracting.
 
-**Why SQLite, not JSON (s-15 "context armor"):** the cache is the one Bounds
+**Why SQLite, not JSON ("context armor"):** the cache is the one Bounds
 artifact that can grow large. Stored as a binary ``.bounds/cache.db``, an agent
 that naively ``cat``s it gets gibberish instead of a parseable token blob dumped
 into its context — the structural defense against accidental context burn. The
 human-editable manifests stay YAML; only the *derived* cache is binary.
 
-**Partial reads (s-19 cache scalability):** the ``subsystem`` column + index let
+**Partial reads (cache scalability):** the ``subsystem`` column + index let
 callers load just one subsystem's records (``SELECT ... WHERE subsystem = ?``)
 instead of the whole cache — see :func:`load_subsystem_records`.
 
@@ -37,7 +37,7 @@ from ..models import ExtractResult, ImportRef, Symbol
 
 _SQLITE_MAGIC = b"SQLite format 3\x00"
 
-# Milliseconds a cache connection waits on a locked database before erroring (s-33). Two `bounds
+# Milliseconds a cache connection waits on a locked database before erroring. Two `bounds
 # validate` runs racing on the same `.bounds/cache.db` should queue briefly, not immediately raise
 # "database is locked"; the writer is a single short transaction, so a few seconds is ample.
 _BUSY_TIMEOUT_MS = 5000
@@ -63,7 +63,7 @@ class FileRecord:
 
     ``symbols`` and ``imports`` are stored as plain dicts (the ``to_dict()`` form of
     :class:`Symbol` / :class:`ImportRef`) so the record round-trips without further
-    conversion. ``subsystem`` is the owning subsystem name (s-19 partial reads).
+    conversion. ``subsystem`` is the owning subsystem name (used for partial reads).
     """
 
     path: str
@@ -185,7 +185,7 @@ def _is_sqlite(path: Path) -> bool:
 def load_state(project_root: Path) -> State:
     """Read the project's extraction cache into a :class:`State`.
 
-    Resolution (matching s-15/s-19): a binary ``cache.db`` is read via SQLite; otherwise a
+    Resolution: a binary ``cache.db`` is read via SQLite; otherwise a
     legacy ``state.json`` is read (auto-migration — the next ``save_state`` writes ``cache.db``).
     Tolerant by design: a missing/unreadable/corrupt/version-mismatched cache yields a fresh
     empty State rather than raising, so a broken cache simply forces full re-extraction.
@@ -296,7 +296,7 @@ def save_state(project_root: Path, state: State) -> None:
 
 
 def load_subsystem_records(project_root: Path, subsystem: str) -> list[FileRecord]:
-    """Partial read (s-19): the cached records for one subsystem, via the subsystem index.
+    """Partial read: the cached records for one subsystem, via the subsystem index.
 
     Returns ``[]`` when there is no SQLite cache yet. This is the per-subsystem read path
     that keeps an agent/tool from loading the whole cache to inspect one boundary.

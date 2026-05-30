@@ -27,7 +27,7 @@ def _issue(
     fix: str | None = None,
 ) -> Issue:
     """Construct an :class:`Issue`, defaulting its severity from the single-source
-    ``errors.SEVERITY`` table (s-34). An explicit ``severity`` overrides it for the
+    ``errors.SEVERITY`` table. An explicit ``severity`` overrides it for the
     context-dependent cases — e.g. an undeclared export surfaced at ``info`` rather than the
     code's canonical ``error`` — so the table stays the one home for canonical severities.
     """
@@ -53,7 +53,7 @@ class CheckContext:
     file_owner: dict[str, str]          # rel posix path -> subsystem name
     dirty: set[str] = field(default_factory=set)
     propagated: set[str] = field(default_factory=set)
-    # s-31 coverage signal: count of local-looking imports that did NOT resolve to an owned
+    # Coverage signal: count of local-looking imports that did NOT resolve to an owned
     # file. checks are pure (CheckContext)->list[Issue], so the count is threaded here (the
     # engine reads it after running checks) rather than returned. Only check_boundary writes it.
     unresolved_local_imports: int = 0
@@ -102,7 +102,7 @@ class CheckContext:
         return cached
 
     def role_exposes_orphans(self, subsystem: str) -> bool:
-        """True if the subsystem's role legitimately exposes unconsumed entrypoints (s-17)."""
+        """True if the subsystem's role legitimately exposes unconsumed entrypoints."""
         sub = self.subsystems.get(subsystem)
         if sub is None:
             return False
@@ -125,7 +125,7 @@ def index_extracts(extracts: dict) -> tuple[dict[str, str], dict[str, str]]:
 
 
 def build_suffix_index(known_noext: dict[str, str]) -> dict[str, str]:
-    """Map every trailing path-segment suffix of each known stem to a known stem (s-34).
+    """Map every trailing path-segment suffix of each known stem to a known stem.
 
     Replaces import resolution's old ``O(files)`` ``endswith`` scan with an ``O(1)`` lookup.
     For ``"src/bounds/models"`` the suffixes ``"models"``, ``"bounds/models"`` and the full
@@ -144,7 +144,7 @@ def build_suffix_index(known_noext: dict[str, str]) -> dict[str, str]:
 
 
 def _is_local_looking(module: str, known_top: set[str]) -> bool:
-    """True if ``module`` plausibly refers to an in-project file (s-31 coverage).
+    """True if ``module`` plausibly refers to an in-project file (coverage signal).
 
     A relative specifier (``./x``, ``..pkg``) is always local. A bare specifier is local-looking
     only when its first segment matches a top-level segment of some extracted file — so stdlib /
@@ -224,10 +224,10 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
                 )
             )
         # Undeclared public surface — a symbol the source exports but the manifest doesn't
-        # list — is surfaced as info for ANY subsystem with a declared expose set (s-32,
-        # bidirectional drift). Previously this only fired on unbounded/core subsystems, so the
+        # list — is surfaced as info for ANY subsystem with a declared expose set
+        # (bidirectional drift). Previously this only fired on unbounded/core subsystems, so the
         # most common real drift (a new undeclared export on a leaf/connector) was invisible.
-        # Severity stays info (never blocks), so exit codes are unchanged; escalation is s-37.
+        # Severity stays info (never blocks), so exit codes are unchanged.
         if declared:
             for extra in sorted(actual - declared):
                 issues.append(
@@ -257,7 +257,7 @@ def check_boundary(ctx: CheckContext) -> list[Issue]:
                 target = resolve_import(rel, imp.module, known, suffix_index)
                 if not target:
                     # Unresolved: if it looks intra-repo, it's a gap in boundary coverage
-                    # (an owned file we couldn't attribute) — count it for the s-31 signal.
+                    # (an owned file we couldn't attribute) — count it for the coverage signal.
                     if _is_local_looking(imp.module, known_top):
                         ctx.unresolved_local_imports += 1
                     continue
@@ -371,7 +371,7 @@ def _rotate_min(cycle: list[str]) -> list[str]:
 
 
 def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
-    """Enumerate distinct directed cycles. Iterative DFS (s-33): an explicit stack instead of
+    """Enumerate distinct directed cycles. Iterative DFS: an explicit stack instead of
     recursion so a deep dependency graph can't raise an uncaught ``RecursionError``. Semantics are
     unchanged — a back-edge to a GRAY node yields the cycle from that node to the current one,
     rotated to a canonical (min-first) form and de-duplicated; results sorted by (length, chain)."""

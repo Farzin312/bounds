@@ -96,7 +96,7 @@ def test_discover_disambiguates_colliding_basenames(tmp_path):
 
 
 def test_discover_apply_preserves_custom_root_keys(tmp_path):
-    # An existing root.yaml with s-17 custom roles must survive `discover --apply`.
+    # An existing root.yaml with custom roles must survive `discover --apply`.
     cfg = tmp_path / config.BOUNDS_DIR
     cfg.mkdir()
     (cfg / config.ROOT_FILE).write_text(

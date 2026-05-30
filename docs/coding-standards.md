@@ -1,4 +1,4 @@
-# Bounds coding standards (s-35)
+# Bounds coding standards
 
 A **reviewable, diff-checkable** checklist. Every item here can be confirmed against a PR by a human
 or an agent — when you review (or self-review) a change, walk the blocking sections and confirm each.

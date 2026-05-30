@@ -61,4 +61,4 @@ Bounds brings AI-native codebase understanding via subsystem boundary manifests 
 ### Notes
 
 - Bounds validates ITSELF (`bounds validate --human` on the Bounds project) — fully dogfooding from day one.
-- The full suite (150 tests across 10 files as of the Unreleased gen-3 work) passes with pytest-xdist parallel execution.
+- The full test suite passes with pytest-xdist parallel execution.

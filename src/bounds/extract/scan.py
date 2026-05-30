@@ -19,13 +19,13 @@ from . import get_adapter, supported_extensions
 
 
 def walk_supported(base: Path, exts: set[str]) -> list[Path]:
-    """Supported source files under ``base``, symlink-cycle-safe (s-33).
+    """Supported source files under ``base``, symlink-cycle-safe.
 
     A stack-based walk that records each visited directory's *real* path, so a symlinked
     directory that points back into the tree is descended at most once — a symlink loop can never
     hang the walk (unlike a bare ``rglob('*')`` on older Python). Skips :data:`config.DEFAULT_IGNORES`
     directories by name. Order is unspecified (callers sort); fail soft on any per-entry OS error.
-    The single home for the recursive source walk shared by every walking call site (s-34).
+    The single home for the recursive source walk shared by every walking call site.
     """
     out: list[Path] = []
     seen_dirs: set[Path] = set()
@@ -58,7 +58,7 @@ def walk_supported(base: Path, exts: set[str]) -> list[Path]:
 def in_default_ignores(path: Path, project_root: Path) -> bool:
     """True if ``path`` lies under any :data:`config.DEFAULT_IGNORES` directory.
 
-    The single home for the hard-coded ignore-directory check (s-34): the repo walk, the
+    The single home for the hard-coded ignore-directory check: the repo walk, the
     owned-file walk, and the unowned-file universe all share this one predicate instead of
     re-deriving ``part in DEFAULT_IGNORES`` in three places. Fail soft: a path outside the
     project (``relative_to`` raises) is treated as not-ignored.
@@ -73,7 +73,7 @@ def in_default_ignores(path: Path, project_root: Path) -> bool:
 def strip_ext(rel: str) -> str:
     """Return ``rel`` with its file extension removed (for import-resolution stems).
 
-    The single home for extension stripping (s-34): ``validate.checks`` imports this rather
+    The single home for extension stripping: ``validate.checks`` imports this rather
     than carrying its own copy. Uses :class:`~pathlib.PurePosixPath` so repo-relative posix
     paths are split the same way on every platform.
     """
@@ -103,7 +103,7 @@ def iter_repo_source(project_root: Path, matcher: IgnoreMatcher | None = None) -
 def iter_subsystem_files(project_root: Path, sub: SubsystemCompact, exts: set[str]) -> list[Path]:
     """Every supported source file a subsystem owns (its ``paths`` globs + explicit ``files``).
 
-    The single home for the owned-file walk (s-34): the validation engine and ``describe`` both
+    The single home for the owned-file walk: the validation engine and ``describe`` both
     call this so they agree on exactly which files belong to a subsystem — no second copy to
     drift. Deduplicated by real path (so a file reached via two globs is counted once) and
     sorted by posix path for deterministic output. Skips :data:`config.DEFAULT_IGNORES`.
@@ -147,7 +147,7 @@ def extract_project(
     subsystems: dict[str, SubsystemCompact],
     matcher: IgnoreMatcher | None = None,
 ) -> tuple[dict[str, str], dict[str, ExtractResult], set[str]]:
-    """Project-wide extraction shared by calibrate / impact --verify / ``where`` (s-34 single home).
+    """Project-wide extraction shared by calibrate / impact --verify / ``where`` (single home).
 
     Walks every subsystem's owned files (flat topology: first declared owner wins), applies the
     optional ``.boundsignore`` ``matcher``, and tree-sitter-extracts each. Returns
@@ -180,9 +180,9 @@ def extract_file(project_root: Path, rel: str) -> tuple[ExtractResult | None, bo
     """Extract one file's surface. Returns ``(result_or_None, is_generated)``.
 
     ``result`` is ``None`` when the extension is unsupported, the file is unreadable, or the file
-    exceeds :data:`config.MAX_FILE_BYTES` (s-33 resource bound — a giant blob is skipped, never
+    exceeds :data:`config.MAX_FILE_BYTES` (resource bound — a giant blob is skipped, never
     read into memory). ``is_generated`` is True when the file carries a ``@generated``-style header
-    marker (callers skip generated files when proposing new exposes — s-14/s-16).
+    marker (callers skip generated files when proposing new exposes).
     """
     adapter = get_adapter(rel)
     if adapter is None:

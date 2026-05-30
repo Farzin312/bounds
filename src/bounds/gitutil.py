@@ -16,7 +16,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-# Hard ceiling on any single git subprocess (s-33). A wedged git (e.g. a network filesystem or a
+# Hard ceiling on any single git subprocess. A wedged git (e.g. a network filesystem or a
 # stuck lock) must not hang Bounds — on timeout the helper fails soft (returns None), exactly like
 # git being absent, so the caller transparently falls back to a full (non-incremental) scan.
 GIT_TIMEOUT_SECONDS = 10

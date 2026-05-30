@@ -21,7 +21,7 @@ def test_impact_cli(monkeypatch, py_project):
     assert data["subsystem"] == "models"
     assert "svc" in data["transitive_consumers"]
     assert data["blast_radius"] >= 1
-    # s-29 honesty fields are always present.
+    # honesty fields are always present.
     assert data["basis"] == "declared-consumes"
     assert data["blast_radius_is_lower_bound"] is True
     assert "lower bound" in data["note"]
@@ -30,7 +30,7 @@ def test_impact_cli(monkeypatch, py_project):
 
 def test_impact_verify_flags_undeclared_consumer(monkeypatch, py_project):
     # Drop svc's declared consume of models, but svc/main.py still imports it: the declared
-    # blast radius now under-reports (0), and --verify must surface the real edge (s-29).
+    # blast radius now under-reports (0), and --verify must surface the real edge .
     (py_project / ".bounds" / "manifests" / "svc.yaml").write_text(
         "name: svc\nrole: service\ncriticality: leaf\npaths: [src/svc]\nexposes: []\nconsumes: []\n",
         encoding="utf-8",
@@ -109,7 +109,7 @@ def test_discover_cli_runs(monkeypatch, py_project):
 
 
 # ---------------------------------------------------------------------------
-# s-33 — architectural hardening (resource bounds, fail-loud, determinism)
+# architectural hardening (resource bounds, fail-loud, determinism)
 # ---------------------------------------------------------------------------
 def test_oversized_owned_file_is_skipped_loudly(monkeypatch, py_project):
     import bounds.config as cfg
@@ -153,7 +153,76 @@ def test_overview_edges_are_sorted(monkeypatch, py_project):
 
 
 # ---------------------------------------------------------------------------
-# s-34 de-spaghetti — golden / determinism guards
+# Edge cases / gaps
+# ---------------------------------------------------------------------------
+def test_where_finds_undeclared_public_symbol(monkeypatch, py_project):
+    # A public symbol the manifest does not declare is still locatable, tagged exposed=False.
+    (py_project / "src" / "models" / "extra.py").write_text(
+        "def helper():\n    return 1\n", encoding="utf-8"
+    )
+    data = json.loads(_invoke(monkeypatch, py_project, ["where", "helper"]).output)
+    assert data["count"] == 1
+    r = data["results"][0]
+    assert r["owning_subsystem"] == "models" and r["exposed"] is False
+
+
+def test_where_no_bounds_is_fatal(monkeypatch, tmp_path):
+    res = _invoke(monkeypatch, tmp_path, ["where", "Thing"])
+    assert res.exit_code == 2
+    assert "E_MANIFEST_NOT_FOUND" in res.output
+
+
+def test_impact_no_bounds_is_fatal(monkeypatch, tmp_path):
+    res = _invoke(monkeypatch, tmp_path, ["impact", "models"])
+    assert res.exit_code == 2
+    assert "E_MANIFEST_NOT_FOUND" in res.output
+
+
+def test_impact_verify_unknown_subsystem_is_fatal(monkeypatch, py_project):
+    # Unknown subsystem must fail fast (before any extraction), even with --verify.
+    res = _invoke(monkeypatch, py_project, ["impact", "ghost", "--verify"])
+    assert res.exit_code == 2
+    assert "E_SUBSYSTEM_NOT_FOUND" in res.output
+
+
+def test_where_empty_project_returns_no_matches(monkeypatch, tmp_path):
+    # A .bounds/ with a subsystem whose paths hold no source → where returns 0, not a crash.
+    (tmp_path / ".bounds" / "manifests").mkdir(parents=True)
+    (tmp_path / ".bounds" / "root.yaml").write_text(
+        'version: "1"\nproject: empty\nsubsystems: [thing]\n', encoding="utf-8"
+    )
+    (tmp_path / ".bounds" / "manifests" / "thing.yaml").write_text(
+        "name: thing\nrole: library\ncriticality: leaf\npaths: [src/thing]\nexposes: []\n",
+        encoding="utf-8",
+    )
+    res = _invoke(monkeypatch, tmp_path, ["where", "Anything"])
+    assert res.exit_code == 0
+    assert json.loads(res.output)["count"] == 0
+
+
+def test_describe_namespace_status_is_per_subsystem(monkeypatch, py_project):
+    # Both subsystems in one namespace; drift only in models. Under --namespace, each subsystem's
+    # validation_status is scoped to itself while project_status is the shared rollup.
+    for n in ("models", "svc"):
+        p = py_project / ".bounds" / "manifests" / f"{n}.yaml"
+        p.write_text("namespace: core\n" + p.read_text(encoding="utf-8"), encoding="utf-8")
+    m = py_project / ".bounds" / "manifests" / "models.yaml"
+    m.write_text(
+        m.read_text(encoding="utf-8").replace(
+            "  - { name: Thing, kind: class }",
+            "  - { name: Thing, kind: class }\n  - { name: Missing, kind: class }",
+        ),
+        encoding="utf-8",
+    )
+    data = json.loads(_invoke(monkeypatch, py_project, ["describe", "--namespace", "core"]).output)
+    by_name = {s["name"]: s for s in data["subsystems"]}
+    assert by_name["models"]["validation_status"] == "stale"
+    assert by_name["svc"]["validation_status"] == "fresh"
+    assert by_name["svc"]["project_status"] == "stale"  # rollup sees the models drift
+
+
+# ---------------------------------------------------------------------------
+# de-spaghetti — golden / determinism guards
 #
 # describe's Tier-1+2 merge now lives in describe.py and reuses the shared
 # scan.iter_subsystem_files + scan.extract_file (one home for the owned-file
@@ -193,7 +262,7 @@ def test_validate_json_is_byte_stable(monkeypatch, py_project):
 
 
 # ---------------------------------------------------------------------------
-# s-31 — subsystem-scoped describe status + coverage signals
+# subsystem-scoped describe status + coverage signals
 # ---------------------------------------------------------------------------
 def test_describe_status_is_subsystem_scoped(monkeypatch, py_project):
     # Introduce drift in `models` only (declare a class the source doesn't export).
@@ -215,7 +284,7 @@ def test_describe_status_is_subsystem_scoped(monkeypatch, py_project):
 
 
 # ---------------------------------------------------------------------------
-# s-30 — bounds where
+# bounds where
 # ---------------------------------------------------------------------------
 def test_where_python_exact(monkeypatch, py_project):
     data = json.loads(_invoke(monkeypatch, py_project, ["where", "Thing"]).output)

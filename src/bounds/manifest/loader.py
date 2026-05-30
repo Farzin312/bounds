@@ -97,7 +97,7 @@ def load_all(
     issues: list[Issue] = []
     issues.extend(_validate_root_yaml(project_root))
 
-    # Resolved validity sets honour any custom roles/criticality declared in root.yaml (s-17).
+    # Resolved validity sets honour any custom roles/criticality declared in root.yaml.
     valid_roles = set(root.role_registry())
     valid_criticality = set(root.criticality_registry())
 

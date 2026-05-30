@@ -1,4 +1,4 @@
-"""CI gate generation (s-20): scaffold CI config so Bounds runs as a merge gate.
+"""CI gate generation: scaffold CI config so Bounds runs as a merge gate.
 
 This module writes (or idempotently augments) the config files that wire Bounds
 into common CI/CD systems, so structural drift is caught at the boundary where it

@@ -53,11 +53,11 @@ Bounds maintains a hidden `.bounds/` directory of tiny YAML **subsystem manifest
 tree-sitter to validate them against your real source, in both directions.
 
 - **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`.
-- **`bounds validate`** — catch drift the moment exports stop matching the manifest. 6 checks, zero LLM.
+- **`bounds validate`** — catch drift the moment your code's exports stop matching the manifest. Six structural checks, zero LLM.
 - **`bounds validate --quick`** — git-diff incremental validation, safe for every commit.
-- **`bounds preflight`** — pre-PR checks: drift, boundaries, contracts, cycles, orphans, impact.
+- **`bounds preflight`** — run all the pre-PR checks at once: drift, boundary violations, broken contracts, dependency cycles, orphaned subsystems, and impact.
 - **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface changes.
-- **`bounds discover` / `bounds calibrate`** — onboard an un-bounded repo in one command, then keep manifests honest against tree-sitter reality.
+- **`bounds discover` / `bounds calibrate`** — set up manifests for a repo that has none in one command, then keep them honest against what tree-sitter actually finds in your source.
 - **`bounds agent --sync`** — wire Bounds into eight coding agents (Claude Code, Codex, Cursor, …) with one command.
 - **Deterministic** — same input, same byte-stable output. No network, no flakiness.
 

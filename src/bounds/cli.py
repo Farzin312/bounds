@@ -14,15 +14,23 @@ from pathlib import Path
 
 import click
 
-from . import __version__, agentsync, calibrate as calibrate_mod, ciconfig, config, describe as describe_mod, discover as discover_mod, errors, output
+from . import (
+    __version__,
+    agentsync,
+    calibrate as calibrate_mod,
+    ciconfig,
+    config,
+    describe as describe_mod,
+    discover as discover_mod,
+    errors,
+    locate,
+    output,
+)
 from .cache import store as cache_store
-from .extract import scan
-from .extract.scan import strip_ext
-from .ignore import IgnoreMatcher, load_matcher
+from .ignore import IgnoreMatcher
 from .manifest import loader as manifest_loader
 from .validate import engine as validate_engine
-from .validate import propagation
-from .validate.checks import CheckContext, build_suffix_index, check_cycles, resolve_import
+from .validate.checks import CheckContext, check_cycles
 
 # ---- shared option ----
 _human = click.option("--human", "-H", "human", is_flag=True, default=False,
@@ -127,7 +135,7 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: boo
 
         if namespace is not None:
             matched = [subs[n] for n in sorted(subs) if subs[n].namespace == namespace]
-            # One shared read-only quick run; each describe_one scopes status to its subsystem (s-31).
+            # One shared read-only quick run; each describe_one scopes status to its subsystem.
             report = describe_mod.status_report(root) if matched else None
             payload = {
                 "namespace": namespace,
@@ -254,7 +262,7 @@ def overview_cmd(human: bool) -> None:
             for n in sorted(subs)
             for c in subs[n].consumes
         ]
-        # Deterministic edge order regardless of consumes-declaration order (s-33).
+        # Deterministic edge order regardless of consumes-declaration order.
         edges.sort(key=lambda e: (e["from"], e["to"], e["interfaces"]))
         ctx = CheckContext(root, rootm, subs, {}, {}, set(), set())
         cycle_issues = check_cycles(ctx)
@@ -291,79 +299,9 @@ def impact_cmd(name: str, verify: bool, human: bool) -> None:
     """Show the transitive blast radius of a subsystem (who breaks if its surface changes)."""
 
     def go() -> None:
-        root = _require_root()
-        _, subs, _ = manifest_loader.load_all(root)
-        if name not in subs:
-            raise errors.BoundsError(
-                errors.E_SUBSYSTEM_NOT_FOUND,
-                f"subsystem '{name}' not found",
-                fix=f"known subsystems: {sorted(subs)}",
-            )
-        index = propagation.build_consumer_index(subs)
-        direct = index.get(name, [])
-        transitive = propagation.transitive_consumers(name, subs)
-        # Per-direct-consumer detail: which of this subsystem's interfaces they rely on.
-        consumers = []
-        for cname in direct:
-            for c in subs[cname].consumes:
-                if c.subsystem == name:
-                    consumers.append({
-                        "name": cname,
-                        "via": c.via,
-                        "interfaces": sorted(c.interfaces),
-                    })
-        payload = {
-            "subsystem": name,
-            "criticality": subs[name].criticality,
-            "direct_consumers": sorted(direct),
-            "transitive_consumers": transitive,
-            "blast_radius": len(transitive),
-            # s-29: be honest that this counts ONLY declared `consumes` edges. A real import
-            # that no manifest declares is not in this number, so it is a lower bound.
-            "basis": "declared-consumes",
-            "blast_radius_is_lower_bound": True,
-            "note": (
-                "blast_radius counts only declared `consumes` edges; an import not declared in a "
-                "manifest is not counted, so treat it as a lower bound. Run `bounds impact "
-                f"{name} --verify` to cross-check the resolved import graph, or `bounds validate` "
-                "for boundary/contract checks."
-            ),
-            "consumers": consumers,
-        }
-        if verify:
-            payload["undeclared_consumer_edges"] = _verify_consumer_edges(root, subs, name)
-        output.emit(payload, human)
+        output.emit(locate.run_impact(_require_root(), name, verify), human)
 
     _run(human, go)
-
-
-def _verify_consumer_edges(root: Path, subs: dict, name: str) -> list[dict]:
-    """Resolved-import cross-check for ``bounds impact --verify`` (s-29).
-
-    Extract every subsystem's source, resolve each import to an owned file, and return the
-    consumer subsystems that really import from ``name`` but declare no ``consumes`` edge to it —
-    exactly the edges the declared-only blast radius silently misses. Deterministic: sorted.
-    Reuses the shared :func:`extract.scan.extract_project` + the one import resolver, so it
-    agrees with validate on ownership and resolution rather than carrying its own copy.
-    """
-    file_owner, extracts, _ = scan.extract_project(root, subs, load_matcher(root))
-    known_noext = {strip_ext(rel): rel for rel in sorted(extracts)}
-    suffix_index = build_suffix_index(known_noext)
-    declared = set(subs[name].consumed_by)  # subsystems that declare consuming `name`
-    evidence: dict[str, set[str]] = {}
-    for rel in sorted(extracts):
-        owner = file_owner.get(rel)
-        if owner is None or owner == name:
-            continue
-        for imp in extracts[rel].imports:
-            target = resolve_import(rel, imp.module, known_noext, suffix_index)
-            if target and file_owner.get(target) == name:
-                evidence.setdefault(owner, set()).add(rel)
-    return [
-        {"consumer": consumer, "files": sorted(files)}
-        for consumer, files in sorted(evidence.items())
-        if consumer not in declared
-    ]
 
 
 # ===========================================================================
@@ -375,46 +313,10 @@ def _verify_consumer_edges(root: Path, subs: dict, name: str) -> list[dict]:
               help="Match symbols whose name starts with SYMBOL, instead of an exact match.")
 @_human
 def where_cmd(symbol: str, prefix: bool, human: bool) -> None:
-    """Locate a symbol: which file defines it, and which subsystem owns it (s-30).
-
-    Returns every definition (name collisions across files are all reported), each tagged with
-    its owning subsystem and whether that subsystem *declares* it in `exposes`. Extraction is
-    fresh (never a stale cache), so a result is always current. Works for Python and TS/JS.
-    """
+    """Locate a symbol: which file defines it, and which subsystem owns it."""
 
     def go() -> None:
-        root = _require_root()
-        _, subs, _ = manifest_loader.load_all(root)
-        # Fresh project-wide extraction (shared helper) — never trusts a stale cache for a lookup.
-        file_owner, extracts, _ = scan.extract_project(root, subs, load_matcher(root))
-        declared_by = {n: subs[n].expose_names() for n in subs}
-
-        def matches(sym_name: str) -> bool:
-            return sym_name.startswith(symbol) if prefix else sym_name == symbol
-
-        results: list[dict] = []
-        for rel in extracts:
-            owner = file_owner.get(rel, "")
-            declared = declared_by.get(owner, set())
-            for sym in extracts[rel].symbols:
-                if matches(sym.name):
-                    results.append({
-                        "symbol": sym.name,
-                        "kind": sym.kind,
-                        "file": rel,
-                        "line": sym.line,
-                        "owning_subsystem": owner,
-                        "exposed": sym.name in declared,
-                    })
-        # All owners, deterministically sorted (handles name collisions across files).
-        results.sort(key=lambda r: (r["file"], r["symbol"], r["line"], r["kind"]))
-        payload = {
-            "symbol": symbol,
-            "match": "prefix" if prefix else "exact",
-            "count": len(results),
-            "results": results,
-        }
-        output.emit(payload, human)
+        output.emit(locate.run_where(_require_root(), symbol, prefix), human)
 
     _run(human, go)
 

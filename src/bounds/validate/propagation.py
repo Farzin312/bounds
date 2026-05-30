@@ -55,7 +55,7 @@ def propagate(
 
     The originally-dirty subsystems are excluded from the result (they're the cause, not the impact).
     ``depth_map`` (criticality label -> hop depth) comes from the resolved root registry so custom
-    criticality labels (s-17) drive propagation; it defaults to the built-in depths.
+    criticality labels drive propagation; it defaults to the built-in depths.
     """
     depth_map = depth_map if depth_map is not None else config.PROPAGATION_DEPTH
     index = build_consumer_index(subsystems)

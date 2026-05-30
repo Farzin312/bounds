@@ -214,7 +214,7 @@ def test_drift_undeclared_extra_on_core_is_info():
 
 
 def test_drift_undeclared_extra_on_leaf_is_info():
-    # s-32: undeclared exports surface as info on leaf/connector too (not just core/unbounded),
+    # undeclared exports surface as info on leaf/connector too (not just core/unbounded),
     # which is where the most common real drift hides. Still info → never blocks.
     for crit in ("leaf", "connector"):
         subs = {"a": Sub(name="a", criticality=crit, paths=["x"], exposes=[Interface("foo")])}
@@ -230,7 +230,7 @@ def test_drift_undeclared_extra_on_leaf_is_info():
 
 
 def test_drift_no_undeclared_flag_when_exposes_empty():
-    # s-32 guard: a subsystem that declares *no* exposes (e.g. not yet calibrated) is not
+    # guard: a subsystem that declares *no* exposes (e.g. not yet calibrated) is not
     # spammed with an info per exported symbol — undeclared drift needs a declared set to drift from.
     subs = {"a": Sub(name="a", criticality="leaf", paths=["x"], exposes=[])}
     extracts = {"x/f.py": ExtractResult("x/f.py", "python", [Symbol("extra", "function", 1, True)])}
@@ -239,11 +239,11 @@ def test_drift_no_undeclared_flag_when_exposes_empty():
 
 
 # ===========================================================================
-# s-33 hardening — cycle detection on a deep graph, concurrent cache writes
+# hardening — cycle detection on a deep graph, concurrent cache writes
 # ===========================================================================
 def test_find_cycles_handles_deep_graph_without_recursionerror():
     # One big cycle 0 -> 1 -> ... -> 1999 -> 0, far deeper than Python's recursion limit.
-    # The iterative DFS (s-33) must enumerate it instead of raising RecursionError.
+    # The iterative DFS must enumerate it instead of raising RecursionError.
     n = 2000
     graph = {str(i): [str((i + 1) % n)] for i in range(n)}
     cycles = _find_cycles(graph)
@@ -253,7 +253,7 @@ def test_find_cycles_handles_deep_graph_without_recursionerror():
 
 def test_concurrent_validate_persist_does_not_crash(py_project):
     # Several validate runs racing on the same cache.db must not raise "database is locked":
-    # PRAGMA busy_timeout lets them queue, and persist failures are swallowed (s-33).
+    # PRAGMA busy_timeout lets them queue, and persist failures are swallowed .
     import threading
 
     seen: list[Exception] = []
