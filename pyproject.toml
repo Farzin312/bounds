@@ -55,3 +55,27 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+exclude = [
+    ".venv",
+    ".git",
+    "build",
+    "dist",
+    "tests/fixtures",
+]
+
+[tool.ruff.lint]
+# Conservative selection: pyflakes (F), a subset of pycodestyle errors (E),
+# and import sorting (I). Rules that fire on the current source tree are
+# disabled here rather than auto-fixed, so the gate passes without touching
+# any .py files. Tighten incrementally as the code is cleaned up.
+select = ["E", "F", "I"]
+ignore = [
+    "E501",  # line-too-long: existing code exceeds 120 cols in places
+    "F401",  # unused imports present in current source
+    "F541",  # f-string without placeholders present in current source
+    "I001",  # import block sorting not yet applied to current source
+]

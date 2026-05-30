@@ -58,10 +58,11 @@ bounds/
 │   ├── calibrate.py        # Manifest↔source reconciliation (s-16)
 │   ├── agentsync.py        # Cross-agent config generation (s-18)
 │   └── ciconfig.py         # CI config generation (s-20)
-├── tests/                  # Pytest test suite (10 files, 150 tests)
+├── tests/                  # Pytest test suite (10 files, 157 tests)
+├── docs/                   # Deep-dive documentation (linked from the README entrance)
 ├── ARCHITECTURE.md         # Engineering contract
 ├── CONTRIBUTING.md         # This file
-└── README.md               # Project overview + agent integration (+ Roadmap section)
+└── README.md               # Lean visual entrance — overview + quickstart, links into docs/
 ```
 
 ## Repository Hygiene — How the Repo Scales and Stays Clean
@@ -150,7 +151,7 @@ All tests must pass. If you add a new feature, include tests.
 
 ### Writing Tests
 
-- Tests live in `tests/` and are grouped by feature area (10 files, 150 tests):
+- Tests live in `tests/` and are grouped by feature area (10 files, 157 tests):
   `test_extract.py`, `test_validate.py`, `test_schema_flex.py` (s-17 roles/criticality),
   `test_cache_sqlite.py`, `test_discover.py`, `test_calibrate.py`, `test_agentsync.py`,
   `test_ciconfig.py`, `test_cli.py`, and `test_commands_cli.py`.
@@ -195,8 +196,13 @@ Tree-sitter adapters live in `src/bounds/extract/`. To add a new language:
 
 When contributing documentation changes:
 
-- **README.md** — product pitch, quickstart, agent integration. Must include real benchmark data
-  and competitive positioning. No emoji.
+- **README.md** — the **lean visual entrance**: overview, why-use, quickstart, and the visuals. It
+  stays short and links into `docs/` for depth — don't grow it back into a manual. No emoji.
+- **docs/** — the deep-dive guides (`why-bounds`, `team-workflow`, `how-it-works`, `token-economics`,
+  `use-cases`, `cli-reference`, `ai-agents`, `languages-and-platforms`, `install`, `comparison`),
+  indexed by `docs/README.md`. New long-form content goes here and is linked from the README, not
+  pasted into it. Honesty rules apply (compliance is advisory; the cache deters naive dumps, not
+  access; Python + TS only today; `--deep` stubbed).
 - **ARCHITECTURE.md** — engineering contract. Every module signature, dataclass field, error code,
   and JSON shape is binding.
 - **README "Roadmap" section + GitHub Milestones** — scope and phasing (shipped vs deferred).

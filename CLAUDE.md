@@ -2,6 +2,7 @@
 
 Working guide for agents and contributors in this repo. **This is not the product doc or the design doc.**
 - Product pitch, install, agent integration → [README.md](README.md)
+- Deep-dive docs (how-it-works, team workflow, CLI reference, agent integration, token economics) → [docs/](docs/README.md)
 - Engineering contract (modules, data model, error codes, JSON shapes) → [ARCHITECTURE.md](ARCHITECTURE.md)
 - Scope & phasing (shipped vs planned) → README "Roadmap" section + GitHub Milestones
 
@@ -11,21 +12,16 @@ Bounds is a zero-LLM CLI that extracts a codebase's structural surface (exported
 with tree-sitter and validates it against human-declared subsystem manifests in `.bounds/`. Python,
 `src/` layout, package `bounds`, console entry `bounds = bounds.cli:main`.
 
-## Dev environment & commands
+## Python environment
 
-**Do not run these automatically.** These are reference commands for human contributors, not session startup instructions.
+Development runs in a virtualenv — one is **created**, never assumed to pre-exist (a fresh clone has
+none). Set it up per [CONTRIBUTING.md](CONTRIBUTING.md#development-setup)
+(`python -m venv .venv && pip install -e ".[dev]"`). **If** a `.venv/` is present in the workspace,
+invoke tooling through it (`.venv/bin/python`, `.venv/bin/pytest`) rather than `source`-ing it; if it
+isn't there yet, create it first. This is contributor/maintainer setup — end users never need it; they
+just `pipx install` the `bounds` CLI.
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"          # editable install + pytest
-bounds --help                    # smoke test the CLI
-pytest                           # run the test suite
-bounds validate --human          # run Bounds on itself (bootstrap demo)
-```
-
-A `.venv/` already exists in this workspace; prefer `.venv/bin/python` / `.venv/bin/pytest` for all tool invocations — do not `source .venv/bin/activate` at session start.
-
-## Code conventions (enforced — see ARCHITECTURE.md for the why)
+## Binding constraints (enforced — see ARCHITECTURE.md for the why)
 
 - **Zero LLM for structural ops.** Everything in `extract/`, `validate/`, `cache/` is tree-sitter +
   pure Python. The only LLM tier (Tier 3, `describe --deep`) is opt-in and **stubbed** in MVP — never

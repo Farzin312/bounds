@@ -1,0 +1,69 @@
+# Token economics
+
+*The cost argument: why a verified contract beats reading source, why the win widens with codebase size, and an honest account of how the numbers were measured.*
+
+[← Docs index](./README.md) · [Bounds README](../README.md)
+
+---
+
+An AI agent's only real cost is **tokens into context**, so that is the only unit that matters here. The core claim: Bounds reduces the context an agent needs to understand your codebase from thousands of tokens to a few hundred.
+
+## Token cost comparison
+
+> **Estimate basis (read this first).** Token figures are estimates derived from byte size at **~4 chars/token** — a standard rough rule for JSON/source, **not** exact tokenizer counts. They come from **one codebase (this repo): a single data point, not a cross-repo corpus study.** The byte numbers are real and reproducible via `benchmarks/run.py`; treat the *ratio* as illustrative, not a guaranteed average.
+
+### Measured on this repo
+
+To understand the `models` subsystem's public API (9 exports, consumed by 5 subsystems):
+
+| Read this | Size | Token estimate |
+|-----------|------|----------------|
+| `bounds describe models` (verified JSON contract) | 1,593 bytes | **~400 tokens** |
+| `src/bounds/models.py` (the full source file) | 11,489 bytes | **~2,900 tokens** |
+
+The agent gets the verified public surface for **~400 tokens** instead of **~2,900 tokens** of source — and in real cases a subsystem spans several files, so the source side is usually far larger.
+
+For the whole-system map across all 8 subsystems:
+
+| Read this | Size | Token estimate |
+|-----------|------|----------------|
+| `bounds list` (every subsystem: role, criticality, graph, interface counts) | 2,633 bytes | **~660 tokens** |
+
+`bounds list` is the cheap whole-system map: **~660 tokens** for the complete architecture instead of grepping a dozen-plus source files and mentally reconstructing it.
+
+| Scenario | Without Bounds | With Bounds | Token savings |
+|----------|----------------|-------------|---------------|
+| Understand one subsystem | Read 1–15 source files (thousands of tokens) | `bounds describe <name>` (~250–400 tokens of verified contract) | ~85–99% |
+| Map all subsystems | Grep `class\|def\|export` across the tree | `bounds list` (~660 tokens) | Near-total |
+| Dependency blast radius | Trace imports by hand | `bounds impact <name>` (transitive consumers + relied-on interfaces) | ~99% |
+| Detect architecture drift | Manual code review | `bounds validate` (structured report, 0 LLM) | Subjective → deterministic |
+| CI gate for boundary violations | No automated option | `bounds preflight --ci` | Previously impossible |
+
+These percentages follow from the single-repo measurements above; the same caveat applies.
+
+## How retrieval scales (and why it matters more as you grow)
+
+The token win isn't a flat discount — it *widens* with codebase size, and that is the whole point.
+
+- **Reading source is O(files).** To understand a subsystem by reading it, an agent's token cost grows with how much code that subsystem (and its neighbors) contains. Bigger codebase → bigger reads.
+- **A Bounds contract is O(public API).** `bounds describe` returns only the declared, tree-sitter-verified surface — `exposes`, `consumes`, `consumed_by`. A subsystem with 50 internal functions and 5 exports is still ~5 lines. As the implementation grows, the contract stays roughly **flat**.
+
+| Codebase size | Read the subsystem's source | `bounds describe <name>` |
+|---------------|-----------------------------|--------------------------|
+| Small (a few files) | hundreds–low-thousands of tokens | ~300 tokens |
+| Medium (dozens of files) | many thousands of tokens | ~300 tokens |
+| Large (hundreds of files) | tens of thousands of tokens | ~300 tokens |
+
+### The context-rot risk (framed as risk, not a guaranteed fix)
+
+This compounds with a property of LLMs that *can* punish the naive approach: models often get worse as their context fills — the "lost-in-the-middle" / context-rot effect, where relevant facts buried in a large prompt are recalled less reliably. So in a large codebase the source-reading approach risks being doubly bad: it costs more tokens *and* may degrade reasoning quality.
+
+To be clear about what Bounds claims and what it doesn't: targeted, minimal retrieval — one verified contract, the dependency map, a blast-radius query — is the behavior that *should* scale better, and Bounds is built to make that the cheap default. It does **not** guarantee an agent reasons well or finishes a task; it lowers token load and gives structure the agent can verify. The architecture lives outside the model's context until a single CLI call pulls in exactly the slice it needs.
+
+## Methodology and per-model results
+
+Token counts are tokenizer-dependent, and the figures above use the ~4 chars/token approximation rather than a real tokenizer. The measured token economics, the scaling methodology, and per-model community results (which note the specific model/tokenizer used) live in [`benchmarks/`](../benchmarks/README.md). Start there for the reproducible numbers and the exact methodology behind any claim on this page.
+
+---
+
+**See also:** [./how-it-works.md](./how-it-works.md) for the mechanism behind these numbers · [../benchmarks/README.md](../benchmarks/README.md) for methodology and per-model results · [../ARCHITECTURE.md](../ARCHITECTURE.md) for the full engineering contract.
