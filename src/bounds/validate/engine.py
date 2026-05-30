@@ -7,6 +7,7 @@ Flow (see ARCHITECTURE.md §2):
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from pathlib import Path
 
@@ -200,8 +201,8 @@ def run(
     if persist:
         try:
             cache_store.save_state(project_root, state)
-        except OSError:
-            pass  # cache is an optimization; never fail validation over it
+        except (OSError, sqlite3.Error):
+            pass  # cache is an optimization; never fail validation over it (incl. a locked db, s-33)
 
     propagated = propagation.propagate(dirty, subsystems, root.criticality_registry())
 

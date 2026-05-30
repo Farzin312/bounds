@@ -226,6 +226,9 @@ def _render_subsystem_human(payload: dict) -> str:
     entry_points = payload.get("entry_points", [])
     if entry_points:
         lines.append(f"entry_points: {', '.join(entry_points)}")
+    unparsed = payload.get("unparsed_files", [])
+    if unparsed:
+        lines.append(f"unparsed_files: {', '.join(unparsed)}")
 
     exposes = payload.get("exposes", [])
     if exposes:

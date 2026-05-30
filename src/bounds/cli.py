@@ -254,6 +254,8 @@ def overview_cmd(human: bool) -> None:
             for n in sorted(subs)
             for c in subs[n].consumes
         ]
+        # Deterministic edge order regardless of consumes-declaration order (s-33).
+        edges.sort(key=lambda e: (e["from"], e["to"], e["interfaces"]))
         ctx = CheckContext(root, rootm, subs, {}, {}, set(), set())
         cycle_issues = check_cycles(ctx)
         schema_errors = sum(1 for i in schema_issues if i.severity == "error")

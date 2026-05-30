@@ -21,31 +21,36 @@ from .models import SubsystemCompact, ValidationReport
 from .validate import engine as validate_engine
 
 
-def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], list[str]]:
+def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], list[str], list[str]]:
     """Tier-1 extraction for one subsystem.
 
-    Returns ``(exported_symbol_name -> owning_file, owned_files)``. Every file the subsystem
-    owns is recorded in ``owned_files`` regardless of whether it parses (so ``files`` reflects
-    the declared surface), but only cleanly-extracted exported symbols populate the symbol map
-    used to mark ``exposes`` entries ``verified``.
+    Returns ``(exported_symbol_name -> owning_file, owned_files, unparsed_files)``. Every file the
+    subsystem owns is recorded in ``owned_files`` regardless of whether it parses (so ``files``
+    reflects the declared surface); only cleanly-extracted exported symbols populate the symbol map
+    used to mark ``exposes`` entries ``verified``. A supported owned file that fails to extract
+    (unreadable / oversized / parse error) is recorded in ``unparsed_files`` so describe reports it
+    loudly instead of silently showing a real symbol as ``verified:false`` (s-33 fail-loud).
 
-    File selection is the engine's owned-file walk, so describe and validate own the same set.
+    File selection is the shared owned-file walk, so describe and validate own the same set.
     """
     exts = supported_extensions()
     extracted_symbols: dict[str, str] = {}  # symbol_name -> owning file (rel posix)
     owned_files: list[str] = []
+    unparsed_files: list[str] = []
 
     for abs_path in scan.iter_subsystem_files(root, sub, exts):
         rel = abs_path.relative_to(root).as_posix()
         if rel not in owned_files:
             owned_files.append(rel)
         result, _ = scan.extract_file(root, rel)
-        if result is not None:  # None ⇒ unsupported/unreadable/parse-fail (fail soft)
+        if result is not None:
             for sym in result.symbols:
                 if sym.exported:
                     extracted_symbols[sym.name] = rel
+        else:  # supported source file that didn't yield a result → a genuine extraction failure
+            unparsed_files.append(rel)
 
-    return extracted_symbols, owned_files
+    return extracted_symbols, owned_files, unparsed_files
 
 
 def describe_one(
@@ -67,7 +72,7 @@ def describe_one(
     so an agent sees a symbol lives in a bootstrap file.
     """
     payload = sub.to_dict()
-    extracted_symbols, owned_files = extract_owned(root, sub)
+    extracted_symbols, owned_files, unparsed_files = extract_owned(root, sub)
     for expose in payload.get("exposes", []):
         ename = expose.get("name", "")
         if ename in extracted_symbols:
@@ -82,6 +87,10 @@ def describe_one(
     payload["entry_points"] = sorted(
         f for f in owned_files if entry_matcher and entry_matcher.matches(f)
     )
+    # Additive (only when non-empty): owned source files Bounds could not extract — surfaced so an
+    # agent never mistakes an unreadable/oversized file for "symbol absent from source" (s-33).
+    if unparsed_files:
+        payload["unparsed_files"] = sorted(unparsed_files)
     payload["validation_status"] = subsystem_status(report, sub.name)
     payload["project_status"] = project_status(report)
     if deep:

@@ -109,6 +109,50 @@ def test_discover_cli_runs(monkeypatch, py_project):
 
 
 # ---------------------------------------------------------------------------
+# s-33 — architectural hardening (resource bounds, fail-loud, determinism)
+# ---------------------------------------------------------------------------
+def test_oversized_owned_file_is_skipped_loudly(monkeypatch, py_project):
+    import bounds.config as cfg
+    monkeypatch.setattr(cfg, "MAX_FILE_BYTES", 5)  # tiny: every real source file is "oversized"
+    data = json.loads(_invoke(monkeypatch, py_project, ["validate"]).output)
+    assert any(
+        i["code"] == "E_EXTRACTION_FAILED" and "MAX_FILE_BYTES" in i["message"]
+        for i in data["issues"]
+    )
+    # And coverage counts it as an extraction failure.
+    assert data["stats"]["coverage"]["extraction_failures"] >= 1
+
+
+def test_describe_reports_unparsed_owned_file(monkeypatch, py_project):
+    import bounds.config as cfg
+    monkeypatch.setattr(cfg, "MAX_FILE_BYTES", 5)
+    data = json.loads(_invoke(monkeypatch, py_project, ["describe", "models"]).output)
+    assert "src/models/thing.py" in data.get("unparsed_files", [])
+    thing = next(e for e in data["exposes"] if e["name"] == "Thing")
+    assert thing["verified"] is False  # couldn't read it — not silently "absent from source"
+
+
+def test_symlink_cycle_does_not_hang(monkeypatch, py_project):
+    import os
+    # models/loop -> models is a directory-symlink cycle that would loop a naive rglob.
+    os.symlink(py_project / "src" / "models", py_project / "src" / "models" / "loop")
+    data = json.loads(_invoke(monkeypatch, py_project, ["where", "Thing"]).output)
+    files = [r["file"] for r in data["results"]]
+    assert files == ["src/models/thing.py"]  # found once (cycle visited at most once), no hang
+
+
+def test_validate_stats_keys_are_sorted(monkeypatch, py_project):
+    stats = json.loads(_invoke(monkeypatch, py_project, ["validate"]).output)["stats"]
+    assert list(stats.keys()) == sorted(stats.keys())
+
+
+def test_overview_edges_are_sorted(monkeypatch, py_project):
+    edges = json.loads(_invoke(monkeypatch, py_project, ["overview"]).output)["edges"]
+    keys = [(e["from"], e["to"]) for e in edges]
+    assert keys == sorted(keys)
+
+
+# ---------------------------------------------------------------------------
 # s-34 de-spaghetti — golden / determinism guards
 #
 # describe's Tier-1+2 merge now lives in describe.py and reuses the shared

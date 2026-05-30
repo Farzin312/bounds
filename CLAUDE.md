@@ -4,6 +4,7 @@ Working guide for agents and contributors in this repo. **This is not the produc
 - Product pitch, install, agent integration → [README.md](README.md)
 - Deep-dive docs (how-it-works, team workflow, CLI reference, agent integration, token economics) → [docs/](docs/README.md)
 - Engineering contract (modules, data model, error codes, JSON shapes) → [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Reviewable coding-standards checklist (the invariants below, as PR-checkable items)** → [docs/coding-standards.md](docs/coding-standards.md) (s-35)
 - Scope & phasing (shipped vs planned) → README "Roadmap" section + GitHub Milestones
 
 ## What this repo is

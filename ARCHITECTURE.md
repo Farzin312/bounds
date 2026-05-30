@@ -285,6 +285,7 @@ ROLE_BASE_BEHAVIOR = {
 
 DEFAULT_IGNORES = {"node_modules",".git","dist","build","__pycache__",".venv","venv",
                    ".bounds",".compact",".mypy_cache",".pytest_cache"}
+MAX_FILE_BYTES = 1_000_000       # s-33: a larger source file is skipped + E_EXTRACTION_FAILED (never read in)
 # propagation depth by criticality of the *changed* provider (fallback for the built-ins):
 PROPAGATION_DEPTH = {"core": -1, "connector": 1, "leaf": 0}   # -1 = unbounded
 BUILTIN_CRITICALITY_DEPTH = PROPAGATION_DEPTH
@@ -640,7 +641,7 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_SUBSYSTEM_NOT_FOUND` | fatal | unknown subsystem (raised by `describe <name>`, `impact <name>`, `calibrate --subsystem`) |
 | `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do) |
 | `E_UNSUPPORTED_LANGUAGE` | warning | file extension has no adapter (skipped) |
-| `E_EXTRACTION_FAILED` | warning | tree-sitter could not parse a file |
+| `E_EXTRACTION_FAILED` | warning | could not extract a file — tree-sitter parse error, unreadable, or over `MAX_FILE_BYTES` (s-33). An OWNED file is never silently dropped; it always emits this. |
 
 Codes are a public contract — never renumber, rename, or repurpose; only add. The full registry, with the advisory `SEVERITY` map, lives in `errors.py`.
 
@@ -658,9 +659,13 @@ The scan-bearing commands (`validate`, `preflight`) also accept `--include-ignor
 bounds list [--namespace NS]       → {project, subsystems:[{name, role, criticality, namespace?,
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name>             → SubsystemCompact.to_dict() + {files, entry_points, validation_status,
-                                       project_status, exposes[*].verified, exposes[*].file?, exposes[*].entry_point?}
+                                       project_status, unparsed_files?, exposes[*].verified, exposes[*].file?,
+                                       exposes[*].entry_point?}
                                        # validation_status is SUBSYSTEM-SCOPED (this subsystem's own issues);
-                                       # project_status is the project-wide rollup, kept additively (s-31)
+                                       # project_status is the project-wide rollup, kept additively (s-31).
+                                       # unparsed_files (present only when non-empty, s-33): owned source files
+                                       # Bounds could not extract — so an unreadable/oversized file is reported,
+                                       # never silently shown as a missing symbol.
 bounds describe --namespace NS     → {namespace, subsystems:[<describe payload>...]}
 bounds describe <name> --deep      → same + {semantic: {"note":"LLM enrichment (Tier 3) not enabled in this build"}}
 bounds validate [--quick|--mode M] [--enforce on|off] [--base REF] [scan flags]

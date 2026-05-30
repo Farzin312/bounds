@@ -28,7 +28,6 @@ is written empty — Bounds never puts wall-clock into any persisted artifact.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +36,11 @@ from .. import config
 from ..models import ExtractResult, ImportRef, Symbol
 
 _SQLITE_MAGIC = b"SQLite format 3\x00"
+
+# Milliseconds a cache connection waits on a locked database before erroring (s-33). Two `bounds
+# validate` runs racing on the same `.bounds/cache.db` should queue briefly, not immediately raise
+# "database is locked"; the writer is a single short transaction, so a few seconds is ample.
+_BUSY_TIMEOUT_MS = 5000
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cache (
@@ -209,6 +213,7 @@ def _load_sqlite(db_path: Path) -> State:
     except sqlite3.Error:
         return State()
     try:
+        conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
         if conn.execute("PRAGMA user_version").fetchone()[0] != _schema_version():
             return State()
         rows = conn.execute(
@@ -264,6 +269,7 @@ def save_state(project_root: Path, state: State) -> None:
 
     conn = sqlite3.connect(db_path)
     try:
+        conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
         conn.executescript(_SCHEMA)
         conn.execute(f"PRAGMA user_version = {_schema_version()}")
         with conn:  # transaction: commit on success, rollback on error
@@ -303,6 +309,7 @@ def load_subsystem_records(project_root: Path, subsystem: str) -> list[FileRecor
     except sqlite3.Error:
         return []
     try:
+        conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
         rows = conn.execute(
             "SELECT path, subsystem, content_hash, structure_hash, language, symbols, imports "
             "FROM cache WHERE subsystem = ? ORDER BY path",

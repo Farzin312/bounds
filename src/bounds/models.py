@@ -312,7 +312,9 @@ class ValidationReport:
             "mode": self.mode,
             "ok": self.ok,
             "issues": [i.to_dict() for i in sorted(self.issues, key=lambda x: x.sort_key())],
-            "stats": self.stats,
+            # Sort stats keys so the serialized report is byte-stable regardless of insertion
+            # order (s-33 determinism); values are already sorted by their producers.
+            "stats": dict(sorted(self.stats.items())),
         }
 
     def errors(self) -> list[Issue]:

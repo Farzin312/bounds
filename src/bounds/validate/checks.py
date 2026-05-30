@@ -78,23 +78,20 @@ class CheckContext:
             out |= {s.name for s in self.extracts[p].symbols}
         return out
 
-    def known_noext(self) -> dict[str, str]:
-        """Map of extension-stripped path -> real rel path, for import resolution (cached)."""
-        cached = getattr(self, "_known_noext", None)
+    def _index(self) -> tuple[dict[str, str], dict[str, str]]:
+        cached = getattr(self, "_idx", None)
         if cached is None:
-            cached = {}
-            for rel in sorted(self.extracts):
-                cached.setdefault(strip_ext(rel), rel)
-            self._known_noext = cached
+            cached = index_extracts(self.extracts)
+            self._idx = cached
         return cached
 
+    def known_noext(self) -> dict[str, str]:
+        """Map of extension-stripped path -> real rel path, for import resolution (cached)."""
+        return self._index()[0]
+
     def suffix_index(self) -> dict[str, str]:
-        """Trailing-segment suffix -> known stem, for O(1) import resolution (cached, s-34)."""
-        cached = getattr(self, "_suffix_index", None)
-        if cached is None:
-            cached = build_suffix_index(self.known_noext())
-            self._suffix_index = cached
-        return cached
+        """Trailing-segment suffix -> known stem, for O(1) import resolution (cached)."""
+        return self._index()[1]
 
     def known_top_segments(self) -> set[str]:
         """First path segments of every extracted file, for the 'local-looking' test (cached)."""
@@ -115,6 +112,18 @@ class CheckContext:
 # ===========================================================================
 # Import resolution helpers (best-effort; never produces false positives by guessing)
 # ===========================================================================
+def index_extracts(extracts: dict) -> tuple[dict[str, str], dict[str, str]]:
+    """Build ``(known_noext, suffix_index)`` from an extracts map — the one home for this
+    projection, shared by the validate path (:class:`CheckContext`) and the standalone callers
+    (``locate``, ``calibrate``, ``discover``). First-wins on a stem collision (sorted iteration +
+    ``setdefault``), so import resolution is deterministic and identical everywhere.
+    """
+    known_noext: dict[str, str] = {}
+    for rel in sorted(extracts):
+        known_noext.setdefault(strip_ext(rel), rel)
+    return known_noext, build_suffix_index(known_noext)
+
+
 def build_suffix_index(known_noext: dict[str, str]) -> dict[str, str]:
     """Map every trailing path-segment suffix of each known stem to a known stem (s-34).
 

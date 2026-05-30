@@ -113,6 +113,13 @@ are the ones worth keeping.
 
 ## Coding Standards
 
+> **The binding, reviewable checklist lives in [docs/coding-standards.md](docs/coding-standards.md)
+> (s-35).** It encodes the invariants every structural change must hold — determinism, fail-soft /
+> report-hard, zero-LLM on the structural path, resource bounds, the additive-only output contract,
+> the single-source severity table, the "one home per concept" DRY rule, and tests-for-new-behavior.
+> Walk its **(blocking)** sections when you review or self-review a PR. The conventions below are the
+> day-to-day style layer on top of it.
+
 ### Python
 
 - **Type hints**: Use `from __future__ import annotations` and annotate all
