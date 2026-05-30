@@ -29,9 +29,9 @@ def emit(payload: dict, human: bool, stream=None, ci: bool = False) -> None:
     (``namespace`` + ``subsystems``), a subsystem compact (``name`` + ``role``), or a
     generic key/value listing. The ``ci`` path renders a report as one issue per line.
     """
-    # SUPERVISOR-NOTE (review, 2026-05-29): resolve sys.stdout at call time, not as a
-    # default arg — a default binds the stream at import and ignores later redirection
-    # (CliRunner, contextlib.redirect_stdout), which silently dropped all CLI output.
+    # Resolve sys.stdout at call time, not as a default arg: a default binds the stream at
+    # import and ignores later redirection (CliRunner, contextlib.redirect_stdout), which
+    # would silently drop all CLI output.
     if stream is None:
         stream = sys.stdout
     if ci:

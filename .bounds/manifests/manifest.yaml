@@ -7,5 +7,6 @@ paths:
 exposes:
   - { name: find_root, kind: function }
   - { name: load_all, kind: function }
+  - { name: load_root, kind: function }
 consumes:
   - { subsystem: models, via: models, interfaces: [RootManifest, SubsystemCompact, Issue] }

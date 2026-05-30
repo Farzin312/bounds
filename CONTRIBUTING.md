@@ -43,22 +43,72 @@ bounds --help
 bounds/
 ├── .github/workflows/      # CI/CD workflows
 ├── src/bounds/
-│   ├── cache/              # Content-addressable extraction cache
-│   ├── extract/            # Tree-sitter language adapters
+│   ├── cache/              # Binary SQLite extraction cache (cache.db)
+│   ├── extract/            # Tree-sitter language adapters (+ scan.py shared helpers)
 │   ├── manifest/           # Manifest loader + schema validation
-│   ├── validate/           # Validation engine + checks
-│   ├── cli.py              # Click CLI entry point
-│   ├── config.py           # Global constants
+│   ├── validate/           # Validation engine + checks + propagation
+│   ├── cli.py              # Click CLI entry point (all commands)
+│   ├── config.py           # Global constants + role/criticality registries
 │   ├── errors.py           # Error codes
 │   ├── gitutil.py          # Git helpers
+│   ├── ignore.py           # .boundsignore matcher + @generated detection
 │   ├── models.py           # Data model dataclasses
-│   └── output.py           # JSON / human rendering
-├── tests/                  # Pytest test suite
+│   ├── output.py           # JSON / human / CI rendering
+│   ├── discover.py         # Bootstrap discovery (s-14)
+│   ├── calibrate.py        # Manifest↔source reconciliation (s-16)
+│   ├── agentsync.py        # Cross-agent config generation (s-18)
+│   └── ciconfig.py         # CI config generation (s-20)
+├── tests/                  # Pytest test suite (10 files, 150 tests)
 ├── ARCHITECTURE.md         # Engineering contract
 ├── CONTRIBUTING.md         # This file
-├── README.md               # Project overview + agent integration
-└── ROADMAP.md              # Future direction
+└── README.md               # Project overview + agent integration (+ Roadmap section)
 ```
+
+## Repository Hygiene — How the Repo Scales and Stays Clean
+
+Bounds is a tool *about* keeping architecture legible; the repository has to model that. As the
+project grows, keep it navigable by holding these invariants. A change that violates one should be
+fixed in the same PR, not deferred.
+
+**1. One module, one concern.** Each file under `src/bounds/` owns a single responsibility and is
+declared as (or part of) a subsystem in `.bounds/manifests/`. New functionality is a new module with
+a clear boundary — not a grab-bag appended to `cli.py` or `engine.py`. `cli.py` is wiring only;
+command logic lives in its own module (see `discover.py`, `calibrate.py`, `agentsync.py`,
+`ciconfig.py`). If you can't name the subsystem a file belongs to, it isn't scoped yet.
+
+**2. The repo dogfoods itself — keep it green.** Bounds models its own architecture in `.bounds/`.
+After any change to `src/bounds/**`, run `bounds validate` (and `bounds calibrate` to see what
+drifted) and update the affected manifest in the same PR. `bounds validate --quick` runs in CI; a PR
+that leaves the project's own manifests stale will not be merged. New cross-subsystem imports must be
+reflected as `exposes`/`consumes` edges — that's the architecture staying honest.
+
+**3. One source of truth — no drift.** Every fact lives in exactly one place. Agent-config text lives
+in `agentsync.py` (the generator), never also in a `templates/` copy. The architecture map lives in
+the manifests (queried via `bounds describe`), mirrored as prose in `ARCHITECTURE.md`. Scope/status
+lives in the README "Roadmap" section + GitHub Milestones. If you find the same fact in two files,
+collapse it to one and link.
+
+**4. Commit only what others need; generate the rest.** A clone should be lean. Commit source,
+tests, docs, and the canonical agent contract (`AGENTS.md`) + dev memory (`CLAUDE.md`). Do **not**
+commit anything a tool regenerates locally: the binary cache (`.bounds/cache.db`), per-tool agent
+configs (`GEMINI.md`, `.cursor/`, `.windsurf/`, `.aider.conf.yml`, `.github/copilot-instructions.md`,
+`.claude/commands/bounds.md` — all produced by `bounds agent --sync`), build artifacts, or
+`bounds ci --install` output. These are in `.gitignore`; if you add a new generator, gitignore its
+output in the same PR. The test for "should this be committed?" is: *would a fresh cloner need it, or
+can they regenerate it with one command?*
+
+**5. Lean root.** The repository root is the first thing a visitor reads — keep it to source dirs,
+governance docs, packaging, and the canonical agent files. New top-level files need a real
+justification; prefer a subdirectory (`docs/`, `assets/`, `benchmarks/`) over another root entry.
+
+**6. Stable contracts only grow.** Error codes in `errors.py` and the JSON output shapes are a public
+contract: add, never rename or repurpose. The same applies to the manifest schema (version it; old
+schemas are supported forever).
+
+**7. Comments serve the reader.** Module/function docstrings say *why this exists* and the one
+non-obvious rule, briefly. No process noise (no review/TODO chatter in committed code), no comments
+that merely restate the code. The "why" comments (determinism, context-armor, the token rationale)
+are the ones worth keeping.
 
 ## Coding Standards
 
@@ -100,9 +150,13 @@ All tests must pass. If you add a new feature, include tests.
 
 ### Writing Tests
 
-- Tests live in `tests/` and mirror the `src/bounds/` package structure.
-- Use `pytest` fixtures from `tests/conftest.py` for temporary projects.
-- The `py_project` fixture creates a minimal two-subsystem Python project.
+- Tests live in `tests/` and are grouped by feature area (10 files, 150 tests):
+  `test_extract.py`, `test_validate.py`, `test_schema_flex.py` (s-17 roles/criticality),
+  `test_cache_sqlite.py`, `test_discover.py`, `test_calibrate.py`, `test_agentsync.py`,
+  `test_ciconfig.py`, `test_cli.py`, and `test_commands_cli.py`.
+- Use `pytest` fixtures from `tests/conftest.py` for temporary projects: `sample_project`
+  (multi-subsystem TS+Py), `py_project` (minimal Python project), `git_sample_project` /
+  `git_init` (git-backed variants for quick-mode tests).
 - CLI tests use CliRunner from Click.
 
 ## Branching and PR Workflow
@@ -122,7 +176,8 @@ Tree-sitter adapters live in `src/bounds/extract/`. To add a new language:
 1. Create a file `src/bounds/extract/<language>.py`.
 2. Subclass `LanguageAdapter` from `.base`. Set `language_name` and `extensions`.
 3. Implement `extract(self, rel_path, source) -> ExtractResult` to walk the
-   tree-sitter tree for exported symbols and import references.
+   tree-sitter tree for exported symbols and import references. Build the result via
+   `base.make_result(...)` so both the content and structure hashes are computed consistently.
 4. Register the adapter in `src/bounds/extract/registry.py`.
 5. Add the tree-sitter grammar to `pyproject.toml` dependencies.
 6. Write tests in `tests/test_extract.py`.
@@ -144,7 +199,7 @@ When contributing documentation changes:
   and competitive positioning. No emoji.
 - **ARCHITECTURE.md** — engineering contract. Every module signature, dataclass field, error code,
   and JSON shape is binding.
-- **ROADMAP.md** — scope and phasing. What is in vs what is deferred.
+- **README "Roadmap" section + GitHub Milestones** — scope and phasing (shipped vs deferred).
 - **SECURITY.md** — security principles (7), vulnerability disclosure policy, install channels.
 - **CHANGELOG.md** — version history. Keep a summary of changes per release.
 - **Benchmarks** — raw data in `benchmarks/v0.1.0/` with full methodology, commands, and

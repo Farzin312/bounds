@@ -33,8 +33,8 @@ def run(
 ) -> ValidationReport:
     """Validate the project at ``project_root`` in the given ``mode`` and return a report.
 
-    ``persist`` controls whether the extraction cache (state.json) is written back; read-only
-    callers (e.g. ``describe``) pass ``persist=False`` to avoid mutating the cache.
+    ``persist`` controls whether the extraction cache (``.bounds/cache.db``) is written back;
+    read-only callers (e.g. ``describe``) pass ``persist=False`` to avoid mutating the cache.
 
     File-selection toggles (all default off, matching the vault's "scan less, by default"
     posture): ``include_ignored`` disables ``.boundsignore``; ``include_gitignored`` scans
@@ -137,6 +137,7 @@ def run(
         # Quick mode: a file git says is unchanged is trusted from cache without hashing/parsing.
         if mode == "quick" and rel not in changed_rel and prev is not None:
             extracts[rel] = prev.to_result()
+            prev.subsystem = owner  # keep the cached owner current (s-19 partial reads)
             cache_hits += 1
             continue
 
@@ -148,6 +149,7 @@ def run(
         chash = content_hash(source)
         if prev is not None and prev.content_hash == chash:
             extracts[rel] = prev.to_result()
+            prev.subsystem = owner  # keep the cached owner current (s-19 partial reads)
             cache_hits += 1
             continue
 
@@ -167,7 +169,7 @@ def run(
         # A structural change (vs the prior cache) marks the owning subsystem dirty.
         if not was_cold and (prev is None or prev.structure_hash != result.structure_hash):
             dirty.add(owner)
-        state.put(result)
+        state.put(result, owner)
         extracts[rel] = result
 
     state.prune(set(file_owner))
@@ -177,7 +179,7 @@ def run(
         except OSError:
             pass  # cache is an optimization; never fail validation over it
 
-    propagated = propagation.propagate(dirty, subsystems)
+    propagated = propagation.propagate(dirty, subsystems, root.criticality_registry())
 
     ctx = CheckContext(
         project_root=project_root,

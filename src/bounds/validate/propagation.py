@@ -25,18 +25,46 @@ def build_consumer_index(subsystems: dict[str, SubsystemCompact]) -> dict[str, l
     return {provider: sorted(set(consumers)) for provider, consumers in index.items()}
 
 
-def propagate(dirty: set[str], subsystems: dict[str, SubsystemCompact]) -> set[str]:
+def transitive_consumers(target: str, subsystems: dict[str, SubsystemCompact]) -> list[str]:
+    """Full transitive closure of subsystems that (in)directly consume ``target``.
+
+    Unlike :func:`propagate` (criticality-bounded, for drift), this is unbounded — it answers
+    the ``bounds impact`` question "everything that could break if I change ``target``'s
+    surface", which a developer asks deliberately for a risky change. Excludes ``target``
+    itself. Returned sorted for stable output.
+    """
+    index = build_consumer_index(subsystems)
+    seen: set[str] = set()
+    queue: deque[str] = deque([target])
+    while queue:
+        node = queue.popleft()
+        for consumer in index.get(node, []):
+            if consumer not in seen:
+                seen.add(consumer)
+                queue.append(consumer)
+    seen.discard(target)
+    return sorted(seen)
+
+
+def propagate(
+    dirty: set[str],
+    subsystems: dict[str, SubsystemCompact],
+    depth_map: dict[str, int] | None = None,
+) -> set[str]:
     """Return the set of consumer subsystems affected by a change to any subsystem in ``dirty``.
 
     The originally-dirty subsystems are excluded from the result (they're the cause, not the impact).
+    ``depth_map`` (criticality label -> hop depth) comes from the resolved root registry so custom
+    criticality labels (s-17) drive propagation; it defaults to the built-in depths.
     """
+    depth_map = depth_map if depth_map is not None else config.PROPAGATION_DEPTH
     index = build_consumer_index(subsystems)
     affected: set[str] = set()
 
     for provider in sorted(dirty):
         sub = subsystems.get(provider)
         criticality = sub.criticality if sub else "leaf"
-        max_depth = config.PROPAGATION_DEPTH.get(criticality, 0)
+        max_depth = depth_map.get(criticality, 0)
         if max_depth == 0:
             continue
 

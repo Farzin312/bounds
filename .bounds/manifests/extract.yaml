@@ -8,5 +8,8 @@ exposes:
   - { name: get_adapter, kind: function }
   - { name: supported_extensions, kind: function }
   - { name: content_hash, kind: function }
+  - { name: extract_file, kind: function }
+  - { name: iter_repo_source, kind: function }
+  - { name: strip_ext, kind: function }
 consumes:
   - { subsystem: models, via: models, interfaces: [Symbol, ImportRef, ExtractResult] }

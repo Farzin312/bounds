@@ -16,17 +16,34 @@ ROOT_FILE = "root.yaml"
 SUBSYS_DIR = "subsystems"
 SUBSYS_FILE = "bounds.yaml"
 MANIFESTS_DIR = "manifests"
-STATE_FILE = "state.json"
+CACHE_FILE = "cache.db"  # binary SQLite extraction cache (context armor; s-15/s-19)
+STATE_FILE = "state.json"  # legacy JSON cache; read once for auto-migration to cache.db
 
 # ---- Schema / versioning ----
 SCHEMA_VERSION = "1"
 STATE_VERSION = "1"
 
 # ---- Enumerations ----
-VALID_ROLES = {"service", "platform", "connector", "library"}
-VALID_CRITICALITY = {"core", "connector", "leaf"}
+# The four built-in roles are *behavior classes*, not just labels. Developers may define
+# custom role names in root.yaml that `extends`/`type` one of these bases (s-17); when no
+# custom roles are declared, these built-ins are the valid set (backward compatible).
+BUILTIN_ROLES = {"service", "platform", "connector", "library"}
+BUILTIN_CRITICALITY = {"core", "connector", "leaf"}
+# Back-compat aliases (older code/tests referenced these names).
+VALID_ROLES = BUILTIN_ROLES
+VALID_CRITICALITY = BUILTIN_CRITICALITY
 VALID_MODES = {"quick", "full", "preflight", "hotfix", "audit"}
 VALID_ENFORCE = {"on", "off"}
+
+# Behavior each base role encodes (what the structural checks key off, never the label):
+#   orphan_exposes -- True if exposes may legitimately have zero consumers (entrypoints).
+# Custom roles inherit their base's behavior unless they override a flag explicitly.
+ROLE_BASE_BEHAVIOR = {
+    "service": {"orphan_exposes": True},
+    "platform": {"orphan_exposes": False},
+    "connector": {"orphan_exposes": False},
+    "library": {"orphan_exposes": False},
+}
 
 # ---- Extraction ----
 # Directories never descended into when globbing subsystem files.
@@ -47,7 +64,10 @@ DEFAULT_IGNORES = {
 # ---- Propagation ----
 # Depth of consumer propagation, keyed by the *changed provider's* criticality.
 #   -1 = unbounded (transitive closure), 0 = none, N = N hops.
+# These are the built-in depths; custom criticality labels (s-17) declare their own
+# `depth:` in root.yaml. Used as the fallback when no custom criticality is defined.
 PROPAGATION_DEPTH = {"core": -1, "connector": 1, "leaf": 0}
+BUILTIN_CRITICALITY_DEPTH = PROPAGATION_DEPTH
 
 # ---- Exit codes ----
 EXIT_OK = 0

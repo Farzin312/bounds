@@ -59,6 +59,21 @@ class CheckContext:
             self._known_noext = cached
         return cached
 
+    def role_exposes_orphans(self, subsystem: str) -> bool:
+        """True if the subsystem's role legitimately exposes unconsumed entrypoints (s-17)."""
+        sub = self.subsystems.get(subsystem)
+        if sub is None:
+            return False
+        registry = self.root.role_registry()
+        return bool(registry.get(sub.role, {}).get("orphan_exposes", False))
+
+    def is_unbounded_criticality(self, subsystem: str) -> bool:
+        """True if the subsystem's criticality propagates unbounded (depth -1), e.g. 'core' (s-17)."""
+        sub = self.subsystems.get(subsystem)
+        if sub is None:
+            return False
+        return self.root.criticality_registry().get(sub.criticality, 0) == -1
+
 
 # ===========================================================================
 # Import resolution helpers (best-effort; never produces false positives by guessing)
@@ -120,8 +135,8 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
                     fix=f"remove '{missing}' from {name}.exposes, or export it from {sub.paths or ['its sources']}",
                 )
             )
-        # Undeclared public surface on a core subsystem is informational only.
-        if sub.criticality == "core" and declared:
+        # Undeclared public surface on an unbounded-criticality (core-like) subsystem is info only.
+        if ctx.is_unbounded_criticality(name) and declared:
             for extra in sorted(actual - declared):
                 issues.append(
                     Issue(
@@ -304,7 +319,7 @@ def check_orphans(ctx: CheckContext) -> list[Issue]:
     issues: list[Issue] = []
     for name in sorted(ctx.subsystems):
         sub = ctx.subsystems[name]
-        if sub.role == "service":  # services legitimately expose unconsumed entrypoints
+        if ctx.role_exposes_orphans(name):  # service-like roles expose unconsumed entrypoints
             continue
         for iface in sorted(sub.expose_names()):
             if (name, iface) not in consumed:

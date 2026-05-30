@@ -97,13 +97,17 @@ def load_all(
     issues: list[Issue] = []
     issues.extend(_validate_root_yaml(project_root))
 
+    # Resolved validity sets honour any custom roles/criticality declared in root.yaml (s-17).
+    valid_roles = set(root.role_registry())
+    valid_criticality = set(root.criticality_registry())
+
     subsystems: dict[str, SubsystemCompact] = {}
     for name in root.subsystems:
         path = _subsystem_path(project_root, name)
         raw = _read_yaml_or_issue(name, path, issues)
         if raw is None:
             continue
-        issues.extend(schema.validate_subsystem(name, raw))
+        issues.extend(schema.validate_subsystem(name, raw, valid_roles, valid_criticality))
         if not raw.get("name"):
             raw = {**raw, "name": name}
         subsystems[name] = SubsystemCompact.from_dict(raw, source_path=path.as_posix())

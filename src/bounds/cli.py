@@ -14,11 +14,13 @@ from pathlib import Path
 
 import click
 
-from . import __version__, config, errors, output
+from . import __version__, agentsync, calibrate as calibrate_mod, ciconfig, config, discover as discover_mod, errors, output
+from .cache import store as cache_store
 from .extract import get_adapter, supported_extensions
 from .ignore import IgnoreMatcher
 from .manifest import loader as manifest_loader
 from .validate import engine as validate_engine
+from .validate import propagation
 from .validate.checks import CheckContext, check_cycles
 
 # ---- shared option ----
@@ -362,6 +364,50 @@ def overview_cmd(human: bool) -> None:
 
 
 # ===========================================================================
+# impact
+# ===========================================================================
+@main.command("impact")
+@click.argument("name", required=True)
+@_human
+def impact_cmd(name: str, human: bool) -> None:
+    """Show the transitive blast radius of a subsystem (who breaks if its surface changes)."""
+
+    def go() -> None:
+        root = _require_root()
+        _, subs, _ = manifest_loader.load_all(root)
+        if name not in subs:
+            raise errors.BoundsError(
+                errors.E_SUBSYSTEM_NOT_FOUND,
+                f"subsystem '{name}' not found",
+                fix=f"known subsystems: {sorted(subs)}",
+            )
+        index = propagation.build_consumer_index(subs)
+        direct = index.get(name, [])
+        transitive = propagation.transitive_consumers(name, subs)
+        # Per-direct-consumer detail: which of this subsystem's interfaces they rely on.
+        consumers = []
+        for cname in direct:
+            for c in subs[cname].consumes:
+                if c.subsystem == name:
+                    consumers.append({
+                        "name": cname,
+                        "via": c.via,
+                        "interfaces": sorted(c.interfaces),
+                    })
+        payload = {
+            "subsystem": name,
+            "criticality": subs[name].criticality,
+            "direct_consumers": sorted(direct),
+            "transitive_consumers": transitive,
+            "blast_radius": len(transitive),
+            "consumers": consumers,
+        }
+        output.emit(payload, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
 # init
 # ===========================================================================
 _ROOT_TEMPLATE = '''version: "{version}"
@@ -444,6 +490,184 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
 
         result["bounds_dir"] = bounds_dir.relative_to(project).as_posix()
         output.emit(result, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
+# discover
+# ===========================================================================
+@main.command("discover")
+@click.option("--apply", "do_apply", is_flag=True, default=False,
+              help="Write proposed manifests to .bounds/ (default: dry-run preview).")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False,
+              help="Explicitly preview without writing (the default).")
+@click.option("--namespace", default=None, help="Tag every discovered subsystem with this namespace.")
+@click.option("--merge-into", "merge_into", multiple=True,
+              help="Fold paths into one subsystem: --merge-into 'name=path1,path2' (repeatable).")
+@_human
+def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
+                 merge_into: tuple[str, ...], human: bool) -> None:
+    """Auto-discover candidate subsystems from source and propose manifests."""
+
+    def go() -> None:
+        if do_apply and dry_run:
+            raise errors.BoundsError(
+                errors.E_USAGE, "pass either --apply or --dry-run, not both",
+                fix="omit both for a preview, or pass --apply to write",
+            )
+        merges: list[tuple[str, list[str]]] = []
+        for spec in merge_into:
+            if "=" not in spec:
+                raise errors.BoundsError(
+                    errors.E_USAGE, f"bad --merge-into value {spec!r}",
+                    fix="use --merge-into 'name=path1,path2'",
+                )
+            name, _, paths = spec.partition("=")
+            merges.append((name.strip(), [p.strip() for p in paths.split(",") if p.strip()]))
+        root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
+        payload = discover_mod.run_discover(
+            root, apply=do_apply, namespace=namespace, merges=merges,
+        )
+        output.emit(payload, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
+# calibrate
+# ===========================================================================
+@main.command("calibrate")
+@click.option("--subsystem", default=None, help="Calibrate only this subsystem.")
+@click.option("--apply", "do_apply", is_flag=True, default=False,
+              help="Write the proposed reconciliation to the manifests (default: diff only).")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False,
+              help="Explicitly show the diff without writing (the default).")
+@_human
+def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool, human: bool) -> None:
+    """Reconcile manifests against tree-sitter reality (proposes a diff; --apply to write)."""
+
+    def go() -> None:
+        if do_apply and dry_run:
+            raise errors.BoundsError(
+                errors.E_USAGE, "pass either --apply or --dry-run, not both",
+                fix="omit both for a diff, or pass --apply to write",
+            )
+        root = _require_root()
+        payload = calibrate_mod.run_calibrate(root, subsystem=subsystem, apply=do_apply)
+        output.emit(payload, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
+# agent
+# ===========================================================================
+_AGENT_FLAGS = ["claude", "codex", "opencode", "gemini", "copilot", "cursor", "aider", "windsurf"]
+
+
+def _agent_selectors(fn):
+    for key in reversed(_AGENT_FLAGS):
+        fn = click.option(f"--{key}", key, is_flag=True, default=False,
+                          help=f"Limit --sync/--check to {key}.")(fn)
+    return fn
+
+
+@main.command("agent")
+@click.option("--sync", "do_sync", is_flag=True, default=False,
+              help="Generate the canonical AGENTS.md contract + per-agent config files.")
+@click.option("--detect", "do_detect", is_flag=True, default=False,
+              help="List which coding agents are present in this project.")
+@click.option("--check", "do_check", is_flag=True, default=False,
+              help="Verify detected agents have a Bounds config.")
+@_agent_selectors
+@_human
+def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, human: bool, **selectors: bool) -> None:
+    """Wire Bounds into coding agents (Claude Code, Codex, Gemini, Copilot, Cursor, ...)."""
+
+    def go() -> None:
+        modes = [m for m, on in (("sync", do_sync), ("detect", do_detect), ("check", do_check)) if on]
+        if len(modes) != 1:
+            raise errors.BoundsError(
+                errors.E_USAGE, "pass exactly one of --sync, --detect, --check",
+                fix="e.g. 'bounds agent --sync' to generate configs, '--detect' to list agents",
+            )
+        only = {k for k in _AGENT_FLAGS if selectors.get(k)} or None
+        root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
+        payload = agentsync.run_agent(root, mode=modes[0], only=only)
+        output.emit(payload, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
+# ci
+# ===========================================================================
+@main.command("ci")
+@click.option("--install", "do_install", is_flag=True, default=False,
+              help="Generate CI config for the detected systems.")
+@click.option("--action", "want_action", is_flag=True, default=False, help="GitHub Action only.")
+@click.option("--precommit", "want_precommit", is_flag=True, default=False, help="pre-commit hook only.")
+@click.option("--gitlab", "want_gitlab", is_flag=True, default=False, help="GitLab CI only.")
+@click.option("--all", "want_all", is_flag=True, default=False, help="All CI targets.")
+@_human
+def ci_cmd(do_install: bool, want_action: bool, want_precommit: bool, want_gitlab: bool,
+           want_all: bool, human: bool) -> None:
+    """Generate CI gate config (GitHub Action, pre-commit, GitLab)."""
+
+    def go() -> None:
+        if not do_install:
+            raise errors.BoundsError(
+                errors.E_USAGE, "ci needs --install",
+                fix="run 'bounds ci --install' (optionally --action/--precommit/--gitlab/--all)",
+            )
+        targets: set[str] = set()
+        if want_action:
+            targets.add("action")
+        if want_precommit:
+            targets.add("precommit")
+        if want_gitlab:
+            targets.add("gitlab")
+        if want_all:
+            targets = set()  # empty => all
+        root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
+        payload = ciconfig.run_ci_install(root, targets=targets)
+        output.emit(payload, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
+# cache
+# ===========================================================================
+@main.command("cache")
+@click.option("--migrate", "do_migrate", is_flag=True, default=False,
+              help="Convert a legacy state.json cache to the binary cache.db.")
+@click.option("--prune", "do_prune", is_flag=True, default=False,
+              help="Drop cache rows whose source file no longer exists.")
+@click.option("--inspect", "do_inspect", is_flag=True, default=False,
+              help="Show a token-lean cache summary (counts only, never symbol dumps).")
+@_human
+def cache_cmd(do_migrate: bool, do_prune: bool, do_inspect: bool, human: bool) -> None:
+    """Manage the binary extraction cache (.bounds/cache.db)."""
+
+    def go() -> None:
+        selected = [f for f, on in
+                    (("migrate", do_migrate), ("prune", do_prune), ("inspect", do_inspect)) if on]
+        if len(selected) != 1:
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                "pass exactly one of --migrate, --prune, --inspect",
+                fix="e.g. 'bounds cache --inspect' to summarize, '--migrate' to convert state.json",
+            )
+        root = _require_root()
+        if do_migrate:
+            payload = cache_store.migrate_json_to_sqlite(root)
+        elif do_prune:
+            payload = cache_store.prune_missing(root)
+        else:
+            payload = cache_store.inspect(root)
+        output.emit(payload, human)
 
     _run(human, go)
 
