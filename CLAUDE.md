@@ -4,6 +4,7 @@ Working guide for agents and contributors in this repo. **This is not the produc
 - Product pitch, install, agent integration → [README.md](README.md)
 - Deep-dive docs (how-it-works, team workflow, CLI reference, agent integration, token economics) → [docs/](docs/README.md)
 - Engineering contract (modules, data model, error codes, JSON shapes) → [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Reviewable coding-standards checklist (the invariants below, as PR-checkable items)** → [docs/coding-standards.md](docs/coding-standards.md)
 - Scope & phasing (shipped vs planned) → README "Roadmap" section + GitHub Milestones
 
 ## What this repo is
@@ -49,20 +50,24 @@ just `pipx install` the `bounds` CLI.
 - **Think in tokens, not bytes.** Value/benchmarks are framed in tokens (an agent's cost is
   tokens-into-context); keep every command's output token-lean and retrieval targeted
   (`describe <name>`/`--namespace`/`impact` over loading the whole map).
-- **Extensible schema (s-17).** Roles/criticality are built-ins by default but can be overridden in
+- **Extensible schema.** Roles/criticality are built-ins by default but can be overridden in
   `root.yaml` (`roles:`/`criticality:`); resolve via `RootManifest.role_registry()` /
   `criticality_registry()`, never hard-code the enum at a check site.
 
 ## Where things live
 
 `config.py` constants · `errors.py` codes · `models.py` data model · `manifest/` load+schema ·
-`extract/` tree-sitter adapters (`registry.get_adapter` dispatches by extension; `scan.py` =
-shared fs→extraction helpers) · `cache/store.py` SQLite `cache.db` (+ migration/partial-read/inspect) ·
-`validate/{engine,propagation,checks}` · `cli.py` command wiring · `discover.py` (s-14) ·
-`calibrate.py` (s-16) · `agentsync.py` (s-18) · `ciconfig.py` (s-20) · `output.py` JSON/human emit.
+`extract/` tree-sitter adapters (`registry.get_adapter` dispatches by extension; `scan.py` = the
+**single home** for fs→extraction helpers — `iter_subsystem_files`/`iter_repo_source`/`extract_file`/
+`strip_ext`/`in_default_ignores`, shared by engine + describe + discover/calibrate; never copy a walk) ·
+`cache/store.py` SQLite `cache.db` (+ migration/partial-read/inspect) ·
+`validate/{engine,propagation,checks}` (`checks.resolve_import`/`build_suffix_index` = the one import
+resolver) · `describe.py` Tier-1+2 describe assembly · `cli.py` command wiring (arg-parse + one
+`go()` per command, no business logic) · `discover.py` ·
+`calibrate.py` · `agentsync.py` · `ciconfig.py` · `output.py` JSON/human emit.
 
 Commands: `list` · `describe` · `validate` · `preflight` · `overview` · `init` · `impact` ·
-`discover` · `calibrate` · `agent` · `ci` · `cache`.
+`where` · `discover` · `calibrate` · `agent` · `ci` · `cache`.
 
 **Adding a language adapter:** subclass `extract.base.LanguageAdapter` (set `language_name`,
 `extensions`, implement `extract`), then register it in `extract/registry.py`. Use

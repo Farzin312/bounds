@@ -20,7 +20,7 @@ Bounds is a plain CLI that emits JSON, so any agent that can run a shell command
 
 | Win | Command | Why it matters |
 |-----|---------|----------------|
-| A cheap, verified map | `bounds describe <name>` | The agent reads a ~300-token subsystem contract instead of opening a dozen source files (thousands of tokens) to reconstruct what a part does and what it touches. |
+| A cheap, verified map | `bounds describe <name>` | The agent reads a ~400-token subsystem contract instead of opening a dozen source files (thousands of tokens) to reconstruct what a part does and what it touches. |
 | A trust signal | every `describe` expose carries `verified: true/false` | `verified: true` means tree-sitter confirmed the symbol actually exists in source — the agent can rely on the manifest without re-reading the file. |
 | Blast radius **before** editing | `bounds impact <name>` | The agent sees the transitive consumer set and the exact interfaces each consumer relies on *before* writing the change — so it doesn't blindly break `api/` and `frontend/`. This is the biggest single agent win: fewer blind breakages. |
 | A deterministic post-edit self-check | `bounds validate --quick` | After editing, the agent runs a fast, zero-LLM structural check and reads `validation_status` to know whether its change drifted from the declared boundary. |

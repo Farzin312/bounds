@@ -33,7 +33,7 @@ For the whole-system map across all 8 subsystems:
 
 | Scenario | Without Bounds | With Bounds | Token savings |
 |----------|----------------|-------------|---------------|
-| Understand one subsystem | Read 1–15 source files (thousands of tokens) | `bounds describe <name>` (~250–400 tokens of verified contract) | ~85–99% |
+| Understand one subsystem | Read 1–15 source files (thousands of tokens) | `bounds describe <name>` (~400 tokens of verified contract) | ~85–99% |
 | Map all subsystems | Grep `class\|def\|export` across the tree | `bounds list` (~660 tokens) | Near-total |
 | Dependency blast radius | Trace imports by hand | `bounds impact <name>` (transitive consumers + relied-on interfaces) | ~99% |
 | Detect architecture drift | Manual code review | `bounds validate` (structured report, 0 LLM) | Subjective → deterministic |
@@ -50,9 +50,9 @@ The token win isn't a flat discount — it *widens* with codebase size, and that
 
 | Codebase size | Read the subsystem's source | `bounds describe <name>` |
 |---------------|-----------------------------|--------------------------|
-| Small (a few files) | hundreds–low-thousands of tokens | ~300 tokens |
-| Medium (dozens of files) | many thousands of tokens | ~300 tokens |
-| Large (hundreds of files) | tens of thousands of tokens | ~300 tokens |
+| Small (a few files) | hundreds–low-thousands of tokens | ~400 tokens |
+| Medium (dozens of files) | many thousands of tokens | ~400 tokens |
+| Large (hundreds of files) | tens of thousands of tokens | ~400 tokens |
 
 ### The context-rot risk (framed as risk, not a guaranteed fix)
 

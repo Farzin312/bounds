@@ -1,4 +1,4 @@
-"""Bootstrap discovery (s-14): auto-generate manifests from an un-bounded codebase.
+"""Bootstrap discovery: auto-generate manifests from an un-bounded codebase.
 
 ``bounds discover`` is the one-command onboarding path that replaces the 5-step manual
 bootstrap. It walks the repo, groups source files into candidate subsystems by directory,
@@ -17,7 +17,7 @@ Heuristic (deterministic, zero LLM):
 4. Resolve cross-candidate imports → ``consumes`` edges (direct imports only).
 5. Infer ``role``/``criticality`` from graph degree (a starting point the developer edits).
 
-Calibrate (s-16) shares the extraction engine to *reconcile* existing manifests; discover
+Calibrate shares the extraction engine to *reconcile* existing manifests; discover
 *creates* them from scratch.
 """
 
@@ -28,10 +28,9 @@ from pathlib import Path
 import yaml
 
 from . import config, errors
-from .extract import supported_extensions
-from .extract.scan import extract_file, iter_repo_source, strip_ext
+from .extract.scan import extract_file, iter_repo_source
 from .ignore import load_matcher
-from .validate.checks import resolve_import
+from .validate.checks import index_extracts, resolve_import
 
 
 def run_discover(
@@ -65,7 +64,7 @@ def run_discover(
             generated.add(rel)
         if result is not None:
             extracts[rel] = result
-    known_noext = {strip_ext(rel): rel for rel in sorted(extracts)}
+    known_noext, suffix_index = index_extracts(extracts)  # one shared projection (built once)
 
     # Cross-candidate consume edges (direct imports only).
     consumes: dict[str, set[str]] = {c: set() for c in candidate_files}
@@ -74,7 +73,7 @@ def run_discover(
         if owner is None:
             continue
         for imp in result.imports:
-            target = resolve_import(rel, imp.module, known_noext)
+            target = resolve_import(rel, imp.module, known_noext, suffix_index)
             tgt_owner = file_to_candidate.get(target) if target else None
             if tgt_owner and tgt_owner != owner:
                 consumes[owner].add(tgt_owner)
@@ -283,7 +282,7 @@ def _write(project_root: Path, root_proposal: dict, candidates: list[dict]) -> t
 
     # Merge subsystems into an existing root.yaml if present. Re-read the RAW mapping (not the
     # RootManifest projection) so developer-authored keys — notably custom `roles:`/`criticality:`
-    # (s-17) — are preserved across the rewrite instead of being silently dropped.
+    # — are preserved across the rewrite instead of being silently dropped.
     root_path = cfg / config.ROOT_FILE
     existing_subs: list[str] = []
     root_doc = dict(root_proposal)

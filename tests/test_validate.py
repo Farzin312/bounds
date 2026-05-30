@@ -22,6 +22,7 @@ from bounds.models import SubsystemCompact as Sub
 from bounds.validate import engine
 from bounds.validate.checks import (
     CheckContext,
+    _find_cycles,
     check_boundary,
     check_contract,
     check_cross_impact,
@@ -210,6 +211,65 @@ def test_drift_undeclared_extra_on_core_is_info():
     issues = check_structural_drift(_ctx(subs, extracts, {"x/f.py": "a"}))
     assert any(i.severity == "info" and "extra" in i.message for i in issues)
     assert not any(i.severity == "error" for i in issues)  # foo is declared & present
+
+
+def test_drift_undeclared_extra_on_leaf_is_info():
+    # undeclared exports surface as info on leaf/connector too (not just core/unbounded),
+    # which is where the most common real drift hides. Still info → never blocks.
+    for crit in ("leaf", "connector"):
+        subs = {"a": Sub(name="a", criticality=crit, paths=["x"], exposes=[Interface("foo")])}
+        extracts = {
+            "x/f.py": ExtractResult(
+                "x/f.py", "python",
+                [Symbol("foo", "function", 1, True), Symbol("extra", "function", 2, True)],
+            )
+        }
+        issues = check_structural_drift(_ctx(subs, extracts, {"x/f.py": "a"}))
+        assert any(i.severity == "info" and "extra" in i.message for i in issues), crit
+        assert not any(i.severity == "error" for i in issues), crit
+
+
+def test_drift_no_undeclared_flag_when_exposes_empty():
+    # guard: a subsystem that declares *no* exposes (e.g. not yet calibrated) is not
+    # spammed with an info per exported symbol — undeclared drift needs a declared set to drift from.
+    subs = {"a": Sub(name="a", criticality="leaf", paths=["x"], exposes=[])}
+    extracts = {"x/f.py": ExtractResult("x/f.py", "python", [Symbol("extra", "function", 1, True)])}
+    issues = check_structural_drift(_ctx(subs, extracts, {"x/f.py": "a"}))
+    assert issues == []
+
+
+# ===========================================================================
+# hardening — cycle detection on a deep graph, concurrent cache writes
+# ===========================================================================
+def test_find_cycles_handles_deep_graph_without_recursionerror():
+    # One big cycle 0 -> 1 -> ... -> 1999 -> 0, far deeper than Python's recursion limit.
+    # The iterative DFS must enumerate it instead of raising RecursionError.
+    n = 2000
+    graph = {str(i): [str((i + 1) % n)] for i in range(n)}
+    cycles = _find_cycles(graph)
+    assert len(cycles) == 1
+    assert len(cycles[0]) == n
+
+
+def test_concurrent_validate_persist_does_not_crash(py_project):
+    # Several validate runs racing on the same cache.db must not raise "database is locked":
+    # PRAGMA busy_timeout lets them queue, and persist failures are swallowed .
+    import threading
+
+    seen: list[Exception] = []
+
+    def run() -> None:
+        try:
+            engine.run(py_project, mode="full")
+        except Exception as exc:  # noqa: BLE001 - the whole point is "no crash"
+            seen.append(exc)
+
+    threads = [threading.Thread(target=run) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert seen == []
 
 
 # ===========================================================================

@@ -26,7 +26,7 @@ class Interface:
     name: str
     kind: str = "unknown"  # function|class|const|type|interface|variable|unknown
     signature: str | None = None  # Tier-3 (LLM) enrichment; None in MVP
-    internal: bool = False  # s-16: exempt from calibration add/remove (deliberately private)
+    internal: bool = False  # exempt from calibration add/remove (deliberately private)
 
     def to_dict(self) -> dict:
         d = {"name": self.name, "kind": self.kind}
@@ -126,7 +126,7 @@ class RootManifest:
     enforce: str = "off"
     subsystems: list[str] = field(default_factory=list)
     entry_points: list[str] = field(default_factory=list)  # root-level bootstrap globs
-    # Optional developer-defined schema extensions (s-17). Raw YAML mappings; resolved
+    # Optional developer-defined schema extensions. Raw YAML mappings; resolved
     # lazily via role_registry()/criticality_registry(). Empty -> built-in enums apply.
     roles: dict = field(default_factory=dict)
     criticality: dict = field(default_factory=dict)
@@ -162,7 +162,7 @@ class RootManifest:
         )
 
     def role_registry(self) -> dict[str, dict]:
-        """Resolve the valid roles -> their base behavior (s-17).
+        """Resolve the valid roles -> their base behavior.
 
         With no custom ``roles:`` block, returns the four built-ins, each mapping to itself
         as base. With a custom block, returns *only* the declared roles (built-ins are not
@@ -185,7 +185,7 @@ class RootManifest:
         return registry
 
     def criticality_registry(self) -> dict[str, int]:
-        """Resolve the valid criticality labels -> propagation depth (s-17).
+        """Resolve the valid criticality labels -> propagation depth.
 
         With no custom ``criticality:`` block, returns the built-in core/connector/leaf
         depths. With a custom block, each label's ``depth:`` integer drives propagation
@@ -312,7 +312,9 @@ class ValidationReport:
             "mode": self.mode,
             "ok": self.ok,
             "issues": [i.to_dict() for i in sorted(self.issues, key=lambda x: x.sort_key())],
-            "stats": self.stats,
+            # Sort stats keys so the serialized report is byte-stable regardless of insertion
+            # order (determinism); values are already sorted by their producers.
+            "stats": dict(sorted(self.stats.items())),
         }
 
     def errors(self) -> list[Issue]:

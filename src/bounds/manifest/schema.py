@@ -91,7 +91,7 @@ def validate_root(data: dict) -> list[Issue]:
 
 
 def _validate_role_defs(roles) -> list[Issue]:
-    """Validate an optional custom ``roles:`` block (s-17): each must extend a base role."""
+    """Validate an optional custom ``roles:`` block: each must extend a base role."""
     if roles is None:
         return []
     if not isinstance(roles, dict):
@@ -124,7 +124,7 @@ def _validate_role_defs(roles) -> list[Issue]:
 
 
 def _validate_criticality_defs(crit) -> list[Issue]:
-    """Validate an optional custom ``criticality:`` block (s-17): each needs a ``depth:`` int."""
+    """Validate an optional custom ``criticality:`` block: each needs a ``depth:`` int."""
     if crit is None:
         return []
     if not isinstance(crit, dict):
@@ -164,7 +164,7 @@ def validate_subsystem(
     present (default ``leaf``), ``paths`` a list, each ``exposes`` entry carrying a name and
     each ``consumes`` entry carrying a subsystem. Issues carry ``subsystem=name``.
 
-    ``valid_roles``/``valid_criticality`` come from the resolved root registries (s-17);
+    ``valid_roles``/``valid_criticality`` come from the resolved root registries;
     they default to the built-in enums so callers without a root context stay backward
     compatible.
     """
@@ -290,10 +290,10 @@ def validate_subsystem(
 
 
 def _unknown_label_fix(kind: str, got, valid: set[str]) -> str:
-    """Build a fix hint for an invalid role/criticality, suggesting a near-miss if any (s-17)."""
+    """Build a fix hint for an invalid role/criticality, suggesting a near-miss if any."""
     base = (
         f"set `{kind}:` to one of {sorted(valid)}, "
-        f"or define a custom {kind} in root.yaml under '{kind}s' (s-17)"
+        f"or define a custom {kind} in root.yaml under '{kind}s'"
         if kind == "role"
         else f"set `{kind}:` to one of {sorted(valid)}, or define a custom {kind} in root.yaml"
     )

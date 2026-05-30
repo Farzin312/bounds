@@ -1,4 +1,4 @@
-"""Cross-agent protocol (s-18): teach coding agents to read architecture via the CLI.
+"""Cross-agent protocol: teach coding agents to read architecture via the CLI.
 
 The problem this solves: AI coding agents (Claude Code, Cursor, Copilot, Gemini, …) each
 have their own out-of-band convention for project instructions, and when left to their own

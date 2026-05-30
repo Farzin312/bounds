@@ -1,11 +1,11 @@
-"""Calibration (s-16): reconcile declared manifests against tree-sitter reality.
+"""Calibration: reconcile declared manifests against tree-sitter reality.
 
 ``bounds calibrate`` extracts each subsystem's actual interface surface and proposes a diff
 against what its manifest declares — symbols to **add** (found but undeclared), to **remove**
 (declared but gone), and ``consumes`` edges to reconcile against real cross-boundary imports.
 
 Calibration is *not* auto-fix. By default it only prints the proposed diff; ``--apply`` writes
-it. The reconciliation rules encode developer intent (from the absorbed s-16 spec):
+it. The reconciliation rules encode developer intent:
 
 * A declared expose that tree-sitter no longer finds is proposed for **removal** — UNLESS
   another subsystem consumes it (then it's a real contract → flagged ``needs_review``, never
@@ -28,11 +28,11 @@ from pathlib import Path
 
 import yaml
 
-from . import config, errors
-from .extract.scan import extract_file, strip_ext
+from . import errors
+from .extract.scan import extract_project
 from .ignore import load_matcher
 from .manifest import loader as manifest_loader
-from .validate.checks import resolve_import
+from .validate.checks import index_extracts, resolve_import
 
 
 def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bool = False) -> dict:
@@ -47,8 +47,8 @@ def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bo
     targets = [subsystem] if subsystem else sorted(subs)
 
     matcher = load_matcher(project_root)
-    file_owner, extracts, generated = _extract_project(project_root, subs, matcher)
-    known_noext = {strip_ext(rel): rel for rel in sorted(extracts)}
+    file_owner, extracts, generated = extract_project(project_root, subs, matcher)
+    known_noext, suffix_index = index_extracts(extracts)  # one shared projection (built once)
 
     # What every subsystem consumes (provider -> set of interface names) and consumed providers.
     consumed_ifaces: dict[tuple[str, str], set[str]] = {}
@@ -62,7 +62,8 @@ def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bo
     proposals: dict[str, dict] = {}
     for name in targets:
         proposal = _calibrate_one(
-            name, subs, file_owner, extracts, generated, known_noext, consumed_providers_ifaces
+            name, subs, file_owner, extracts, generated, known_noext, suffix_index,
+            consumed_providers_ifaces,
         )
         if _has_changes(proposal):
             proposals[name] = proposal
@@ -91,6 +92,7 @@ def _calibrate_one(
     extracts: dict,
     generated: set[str],
     known_noext: dict[str, str],
+    suffix_index: dict[str, str],
     consumed_providers_ifaces: dict[str, set[str]],
 ) -> dict:
     sub = subs[name]
@@ -129,7 +131,7 @@ def _calibrate_one(
     actual_owners: set[str] = set()
     for rel in own_files:
         for imp in extracts[rel].imports:
-            target = resolve_import(rel, imp.module, known_noext)
+            target = resolve_import(rel, imp.module, known_noext, suffix_index)
             owner = file_owner.get(target) if target else None
             if owner and owner != name and owner in subs:
                 actual_owners.add(owner)
@@ -166,56 +168,6 @@ def _summarize(proposals: dict[str, dict]) -> dict:
         "consumes_added": sum(len(p["add_consumes"]) for p in proposals.values()),
         "consumes_removed": sum(len(p["remove_consumes"]) for p in proposals.values()),
     }
-
-
-# ---------------------------------------------------------------------------
-# Extraction across the whole project (for owner + consumes resolution)
-# ---------------------------------------------------------------------------
-def _extract_project(project_root: Path, subs: dict, matcher):
-    """Build (file_owner, extracts, generated_set) across every subsystem's declared files."""
-    exts_owner: dict[str, str] = {}
-    extracts: dict = {}
-    generated: set[str] = set()
-    for name in sorted(subs):
-        for rel in _subsystem_files(project_root, subs[name], matcher):
-            if rel in exts_owner:  # flat topology: first declared owner wins
-                continue
-            result, is_gen = extract_file(project_root, rel)
-            exts_owner[rel] = name
-            if is_gen:
-                generated.add(rel)
-            if result is not None:
-                extracts[rel] = result
-    return exts_owner, extracts, generated
-
-
-def _subsystem_files(project_root: Path, sub, matcher) -> list[str]:
-    """Repo-relative POSIX source paths a subsystem owns (dirs, globs, explicit files)."""
-    from .extract import supported_extensions
-
-    exts = supported_extensions()
-    out: set[str] = set()
-
-    def add(p: Path) -> None:
-        if p.is_file() and p.suffix in exts:
-            rel = p.relative_to(project_root).as_posix()
-            if not (matcher and matcher.matches(rel)):
-                out.add(rel)
-
-    for raw in (sub.paths or []):
-        base = project_root / raw
-        if base.is_dir():
-            for f in base.rglob("*"):
-                if not any(part in config.DEFAULT_IGNORES for part in f.relative_to(project_root).parts):
-                    add(f)
-        elif base.is_file():
-            add(base)
-        else:
-            for f in project_root.glob(raw):
-                add(f)
-    for raw in (sub.files or []):
-        add(project_root / raw)
-    return sorted(out)
 
 
 # ---------------------------------------------------------------------------
