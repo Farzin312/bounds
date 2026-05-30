@@ -29,6 +29,7 @@ The three modes:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from . import errors
@@ -346,15 +347,31 @@ def _replace_block(text: str, start: str, end: str, block: str) -> str:
     return text[:i] + block + text[j:]
 
 
+_BOUNDS_COMMAND_RE = re.compile(
+    r"\bbounds\s+"
+    r"(list|describe|validate|preflight|overview|init|impact|discover|calibrate|agent|ci|cache)\b"
+)
+_BOUNDS_HEADING_RE = re.compile(r"(?m)^\s*#.*\bbounds\b")
+
+
 def _looks_bounds_authored(text: str) -> bool:
     """Heuristic: does an unmarked shared file already contain hand-written bounds content?
 
-    Used only to decide ``skipped_custom``. We look for clear signals that a human wrote
-    bounds guidance (the CLI name as a command, or a heading naming Bounds) so we err toward
-    *not* clobbering. Plain unrelated content (no bounds mention) is safe to append to.
+    Used only to decide ``skipped_custom``. We look for unambiguous signals that a human wrote
+    bounds guidance, so we err toward *not* clobbering:
+      * a real CLI invocation — the word ``bounds`` immediately followed by a known subcommand;
+      * the inline-code form ```` `bounds` ````;
+      * a markdown heading line that names Bounds.
+
+    Critically, plain English prose such as "out of bounds" or "bounds checking" must NOT
+    match — those are safe to append our block to. Returns False for any such unrelated content.
     """
     lowered = text.lower()
-    return "bounds " in lowered or "`bounds`" in lowered or "bounds list" in lowered
+    return (
+        bool(_BOUNDS_COMMAND_RE.search(lowered))
+        or "`bounds`" in lowered
+        or bool(_BOUNDS_HEADING_RE.search(lowered))
+    )
 
 
 # ---------------------------------------------------------------------------

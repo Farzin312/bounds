@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from bounds import agentsync, errors
+from bounds.agentsync import _looks_bounds_authored
 
 
 def _mk_root(tmp_path):
@@ -181,6 +182,33 @@ def test_unknown_mode_raises_usage(tmp_path):
     with pytest.raises(errors.BoundsError) as exc:
         agentsync.run_agent(root, mode="nope")
     assert exc.value.code == errors.E_USAGE
+
+
+# ---------------------------------------------------------------------------
+# _looks_bounds_authored heuristic
+# ---------------------------------------------------------------------------
+def test_looks_bounds_authored_ignores_out_of_bounds_idiom():
+    assert _looks_bounds_authored("array index out of bounds in the parser") is False
+
+
+def test_looks_bounds_authored_ignores_bounds_checking_prose():
+    assert _looks_bounds_authored("We do bounds checking on every write.") is False
+
+
+def test_looks_bounds_authored_matches_inline_command():
+    assert _looks_bounds_authored("Run `bounds list` to see the map.") is True
+
+
+def test_looks_bounds_authored_matches_bare_command_invocation():
+    assert _looks_bounds_authored("Use bounds describe auth before editing.") is True
+
+
+def test_looks_bounds_authored_matches_heading():
+    assert _looks_bounds_authored("## Bounds — architecture contract") is True
+
+
+def test_looks_bounds_authored_matches_inline_code_name():
+    assert _looks_bounds_authored("`bounds`") is True
 
 
 # ---------------------------------------------------------------------------

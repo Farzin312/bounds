@@ -32,14 +32,20 @@ can't blindly slurp into context).
 
 When an AI agent opens your repo, it does the expensive thing: it reads source files — sometimes
 dozens — to reconstruct what each part does and how the parts connect. Every file burns tokens.
-Every wrong guess produces a bad edit. And the agent's mental model is stale the moment it's built,
-with nothing to validate it against.
+Every wrong guess produces a bad edit. And the agent's mental model has no way to *check* itself —
+nothing tells it when its picture of the architecture has drifted from the code.
 
 But an agent doesn't need every function in `auth.ts`. It needs:
 
 > *"auth exposes `login`, `verify`, `register` and talks to the database via `user_repository`."*
 
 That fits in five lines of YAML — and a machine can reason about it **deterministically**.
+
+<div align="center">
+<img src="assets/before-after.svg" alt="Without Bounds an agent reads 5-15 source files for thousands of unverified tokens; with Bounds a single describe call returns a tree-sitter-verified contract in about 300 tokens" width="760">
+</div>
+
+*~300 tokens to understand a subsystem, verified by tree-sitter — not thousands from source.*
 
 ## What Bounds does
 
@@ -142,6 +148,21 @@ reads the Bounds map first then digs into specific symbols uses any graph tool m
 <sub>A full side-by-side comparison table is in the [appendix](#appendix-bounds-vs-code-graphs) at the
 end of this README.</sub>
 
+### What Bounds does NOT do
+
+Bounds is deliberately narrow. Being explicit about the edges is part of why you can trust the parts
+that do work:
+
+| Bounds does **not** | What that means |
+|---------------------|-----------------|
+| Execute your code | Pure static tree-sitter parsing — no runtime, no semantics inferred from behavior. |
+| Understand intent on its own | It validates **human-declared** manifests; it does not invent what a subsystem *should* be. |
+| Produce semantic summaries without `--deep` | The Tier-3 LLM tier is **stubbed** in the MVP; the structural path is intentionally LLM-free. |
+| Replace exploratory code graphs | It **complements** them — graph to explore, Bounds to validate a declared boundary. |
+| Guarantee an agent reasons well or finishes the task | It cuts token load and validates structure; it makes no claim about task success. |
+| Auto-update your manifests | Drift is detected and proposed; you apply fixes with `calibrate --apply`. |
+| Validate every language | Python + TS/JS are tree-sitter-verified today; other languages fall back to YAML-only (declared files) and are otherwise skipped. |
+
 ---
 
 ## Quick start
@@ -238,9 +259,12 @@ bounds calibrate                    # reconcile manifests vs source (diff; --app
 ```
 
 > `.bounds/` is hidden and **only** touched by the `bounds` CLI — nothing auto-loads it. Its
-> extraction cache is a **binary SQLite file** (`.bounds/cache.db`), so an agent that naively reads
-> it gets binary gibberish, not a parseable token blob dumped into context. Bounds never silently
-> inflates an agent's context.
+> extraction cache is a **binary SQLite file** (`.bounds/cache.db`), so a tool that blindly `cat`s
+> every file in a directory gets binary bytes rather than a parseable token blob. This is an
+> *accidental-context-burn* defense, **not** access control: the manifests in
+> `.bounds/manifests/*.yaml` are plain human-readable YAML and any agent can still read them
+> directly. The binary cache only keeps the *derived* extraction data from being trivially slurped
+> in by naive file-dumping tools.
 
 ---
 
@@ -253,7 +277,9 @@ tokens to a few hundred.
 ### Measured on this repo
 
 > Token figures are estimates from the byte size at ~4 chars/token (a standard rough rule for
-> JSON/source). They are estimates, not exact tokenizer counts.
+> JSON/source). They are estimates, not exact tokenizer counts — and they come from **one codebase
+> (this repo): a single data point, not a cross-repo corpus study.** The numbers are real
+> (reproducible via `benchmarks/run.py`); treat the ratio as illustrative, not a guaranteed average.
 
 To understand the `models` subsystem's public API (9 exports, consumed by 5 subsystems):
 
@@ -300,6 +326,10 @@ The token win isn't a flat discount — it *widens* with codebase size, and that
 | Medium (dozens of files) | many thousands of tokens | ~300 tokens |
 | Large (hundreds of files) | tens of thousands of tokens | ~300 tokens |
 
+<div align="center">
+<img src="assets/token-scaling.svg" alt="Line chart: reading source climbs steeply as O of files toward tens of thousands of tokens, while a Bounds describe contract stays flat near 300 tokens as O of public API" width="700">
+</div>
+
 This compounds with a property of LLMs that punishes the naive approach: **models get *worse* as their
 context fills** — the "lost-in-the-middle" / context-rot effect, where relevant facts buried in a large
 prompt are recalled less reliably. So in a large codebase the source-reading approach is doubly bad: it
@@ -310,6 +340,13 @@ in exactly the slice it needs.
 
 > Measured token economics, the scaling methodology, and per-model community results live in
 > [benchmarks/](benchmarks/README.md). Token counts are tokenizer-dependent — results note the model/tokenizer used.
+
+**Staleness is caught, not assumed.** A cheap contract is only useful if you know it still matches
+the code. Bounds keeps the contract honest in four places: `bounds validate --quick` runs per-commit
+(git-diff incremental), `bounds calibrate` reconciles manifests against tree-sitter reality, the CI
+gate (`bounds preflight --ci`) blocks drifting PRs, and every `describe`/`validate` payload carries a
+machine-readable `validation_status` an agent can branch on. *You declare the boundary in YAML;
+Bounds validates it against reality, both directions, on every commit.*
 
 ---
 
@@ -353,8 +390,10 @@ touches an LLM.
 ### The cache is binary by design
 
 Extraction results are cached in `.bounds/cache.db`, a **binary SQLite file** (SQLite ships with
-Python — no new dependency). This is deliberate context armor: an agent that naively `cat`s the
-cache gets binary gibberish rather than a giant parseable token blob. The cache is subsystem-indexed
+Python — no new dependency). This is a deliberate *accidental-context-burn* defense, not access
+control: a tool that blindly dumps a directory's files gets binary bytes rather than a giant
+parseable token blob. It does **not** stop a determined agent — the manifests themselves are plain
+YAML — it only keeps the derived extraction data from being slurped in by naive file-dumping tools. The cache is subsystem-indexed
 (partial per-subsystem reads), gitignored, and managed by `bounds cache` — `--inspect` prints a
 token-lean counts-only summary (never symbol dumps), `--prune` drops dead rows, and `--migrate`
 converts a legacy `state.json` cache (auto-migrated on first load anyway).
@@ -368,6 +407,27 @@ YAML manifests ──parse──────> Declared exports  ───┘
                                     +
                               Consumed interfaces
 ```
+
+The same flow, including the opt-in semantic tier:
+
+```mermaid
+flowchart LR
+    SRC[Source files] -->|tree-sitter extract<br/>zero LLM| EX[Extracted exports + imports]
+    EX -->|cache| DB[(binary SQLite<br/>.bounds/cache.db)]
+    DB --> DIFF
+    YAML[YAML manifests<br/>.bounds/manifests] -->|parse| DECL[Declared exposes + consumes]
+    DECL --> DIFF{Two-directional diff}
+    DIFF --> REP[Validation report<br/>+ validation_status]
+    EX -.->|describe --deep<br/>STUBBED / opt-in| LLM[Tier 3: LLM enrichment]
+    LLM -.-> REP
+
+    classDef stub fill:#161b22,stroke:#6e7681,stroke-dasharray:4 3,color:#6e7681;
+    class LLM stub;
+```
+
+> The structural path (solid arrows) never touches an LLM. Tier 3 (dotted) — `describe --deep` — is
+> opt-in enrichment and **stubbed in the MVP**; it is not part of validation. Zero LLM in the
+> structural path: deterministic, sub-200ms, no network, no API keys.
 
 The engine checks both directions:
 - **Stale manifest**: the manifest claims an export the source doesn't provide.
@@ -393,9 +453,12 @@ The engine checks both directions:
 | **Go** | Functions, methods, exported symbols | Planned | Planned | Future (v0.2.0 target) |
 | **Rust** | `pub fn`, `pub struct`, `pub enum`, traits | Planned | Planned | Future (v0.2.0 target) |
 | **Java** | Classes, interfaces, public methods | Planned | Planned | Future (v0.3.0 target) |
-| **Fallback** | YAML-only metadata, no tree-sitter | No merge | Data integrity only | Available always |
+| **Fallback** | YAML-only metadata, no tree-sitter | No merge | Data integrity only | Only for files **explicitly declared** in a manifest |
 
-Adding a language is one class (`extract.base.LanguageAdapter`) plus a registry entry.
+Adding a language is one class (`extract.base.LanguageAdapter`) plus a registry entry. The fallback
+only covers files a manifest **names directly** (metadata is preserved, but there is no tree-sitter
+verification); files in an unsupported language that are only **auto-discovered** are silently
+skipped rather than validated.
 
 ---
 
@@ -407,6 +470,12 @@ today**. The universal instruction is the same:
 > Prefer `bounds describe <name>` / `bounds list` over reading raw source to understand
 > architecture. Output is JSON by default — parse it. Run `bounds validate --quick` after edits
 > and treat a non-`fresh` `validation_status` as a signal to update the manifests.
+
+Compliance is **advisory, not enforced.** Bounds writes these instructions into the configs agents
+already read, but it cannot prevent an agent from ignoring them or reading raw files directly — it
+works *with* cooperating agents, lowering the cost of the right behavior rather than blocking the
+wrong one. (The CI gate is the one hard enforcement point, and it runs in your pipeline, not in the
+agent.)
 
 > **Claude Code plugin auto-detection.** Claude Code (and compatible agents) can auto-detect a
 > project's `.bounds/` directory and use the `bounds` CLI to load subsystem manifests on demand —

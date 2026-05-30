@@ -11,21 +11,13 @@ Bounds is a zero-LLM CLI that extracts a codebase's structural surface (exported
 with tree-sitter and validates it against human-declared subsystem manifests in `.bounds/`. Python,
 `src/` layout, package `bounds`, console entry `bounds = bounds.cli:main`.
 
-## Dev environment & commands
+## Python environment
 
-**Do not run these automatically.** These are reference commands for human contributors, not session startup instructions.
+A `.venv/` already exists in this workspace; invoke tooling via `.venv/bin/python` / `.venv/bin/pytest`. Do not `source .venv/bin/activate` or run setup at session start.
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"          # editable install + pytest
-bounds --help                    # smoke test the CLI
-pytest                           # run the test suite
-bounds validate --human          # run Bounds on itself (bootstrap demo)
-```
+For local dev setup (venv, install, tests), see [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
 
-A `.venv/` already exists in this workspace; prefer `.venv/bin/python` / `.venv/bin/pytest` for all tool invocations — do not `source .venv/bin/activate` at session start.
-
-## Code conventions (enforced — see ARCHITECTURE.md for the why)
+## Binding constraints (enforced — see ARCHITECTURE.md for the why)
 
 - **Zero LLM for structural ops.** Everything in `extract/`, `validate/`, `cache/` is tree-sitter +
   pure Python. The only LLM tier (Tier 3, `describe --deep`) is opt-in and **stubbed** in MVP — never

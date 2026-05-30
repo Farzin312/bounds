@@ -1,0 +1,4 @@
+# Code owners for Bounds.
+# Every file routes to @Farzin312, so all PRs require their review
+# (enforced by the "Require review from Code Owners" branch protection rule).
+* @Farzin312
