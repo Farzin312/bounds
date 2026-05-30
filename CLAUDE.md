@@ -2,6 +2,7 @@
 
 Working guide for agents and contributors in this repo. **This is not the product doc or the design doc.**
 - Product pitch, install, agent integration → [README.md](README.md)
+- Deep-dive docs (how-it-works, team workflow, CLI reference, agent integration, token economics) → [docs/](docs/README.md)
 - Engineering contract (modules, data model, error codes, JSON shapes) → [ARCHITECTURE.md](ARCHITECTURE.md)
 - Scope & phasing (shipped vs planned) → README "Roadmap" section + GitHub Milestones
 
@@ -13,9 +14,12 @@ with tree-sitter and validates it against human-declared subsystem manifests in 
 
 ## Python environment
 
-A `.venv/` already exists in this workspace; invoke tooling via `.venv/bin/python` / `.venv/bin/pytest`. Do not `source .venv/bin/activate` or run setup at session start.
-
-For local dev setup (venv, install, tests), see [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
+Development runs in a virtualenv — one is **created**, never assumed to pre-exist (a fresh clone has
+none). Set it up per [CONTRIBUTING.md](CONTRIBUTING.md#development-setup)
+(`python -m venv .venv && pip install -e ".[dev]"`). **If** a `.venv/` is present in the workspace,
+invoke tooling through it (`.venv/bin/python`, `.venv/bin/pytest`) rather than `source`-ing it; if it
+isn't there yet, create it first. This is contributor/maintainer setup — end users never need it; they
+just `pipx install` the `bounds` CLI.
 
 ## Binding constraints (enforced — see ARCHITECTURE.md for the why)
 

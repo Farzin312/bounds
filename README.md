@@ -79,9 +79,10 @@ bounds validate --quick      # fast incremental drift check
 [docs/install.md](docs/install.md) for all install channels.
 
 > `.bounds/` is hidden and **only** touched by the `bounds` CLI. Its extraction cache is a binary
-> SQLite file (`.bounds/cache.db`) so a tool that blindly dumps a directory gets binary bytes, not a
-> parseable token blob. This is an *accidental-context-burn* defense, **not** access control — the
-> manifests are plain YAML any agent can read.
+> SQLite file (`.bounds/cache.db`, **gitignored and regenerated** — never committed) so a tool that
+> blindly dumps a directory gets binary bytes, not a parseable token blob. This is an
+> *accidental-context-burn* defense, **not** access control — the manifests are plain YAML any agent
+> can read.
 
 ---
 

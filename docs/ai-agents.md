@@ -50,6 +50,12 @@ telling each to query `bounds describe` / `bounds list` instead of reading raw s
 Shared files (`AGENTS.md`, `GEMINI.md`) get a marked Bounds block that leaves your other content
 intact; hand-written configs are never clobbered.
 
+**What ships vs what's generated:** only `AGENTS.md` is **committed** to the repo (the cross-ecosystem
+standard file). Every per-tool pointer above — `.claude/commands/bounds.md`, `GEMINI.md`,
+`.cursor/rules/bounds.mdc`, `.windsurf/rules/bounds.md`, `.aider.conf.yml`,
+`.github/copilot-instructions.md` — is **gitignored and regenerated locally** by `bounds agent --sync`,
+so a clone stays lean. Run `bounds agent --sync` after cloning to (re)create the ones your editor uses.
+
 ### Companion flags
 
 ```bash

@@ -17,13 +17,13 @@ cd your-project
 bounds discover            # preview auto-generated manifests (dry-run)
 bounds discover --apply    # write root.yaml + per-subsystem manifests
 # → review the generated manifests by hand: fix boundaries, roles, names
-git add .bounds && git commit -m "chore: adopt Bounds manifests"
+git add .bounds/root.yaml .bounds/manifests && git commit -m "chore: adopt Bounds manifests"
 bounds agent --sync        # wire Bounds into the coding agents your team uses
 ```
 
 1. **`bounds discover`** groups source by directory, tree-sitter-extracts each candidate's verified `exposes`, infers `consumes` from the cross-candidate import graph, and seeds `role`/`criticality` from graph degree. It is a dry-run by default and never overwrites existing manifests.
 2. **Review the manifests.** Discovery proposes; humans decide. This is where you correct boundaries the heuristic got wrong and confirm the roles.
-3. **Commit `.bounds/`** so the contract is versioned with the code.
+3. **Commit `.bounds/root.yaml` and `.bounds/manifests/`** so the contract is versioned with the code. (The cache `.bounds/cache.db` is gitignored and regenerated — never commit it.)
 4. **`bounds agent --sync`** writes the canonical contract into `AGENTS.md` plus per-tool pointer files, telling each agent to query `bounds describe`/`bounds list` instead of reading raw source.
 
 ## The freshness loop (the core discipline)
