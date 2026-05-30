@@ -29,7 +29,7 @@ classifiers = [
     "Topic :: Software Development :: Build Tools",
 ]
 dependencies = [
-    "click>=8.1",
+    "click>=8.4.1",
     "PyYAML>=6",
     "tree-sitter>=0.21,<0.26",
     "tree-sitter-python>=0.21",
