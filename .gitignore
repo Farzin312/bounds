@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.egg
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Editable-install / setuptools artifacts
+src/*.egg-info/
+__editable__.*
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Compact's own cache (state is regenerated; never committed)
+.compact/state.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
