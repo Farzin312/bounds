@@ -58,11 +58,57 @@ bounds/
 │   ├── calibrate.py        # Manifest↔source reconciliation (s-16)
 │   ├── agentsync.py        # Cross-agent config generation (s-18)
 │   └── ciconfig.py         # CI config generation (s-20)
-├── tests/                  # Pytest test suite (10 files, 147 tests)
+├── tests/                  # Pytest test suite (10 files, 150 tests)
 ├── ARCHITECTURE.md         # Engineering contract
 ├── CONTRIBUTING.md         # This file
 └── README.md               # Project overview + agent integration (+ Roadmap section)
 ```
+
+## Repository Hygiene — How the Repo Scales and Stays Clean
+
+Bounds is a tool *about* keeping architecture legible; the repository has to model that. As the
+project grows, keep it navigable by holding these invariants. A change that violates one should be
+fixed in the same PR, not deferred.
+
+**1. One module, one concern.** Each file under `src/bounds/` owns a single responsibility and is
+declared as (or part of) a subsystem in `.bounds/manifests/`. New functionality is a new module with
+a clear boundary — not a grab-bag appended to `cli.py` or `engine.py`. `cli.py` is wiring only;
+command logic lives in its own module (see `discover.py`, `calibrate.py`, `agentsync.py`,
+`ciconfig.py`). If you can't name the subsystem a file belongs to, it isn't scoped yet.
+
+**2. The repo dogfoods itself — keep it green.** Bounds models its own architecture in `.bounds/`.
+After any change to `src/bounds/**`, run `bounds validate` (and `bounds calibrate` to see what
+drifted) and update the affected manifest in the same PR. `bounds validate --quick` runs in CI; a PR
+that leaves the project's own manifests stale will not be merged. New cross-subsystem imports must be
+reflected as `exposes`/`consumes` edges — that's the architecture staying honest.
+
+**3. One source of truth — no drift.** Every fact lives in exactly one place. Agent-config text lives
+in `agentsync.py` (the generator), never also in a `templates/` copy. The architecture map lives in
+the manifests (queried via `bounds describe`), mirrored as prose in `ARCHITECTURE.md`. Scope/status
+lives in the README "Roadmap" section + GitHub Milestones. If you find the same fact in two files,
+collapse it to one and link.
+
+**4. Commit only what others need; generate the rest.** A clone should be lean. Commit source,
+tests, docs, and the canonical agent contract (`AGENTS.md`) + dev memory (`CLAUDE.md`). Do **not**
+commit anything a tool regenerates locally: the binary cache (`.bounds/cache.db`), per-tool agent
+configs (`GEMINI.md`, `.cursor/`, `.windsurf/`, `.aider.conf.yml`, `.github/copilot-instructions.md`,
+`.claude/commands/bounds.md` — all produced by `bounds agent --sync`), build artifacts, or
+`bounds ci --install` output. These are in `.gitignore`; if you add a new generator, gitignore its
+output in the same PR. The test for "should this be committed?" is: *would a fresh cloner need it, or
+can they regenerate it with one command?*
+
+**5. Lean root.** The repository root is the first thing a visitor reads — keep it to source dirs,
+governance docs, packaging, and the canonical agent files. New top-level files need a real
+justification; prefer a subdirectory (`docs/`, `assets/`, `benchmarks/`) over another root entry.
+
+**6. Stable contracts only grow.** Error codes in `errors.py` and the JSON output shapes are a public
+contract: add, never rename or repurpose. The same applies to the manifest schema (version it; old
+schemas are supported forever).
+
+**7. Comments serve the reader.** Module/function docstrings say *why this exists* and the one
+non-obvious rule, briefly. No process noise (no review/TODO chatter in committed code), no comments
+that merely restate the code. The "why" comments (determinism, context-armor, the token rationale)
+are the ones worth keeping.
 
 ## Coding Standards
 
@@ -104,7 +150,7 @@ All tests must pass. If you add a new feature, include tests.
 
 ### Writing Tests
 
-- Tests live in `tests/` and are grouped by feature area (10 files, 147 tests):
+- Tests live in `tests/` and are grouped by feature area (10 files, 150 tests):
   `test_extract.py`, `test_validate.py`, `test_schema_flex.py` (s-17 roles/criticality),
   `test_cache_sqlite.py`, `test_discover.py`, `test_calibrate.py`, `test_agentsync.py`,
   `test_ciconfig.py`, `test_cli.py`, and `test_commands_cli.py`.

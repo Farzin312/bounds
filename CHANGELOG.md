@@ -7,7 +7,7 @@
 - **`bounds discover`** — bootstrap manifest generation: auto-discovers candidate subsystems from source and proposes `.bounds/` manifests for a new project.
 - **`bounds calibrate`** — reconciles manifests against tree-sitter reality, proposing exports to add or remove. Honors a new per-export `internal` flag (mark a symbol deliberately private and calibration leaves it alone).
 - **`bounds impact <name>`** — transitive blast radius: which subsystems break if the named subsystem changes. Backed by a new `transitive_consumers` graph walk in the propagation engine.
-- **`bounds agent --sync/--detect/--check`** — cross-agent config *generator*. Writes a canonical `BOUNDS.md` plus per-agent config for eight agents (Claude Code, Codex, OpenCode, Gemini, Copilot, Cursor, Aider, Windsurf). Generates committed files; not a hosted integration or plugin registry.
+- **`bounds agent --sync/--detect/--check`** — cross-agent config *generator*. Writes the canonical contract into `AGENTS.md` (the cross-ecosystem standard file agents already read) plus a short per-agent pointer for eight agents (Claude Code, Codex, OpenCode, Gemini, Copilot, Cursor, Aider, Windsurf). Generates committed files; not a hosted integration or plugin registry.
 - **`bounds ci --install`** (`--action`/`--precommit`/`--gitlab`/`--all`) — CI gate config *generator*. Writes a GitHub Action workflow, pre-commit hook, and/or GitLab CI config you commit. Not published Marketplace actions or a published pre-commit repo.
 - **`bounds cache --migrate/--inspect/--prune`** — manage the binary extraction cache.
 - **Schema flexibility** — `root.yaml` now accepts extensible roles and criticality values rather than a fixed enum.
@@ -23,7 +23,7 @@
 
 ### Tests
 
-- **147 tests across 10 files** now pass (up from the v0.1.0 figure), covering the new `discover`, `calibrate`, `impact`, `agent`, `ci`, and SQLite-cache surfaces in addition to extraction, validation, and schema flexibility.
+- **150 tests across 10 files** now pass (up from the v0.1.0 figure), covering the new `discover`, `calibrate`, `impact`, `agent`, `ci`, and SQLite-cache surfaces in addition to extraction, validation, and schema flexibility.
 
 ## [0.1.0] — 2026-05-29
 
@@ -61,4 +61,4 @@ Bounds brings AI-native codebase understanding via subsystem boundary manifests 
 ### Notes
 
 - Bounds validates ITSELF (`bounds validate --human` on the Bounds project) — fully dogfooding from day one.
-- The full suite (147 tests across 10 files as of the Unreleased gen-3 work) passes with pytest-xdist parallel execution.
+- The full suite (150 tests across 10 files as of the Unreleased gen-3 work) passes with pytest-xdist parallel execution.

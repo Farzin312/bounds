@@ -25,7 +25,7 @@ help: ## List available targets
 	@echo "  make test       Run the test suite (pytest -q)"
 	@echo "  make lint       Best-effort lint (ruff if present, else compileall)"
 	@echo "  make validate   Dogfood: bounds validate --human"
-	@echo "  make benchmark  Time a few bounds commands against this repo"
+	@echo "  make benchmark  Run the token-economics harness against this repo"
 	@echo "  make clean      Remove build/cache artifacts and .bounds/cache.db"
 	@echo ""
 	@echo "Using PY=$(PY)  BOUNDS=$(BOUNDS)"
@@ -53,22 +53,13 @@ lint: ## Best-effort lint (non-failing if ruff absent)
 validate: ## Dogfood Bounds on itself
 	$(BOUNDS) validate --human
 
-# benchmark: time a few representative read-only commands against this repo.
-# Timing varies run-to-run (interpreter startup dominates) — that's expected.
-#
-# NOTE: the benchmark doc (benchmarks/<version>/README.md) reports context
-# cost in TOKENS, not bytes. The raw `wc -c` byte counts shown there are the
-# measured proxy; the doc converts/frames them as token savings. This target
-# only reproduces the wall-clock timing portion.
-benchmark: ## Time a few bounds commands (timing varies; that's fine)
-	@echo "==> Benchmarking Bounds against this repo (timings are approximate)"
-	@echo "--- bounds list ---"
-	@time $(BOUNDS) list >/dev/null
-	@echo "--- bounds describe models ---"
-	@time $(BOUNDS) describe models >/dev/null
-	@echo "--- bounds validate --quick ---"
-	@time $(BOUNDS) validate --quick >/dev/null
-	@echo "==> Done. See benchmarks/ for token-cost figures (reported in tokens)."
+# benchmark: deterministic, model-agnostic token-economics harness. Shells out
+# to read-only `bounds` queries against this repo and reports tokens saved
+# (Bounds contract vs equivalent source). No wall-clock in its output; latency
+# is a de-emphasized, separately-labeled note in benchmarks/results/. See
+# benchmarks/README.md for methodology and how to contribute a result.
+benchmark: ## Run the token-economics harness against this repo
+	$(PY) benchmarks/run.py
 
 clean: ## Remove build/cache artifacts and the bounds cache db
 	rm -rf build dist .pytest_cache *.egg-info src/*.egg-info

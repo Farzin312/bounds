@@ -1,14 +1,16 @@
 <!-- BOUNDS:START -->
-## Bounds
+## Bounds — architecture contract for agents
 
-This project uses **Bounds** to model its architecture as subsystem boundary manifests.
-Read the architecture through the Bounds CLI, never by opening the raw files.
+Bounds models this codebase as subsystem boundary manifests. Query them through the CLI — never read the raw files.
 
-- `bounds list` — map of all subsystems (roles + dependency counts)
-- `bounds describe <name>` — one subsystem's verified public surface (~300 tokens)
-- `bounds validate --quick` — catch structural drift after a change
+### Commands
+- `bounds list` — all subsystems (the map; roles + dependency counts)
+- `bounds describe <name>` — one subsystem's public surface (~300 tokens, tree-sitter-verified)
+- `bounds describe --namespace <ns>` — every subsystem in a namespace
+- `bounds validate --quick` — catch drift after a change
+- `bounds impact <name>` — transitive blast radius before a risky change
 
-**Never** read `.bounds/cache.db`, `.bounds/*.json`, or `.bounds/manifests/*.yaml` directly —
-the cache is binary and the manifests bypass tree-sitter verification. The CLI is the API.
-See `BOUNDS.md` for the full contract.
+### Hard rules
+- NEVER read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/manifests/*.yaml`, or `.bounds/root.yaml` directly. The cache is binary; the manifests bypass tree-sitter verification.
+- The CLI is the API. Always use `bounds` commands to read architecture.
 <!-- BOUNDS:END -->

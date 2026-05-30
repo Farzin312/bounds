@@ -58,8 +58,8 @@ def test_agent_sync_cli(monkeypatch, py_project):
     res = _invoke(monkeypatch, py_project, ["agent", "--sync", "--claude"])
     assert res.exit_code == 0
     data = json.loads(res.output)
-    assert data["bounds_md"] == "BOUNDS.md"
-    assert (py_project / "BOUNDS.md").is_file()
+    assert data["canonical"] == "AGENTS.md"
+    assert (py_project / "AGENTS.md").is_file()
     assert (py_project / ".claude" / "commands" / "bounds.md").is_file()
 
 

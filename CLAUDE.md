@@ -13,6 +13,8 @@ with tree-sitter and validates it against human-declared subsystem manifests in 
 
 ## Dev environment & commands
 
+**Do not run these automatically.** These are reference commands for human contributors, not session startup instructions.
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"          # editable install + pytest
@@ -21,7 +23,7 @@ pytest                           # run the test suite
 bounds validate --human          # run Bounds on itself (bootstrap demo)
 ```
 
-A `.venv/` already exists in this workspace; prefer `.venv/bin/python` / `.venv/bin/pytest`.
+A `.venv/` already exists in this workspace; prefer `.venv/bin/python` / `.venv/bin/pytest` for all tool invocations — do not `source .venv/bin/activate` at session start.
 
 ## Code conventions (enforced — see ARCHITECTURE.md for the why)
 

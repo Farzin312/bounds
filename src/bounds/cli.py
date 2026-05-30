@@ -575,7 +575,7 @@ def _agent_selectors(fn):
 
 @main.command("agent")
 @click.option("--sync", "do_sync", is_flag=True, default=False,
-              help="Generate BOUNDS.md + per-agent config files.")
+              help="Generate the canonical AGENTS.md contract + per-agent config files.")
 @click.option("--detect", "do_detect", is_flag=True, default=False,
               help="List which coding agents are present in this project.")
 @click.option("--check", "do_check", is_flag=True, default=False,

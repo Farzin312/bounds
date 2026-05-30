@@ -4,6 +4,8 @@
 
 ### Architecture contracts your AI agents can trust
 
+<img src="assets/demo.svg" alt="Bounds in four commands: discover manifests, describe a subsystem in ~300 tokens, see a change's blast radius, validate for drift" width="760">
+
 **Bounds** is a CLI that turns your codebase's architecture into deterministic, machine-readable
 manifests — validated against source with **tree-sitter (zero LLM)**. An AI coding agent reads a
 ~300-token subsystem contract instead of a dozen source files (thousands of tokens), and gets
@@ -14,12 +16,13 @@ should spend tokens *deliberately* (one cheap CLI call returns a verified contra
 *accidentally* (the `.bounds/` directory is hidden, and its cache is a binary SQLite file an agent
 can't blindly slurp into context).
 
+[![CI](https://github.com/Farzin312/bounds/actions/workflows/ci.yml/badge.svg)](https://github.com/Farzin312/bounds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](#cross-platform-support)
 [![Zero LLM](https://img.shields.io/badge/structural%20validation-zero%20LLM-brightgreen.svg)](#how-it-works)
 
-[Quick start](#quick-start) · [Why not another code graph?](#why-not-another-code-graph) · [Token cost comparison](#token-cost-comparison) · [For AI agents](#for-ai-coding-agents) · [How it works](#how-it-works) · [Security](#security) · [Architecture](ARCHITECTURE.md) · [Roadmap](#roadmap)
+[Quick start](#quick-start) · [Use cases](#use-cases) · [Token cost](#token-cost-comparison) · [How retrieval scales](#how-retrieval-scales-and-why-it-matters-more-as-you-grow) · [For AI agents](#for-ai-coding-agents) · [How it works](#how-it-works) · [Security](#security) · [Architecture](ARCHITECTURE.md) · [Roadmap](#roadmap)
 
 </div>
 
@@ -56,6 +59,48 @@ The result is a structural contract an agent can query, and a CI pipeline can en
 - **`bounds discover` / `bounds calibrate`** — onboard an un-bounded repo in one command, then keep manifests honest against tree-sitter reality.
 - **`bounds agent --sync`** — wire Bounds into eight coding agents (Claude Code, Codex, Cursor, …) with one command.
 - **Deterministic** — same input, same byte-stable output. No network, no flakiness, no accidental token spend.
+
+---
+
+## Use cases
+
+### ▸ "Will this change break anything?" — let the agent check, before the PR
+
+The hardest question in a large codebase is *what does this change touch*. Bounds answers it
+structurally, in a few hundred tokens, so an agent (or you) can reason about blast radius **before**
+writing the change and **prove** nothing broke after:
+
+```bash
+bounds impact auth          # who depends on auth? → billing, api, frontend (+ the exact interfaces)
+bounds describe billing     # what does billing rely on from auth? (verified contract, ~300 tokens)
+# … the agent makes the change, now knowing the reach …
+bounds preflight            # contracts + boundaries + cycles + drift — fails if a consumer was broken
+```
+
+`bounds impact` returns the transitive consumer set and the interfaces each consumer relies on.
+`bounds preflight` then catches the failure modes that actually matter — a removed export a consumer
+still imports, a new cross-boundary dependency, an introduced cycle — each with a deterministic fix
+suggestion. The agent never had to read `billing/`, `api/`, and `frontend/` to find out it was about
+to break them.
+
+### ▸ Drop an agent into a strange repo and have it productive in seconds
+
+```bash
+bounds list                 # the whole architecture map (roles + dependency counts) — one cheap call
+bounds describe payments    # one subsystem's verified public surface, instead of opening its files
+```
+
+No directory spelunking, no grepping for `class`/`export`. `bounds agent --sync` wires this in as the
+default workflow for whatever agent the contributor uses.
+
+### ▸ Enforce architecture in CI, not in a wiki
+
+```bash
+bounds ci --install         # generate a GitHub Action / pre-commit hook / GitLab job
+```
+
+Boundary violations and drift become a failing check with a fix suggestion — a toggle, not a
+convention nobody follows.
 
 ---
 
@@ -239,6 +284,35 @@ of grepping a dozen-plus source files and mentally reconstructing it.
 
 ---
 
+## How retrieval scales (and why it matters more as you grow)
+
+The token win isn't a flat discount — it *widens* with codebase size, and that is the whole point.
+
+- **Reading source is O(files).** To understand a subsystem by reading it, an agent's token cost grows
+  with how much code that subsystem (and its neighbors) contains. Bigger codebase → bigger reads.
+- **A Bounds contract is O(public API).** `bounds describe` returns only the declared, tree-sitter-verified
+  surface — exposes, consumes, `consumed_by`. A subsystem with 50 internal functions and 5 exports is
+  still ~5 lines. As the implementation grows, the contract stays roughly **flat**.
+
+| Codebase size | Read the subsystem's source | `bounds describe <name>` |
+|---------------|-----------------------------|--------------------------|
+| Small (a few files) | hundreds–low-thousands of tokens | ~300 tokens |
+| Medium (dozens of files) | many thousands of tokens | ~300 tokens |
+| Large (hundreds of files) | tens of thousands of tokens | ~300 tokens |
+
+This compounds with a property of LLMs that punishes the naive approach: **models get *worse* as their
+context fills** — the "lost-in-the-middle" / context-rot effect, where relevant facts buried in a large
+prompt are recalled less reliably. So in a large codebase the source-reading approach is doubly bad: it
+costs more tokens *and* degrades reasoning quality. Targeted, minimal retrieval — one verified contract,
+the dependency map, a blast-radius query — is the behavior that actually scales. Bounds is built to make
+that the cheap default: the architecture lives outside the model's context until a single CLI call pulls
+in exactly the slice it needs.
+
+> Measured token economics, the scaling methodology, and per-model community results live in
+> [benchmarks/](benchmarks/README.md). Token counts are tokenizer-dependent — results note the model/tokenizer used.
+
+---
+
 ## Performance
 
 Real wall-clock times (including Python interpreter startup) on M3 Pro, all measurements median of
@@ -341,8 +415,9 @@ today**. The universal instruction is the same:
 
 ### One-command agent setup: `bounds agent --sync`
 
-No more manual copy-paste. `bounds agent --sync` writes a canonical `BOUNDS.md` contract plus the
-right config file for **eight** coding agents — telling each one to query `bounds describe` /
+No more manual copy-paste. `bounds agent --sync` writes the canonical contract into `AGENTS.md`
+(the cross-ecosystem standard agents already read) plus a short pointer file for **eight** coding
+agents — telling each one to query `bounds describe` /
 `bounds list` instead of reading raw source, and to run `bounds validate --quick` after edits:
 
 | Agent | Config file written |
@@ -365,9 +440,9 @@ bounds agent --sync --claude   # scope --sync/--check to one agent (--codex, --c
 ```
 
 `bounds agent --sync` is the single supported path — the canonical contract lives in
-[`BOUNDS.md`](BOUNDS.md) (committed) and every per-tool config is generated from it, so there's no
-template to copy or keep in sync. A native MCP server (`bounds mcp`) is on the
-[roadmap](#roadmap) for v0.3.
+[`AGENTS.md`](AGENTS.md) (committed; the standard filename agents already read) and every per-tool
+pointer is generated from it, so there's no template to copy or keep in sync. A native MCP server
+(`bounds mcp`) is on the [roadmap](#roadmap) for v0.3.
 
 ---
 
@@ -484,8 +559,8 @@ a git/PyPI install never needs a C compiler.
 | [SECURITY.md](SECURITY.md) | Security principles, vulnerability disclosure, distribution integrity |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, coding standards, testing, PR workflow |
 | [CLAUDE.md](CLAUDE.md) | Project memory for agents and contributors working *on* Bounds |
-| [BOUNDS.md](BOUNDS.md) | Canonical agent contract — generated by `bounds agent --sync`, source for every per-tool config |
-| [benchmarks/](benchmarks/v0.1.0/README.md) | Raw benchmark data, token cost analysis, performance measurements |
+| [AGENTS.md](AGENTS.md) | Canonical agent contract — generated by `bounds agent --sync`, source for every per-tool pointer |
+| [benchmarks/](benchmarks/README.md) | Token-economics methodology, the scaling/context-rot argument, and per-model community results |
 
 ---
 

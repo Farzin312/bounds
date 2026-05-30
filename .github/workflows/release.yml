@@ -1,16 +1,47 @@
 name: Release
 
+# Publishes to PyPI when a version tag (e.g. v0.1.0) is pushed.
+#
+# ONE-TIME SETUP (no secrets needed — uses PyPI Trusted Publishing / OIDC):
+#   1. Create the project on PyPI (or reserve the name) and add a Trusted Publisher:
+#        PyPI → project → Settings → Publishing → Add a GitHub publisher
+#        owner: Farzin312   repo: bounds   workflow: release.yml   environment: pypi
+#   2. In GitHub → Settings → Environments, create an environment named `pypi`.
+#   Then: bump the version in pyproject.toml + src/bounds/__init__.py, commit, and
+#         git tag v0.1.0 && git push origin v0.1.0
+#
+# Prefer trusted publishing (below). If you must use a token instead, set the
+# repo secret PYPI_API_TOKEN and add `with: { password: ${{ secrets.PYPI_API_TOKEN }} }`
+# to the publish step (and you can drop the `environment:` + `id-token` permission).
+
 on:
   push:
     tags:
       - "v*"
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
-  build-and-publish:
+  # Gate the release on a green test run + a functional smoke test of the built
+  # artifact, so a broken build can never reach PyPI.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (with dev deps) and test
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          pytest -q
+      - name: Self-validate (dogfood)
+        run: bounds validate --quick
+
+  build:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,5 +52,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           python -m build
+      - name: Smoke-test the built wheel
+        run: |
+          python -m venv /tmp/relcheck
+          /tmp/relcheck/bin/pip install dist/*.whl
+          /tmp/relcheck/bin/bounds --version
+          /tmp/relcheck/bin/bounds --help > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # OIDC for PyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
