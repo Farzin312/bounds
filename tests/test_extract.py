@@ -130,6 +130,16 @@ def test_commonjs_module_exports_become_symbols():
     assert "flag" in exported  # exports.flag = ...
 
 
+def test_commonjs_chained_named_exports_become_symbols():
+    # `exports.foo = exports.bar = helper` exports BOTH names, not just the outermost.
+    res = get_adapter("chain.cjs").extract(
+        "chain.cjs", b"function helper() {}\nexports.foo = exports.bar = helper;\n"
+    )
+    exported = {s.name for s in res.symbols if s.exported}
+    assert "foo" in exported
+    assert "bar" in exported
+
+
 def test_commonjs_dynamic_require_records_no_edge():
     # require() with a non-literal argument has no statically knowable module.
     res = get_adapter("dyn.js").extract(

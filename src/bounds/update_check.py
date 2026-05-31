@@ -23,7 +23,7 @@ import json
 import urllib.error
 import urllib.request
 
-from . import __version__
+from . import __version__, config
 
 # GitHub Releases API for the canonical repository. The "latest" endpoint returns
 # the most recent non-draft, non-prerelease release.
@@ -37,8 +37,9 @@ _TIMEOUT_SECONDS = 3.0
 _USER_AGENT = "bounds-upgrade-check"
 
 # The documented refresh path for git/pipx installs. Surfaced in `fix` so the
-# message is actionable regardless of which degraded branch we land in.
-_FIX = "pipx install --force git+https://github.com/Farzin312/bounds.git"
+# message is actionable regardless of which degraded branch we land in. Single-sourced
+# from config so the agent contract and this command never disagree.
+_FIX = config.UPGRADE_INSTALL_CMD
 
 
 # Sentinel distinguishing "the API answered, but no release is published" from

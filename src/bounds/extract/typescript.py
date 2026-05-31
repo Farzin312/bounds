@@ -174,31 +174,23 @@ def _collect_requires(node: ts.Node, source: bytes, imports: list[ImportRef]) ->
         stack.extend(reversed(cur.named_children))
 
 
-def _commonjs_export_symbols(node: ts.Node, source: bytes) -> list[Symbol]:
-    """Exported Symbol(s) from a top-level CommonJS assignment expression.
+def _commonjs_export_target(left: ts.Node, source: bytes, line: int) -> Symbol | None:
+    """The exported Symbol named by a single CommonJS assignment target, or None.
 
-    Handles ``module.exports = <expr>`` (a single ``default`` export), and the named
-    forms ``module.exports.<name> = <expr>`` / ``exports.<name> = <expr>`` (one symbol
-    per assigned property name). A non-export assignment yields nothing.
+    A target is the ``left`` of one assignment: ``module.exports`` (a ``default``
+    export), or ``module.exports.<name>`` / ``exports.<name>`` (named export ``name``).
     """
-    if node.type != "expression_statement":
-        return []
-    assign = next((c for c in node.named_children if c.type == "assignment_expression"), None)
-    if assign is None:
-        return []
-    left = assign.child_by_field_name("left")
-    if left is None or left.type != "member_expression":
-        return []
-    line = _line(node)
+    if left.type != "member_expression":
+        return None
     obj = left.child_by_field_name("object")
     prop = left.child_by_field_name("property")
     if obj is None or prop is None:
-        return []
+        return None
     obj_text = _text(obj, source)
     prop_text = _text(prop, source)
     # `module.exports = ...` -> a single default-style export.
     if obj_text == "module" and prop_text == "exports":
-        return [Symbol(name="default", kind="default", line=line, exported=True)]
+        return Symbol(name="default", kind="default", line=line, exported=True)
     # `module.exports.foo = ...` -> named export `foo`.
     if obj.type == "member_expression":
         inner_obj = obj.child_by_field_name("object")
@@ -209,11 +201,38 @@ def _commonjs_export_symbols(node: ts.Node, source: bytes) -> list[Symbol]:
             and _text(inner_obj, source) == "module"
             and _text(inner_prop, source) == "exports"
         ):
-            return [Symbol(name=prop_text, kind="unknown", line=line, exported=True)]
+            return Symbol(name=prop_text, kind="unknown", line=line, exported=True)
     # `exports.foo = ...` -> named export `foo`.
     if obj_text == "exports":
-        return [Symbol(name=prop_text, kind="unknown", line=line, exported=True)]
-    return []
+        return Symbol(name=prop_text, kind="unknown", line=line, exported=True)
+    return None
+
+
+def _commonjs_export_symbols(node: ts.Node, source: bytes) -> list[Symbol]:
+    """Exported Symbol(s) from a top-level CommonJS assignment expression.
+
+    Handles ``module.exports = <expr>`` (a single ``default`` export), and the named
+    forms ``module.exports.<name> = <expr>`` / ``exports.<name> = <expr>`` (one symbol
+    per assigned property name). Chained assignments
+    (``exports.foo = exports.bar = <expr>``) yield one symbol per target in source
+    order. A non-export assignment yields nothing.
+    """
+    if node.type != "expression_statement":
+        return []
+    assign = next((c for c in node.named_children if c.type == "assignment_expression"), None)
+    if assign is None:
+        return []
+    line = _line(node)
+    symbols: list[Symbol] = []
+    # Walk the assignment chain left-to-right, collecting each export target.
+    while assign is not None and assign.type == "assignment_expression":
+        left = assign.child_by_field_name("left")
+        if left is not None:
+            sym = _commonjs_export_target(left, source, line)
+            if sym is not None:
+                symbols.append(sym)
+        assign = assign.child_by_field_name("right")
+    return symbols
 
 
 class TypeScriptAdapter(LanguageAdapter):

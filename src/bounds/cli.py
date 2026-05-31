@@ -65,7 +65,7 @@ def _run(human: bool, fn, ci: bool = False):
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(__version__, prog_name="bounds")
 def main() -> None:
-    """Bounds — AI-native codebase understanding via subsystem boundary manifests."""
+    """Bounds — a verified, CI-enforced contract of what your architecture is supposed to be. Architecture tooling for AI-native codebases — zero LLM inside."""
 
 
 # ===========================================================================

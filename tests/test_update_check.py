@@ -12,13 +12,14 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from bounds import update_check
+from bounds import config, update_check
 from bounds.cli import main
 
 # The exact, stable JSON keys every `check()` result must carry (additive contract).
 _EXPECTED_KEYS = {"current", "latest", "outdated", "is_dev_build", "fix", "checked", "note"}
 
-_FIX = "pipx install --force git+https://github.com/Farzin312/bounds.git"
+# Single-sourced from config (the same constant the command surfaces), so the test can't drift.
+_FIX = config.UPGRADE_INSTALL_CMD
 
 
 def _stub_version(monkeypatch, value: str) -> None:
@@ -248,19 +249,30 @@ def test_structural_command_makes_no_network_call(monkeypatch, py_project):
 
 
 def test_importing_bounds_makes_no_network_call(monkeypatch):
-    """Importing the package / structural modules must not trigger a release check."""
-    import urllib.request
+    """Importing the package / structural modules must not open any network connection.
+
+    Guards at the socket layer (not just ``urllib``) so a future switch to a different transport
+    can't slip a network call into the import path unnoticed, and drops the cached modules first
+    so the imports genuinely re-execute their top-level code.
+    """
+    import socket
+    import sys
+
+    opened = []
 
     def boom(*args, **kwargs):  # pragma: no cover - only runs on a regression
-        raise AssertionError("import path attempted a network request")
+        opened.append(args)
+        raise AssertionError("import path opened a network connection")
 
-    monkeypatch.setattr(urllib.request, "urlopen", boom)
-    # Re-importing already-loaded modules is a no-op, but a fresh import must also be inert.
-    import importlib
+    # The lowest common seam: any outbound socket (urllib, http.client, requests, …) lands here.
+    monkeypatch.setattr(socket.socket, "connect", boom)
 
-    import bounds
-    import bounds.cli
-    import bounds.validate.engine
+    # Drop cached bounds modules so the imports below truly re-run their module-level code.
+    for name in [n for n in sys.modules if n == "bounds" or n.startswith("bounds.")]:
+        del sys.modules[name]
 
-    importlib.reload(bounds)
-    # No network call fired during any import above.
+    import bounds  # noqa: F401
+    import bounds.cli  # noqa: F401
+    import bounds.validate.engine  # noqa: F401
+
+    assert opened == [], "no network connection should be opened during import"

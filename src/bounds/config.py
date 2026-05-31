@@ -23,6 +23,11 @@ STATE_FILE = "state.json"  # legacy JSON cache; read once for auto-migration to 
 SCHEMA_VERSION = "1"
 STATE_VERSION = "1"
 
+# The documented command to refresh a stale git/pipx install. Surfaced by `upgrade-check`
+# and embedded in the generated agent contract; kept here as the single source so the two
+# can never drift.
+UPGRADE_INSTALL_CMD = "pipx install --force git+https://github.com/Farzin312/bounds.git"
+
 # ---- Enumerations ----
 # The four built-in roles are *behavior classes*, not just labels. Developers may define
 # custom role names in root.yaml that `extends`/`type` one of these bases; when no
@@ -64,6 +69,7 @@ DEFAULT_IGNORES = {
     "dist",
     "build",
     "out",
+    "target",  # Rust/Cargo, Maven/Gradle JVM output
     "coverage",
     # JS/TS framework build & tooling dirs
     ".next",

@@ -1,4 +1,4 @@
-"""Bounds — AI-native codebase understanding via subsystem boundary manifests."""
+"""Bounds — a verified, CI-enforced contract of what your architecture is supposed to be. Architecture tooling for AI-native codebases — zero LLM inside."""
 
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _version

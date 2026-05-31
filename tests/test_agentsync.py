@@ -404,15 +404,63 @@ def test_check_flags_unstamped_block_as_stale(tmp_path):
     assert result["fix"] == "bounds agent --sync"
 
 
-def test_check_detects_version_drift_as_stale(monkeypatch, tmp_path):
-    """If the installed bounds version moves past what stamped a file, that file is stale even
-    though its body is byte-identical — the stamp's version no longer matches."""
+def test_check_ignores_version_drift_when_body_matches(monkeypatch, tmp_path):
+    """A bounds version bump alone must NOT mark a file stale: the dev version moves every commit,
+    so staleness keys on the body hash, not the stamped version. A byte-identical body stays ok."""
     root = _mk_root(tmp_path)
     (root / ".claude").mkdir()
     agentsync.run_agent(root, mode="sync", only={"claude"})
 
-    # Simulate a CLI upgrade: the installed version is now newer than the stamp on disk.
+    # Simulate a CLI upgrade: the installed version moves past the stamp on disk, but the contract
+    # body is unchanged — the file is still up to date.
     monkeypatch.setattr(agentsync, "_version", lambda: "99.99.99")
     result = agentsync.run_agent(root, mode="check")
-    assert result["ok"] is False
+    assert result["ok"] is True
+    assert "claude" in result["configured"]
+    assert result["stale"] == []
+
+
+def test_legacy_dedicated_file_without_markers_is_migrated(tmp_path):
+    """A dedicated file written by an older bounds (bounds content, no markers) must be migrated
+    to a stamped block on sync — not skipped — so it never gets stuck reporting 'missing'."""
+    root = _mk_root(tmp_path)
+    legacy = root / ".claude/commands/bounds.md"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("# /bounds\n\nRun `bounds list` to read this project's architecture.\n", "utf-8")
+
+    report = agentsync.run_agent(root, mode="sync", only={"claude"})
+    assert ".claude/commands/bounds.md" in report["updated"]
+    assert ".claude/commands/bounds.md" not in report["skipped_custom"]
+
+    text = legacy.read_text("utf-8")
+    assert "<!-- BOUNDS:START -->" in text and "<!-- BOUNDS:END -->" in text
+    assert text.startswith("---")  # activating front-matter supplied during migration
+
+    result = agentsync.run_agent(root, mode="check", only={"claude"})
+    assert result["ok"] is True
+    assert "claude" in result["configured"]
+
+
+def test_sync_restores_deleted_front_matter_on_dedicated_file(tmp_path):
+    """If a human deletes a dedicated file's activating front-matter, --check flags it stale and
+    --sync restores it — otherwise the tool silently de-registers while reporting healthy."""
+    root = _mk_root(tmp_path)
+    (root / ".claude").mkdir()
+    agentsync.run_agent(root, mode="sync", only={"claude"})
+    target = root / ".claude/commands/bounds.md"
+
+    # Strip the leading front-matter, leaving the managed block intact.
+    text = target.read_text("utf-8")
+    target.write_text(text[text.index("<!-- BOUNDS:START -->"):], "utf-8")
+    assert not target.read_text("utf-8").startswith("---")
+
+    # The block body is still current, but the missing front-matter makes it stale.
+    result = agentsync.run_agent(root, mode="check", only={"claude"})
     assert "claude" in result["stale"]
+
+    # Re-sync restores the front-matter; the file is configured again.
+    report = agentsync.run_agent(root, mode="sync", only={"claude"})
+    assert ".claude/commands/bounds.md" in report["updated"]
+    assert target.read_text("utf-8").startswith("---")
+    result = agentsync.run_agent(root, mode="check", only={"claude"})
+    assert result["ok"] is True

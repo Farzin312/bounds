@@ -22,9 +22,11 @@ Design constraints (enforced repo-wide):
     / ``list`` JSON, nor any cache/validation hash. Everything *around* a managed block (and
     the body apart from the stamp) is deterministic, so a re-sync of unedited files is a no-op.
   * Fail soft: the only fatal condition is genuine misuse (bad ``mode`` / bad agent key),
-    which raises ``BoundsError(E_USAGE)``. A pre-existing hand-written config — whether it has
-    no markers but mentions bounds, or has markers whose body a human edited — is never
-    clobbered; it is reported (``skipped_custom``) and left untouched.
+    which raises ``BoundsError(E_USAGE)``. A *shared* config a human wrote — one with no markers
+    but mentioning bounds, or with markers whose body a human edited — is never clobbered; it is
+    reported (``skipped_custom``) and left untouched. A *dedicated* (bounds-only) file is ours to
+    keep current: a legacy unmarked one is migrated to a stamped block and deleted front-matter
+    is restored.
 
 The three modes:
   * ``sync``   — write ``AGENTS.md`` and the selected agents' pointer files; return what changed.
@@ -38,7 +40,7 @@ import hashlib
 import re
 from pathlib import Path
 
-from . import errors
+from . import config, errors
 
 # ---------------------------------------------------------------------------
 # Canonical contract content (committed in AGENTS.md; the single source of truth)
@@ -53,7 +55,7 @@ CANONICAL_NAME = "AGENTS.md"
 # The full contract. Lives inside AGENTS.md's marked block so it coexists with any other
 # AGENTS.md content a project already keeps. The leading warning line is intentional: it tells
 # a human reader (and any agent) that the block is machine-managed.
-CANONICAL_BODY = """\
+CANONICAL_BODY = f"""\
 > Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agentsync.py`) instead.
 
 ## Bounds — architecture contract for agents
@@ -70,7 +72,7 @@ Bounds models this codebase as subsystem boundary manifests. Query them through 
 ### Source of Truth
 - GitHub is the single source of truth.
 - This repo uses `setuptools-scm` for automatic versioning (no static version string).
-- If the local `bounds` CLI is stale, run: `pipx install --force git+https://github.com/Farzin312/bounds.git`.
+- If the local `bounds` CLI is stale, run: `{config.UPGRADE_INSTALL_CMD}`.
 
 ### Hard rules
 - NEVER read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/manifests/*.yaml`, or `.bounds/root.yaml` directly. The cache is binary; the manifests bypass tree-sitter verification.
@@ -399,7 +401,11 @@ def _sync(root: Path, selected: list[str]) -> dict:
             continue  # covered by the canonical AGENTS.md write
         done.add(agent.path)
         outcome = _upsert_block(
-            root / Path(agent.path), agent.fmt, _expected_body(agent), prefix=_front_matter(agent)
+            root / Path(agent.path),
+            agent.fmt,
+            _expected_body(agent),
+            prefix=_front_matter(agent),
+            dedicated=agent.dedicated,
         )
         _record(outcome, Path(agent.path).as_posix(), created, updated, skipped)
 
@@ -421,19 +427,27 @@ def _record(outcome: str, rel: str, created: set, updated: set, skipped: set) ->
         skipped.add(rel)
 
 
-def _upsert_block(target: Path, fmt: str, body: str, prefix: str = "") -> str:
+def _upsert_block(
+    target: Path, fmt: str, body: str, prefix: str = "", dedicated: bool = False
+) -> str:
     """Insert or refresh our marked+stamped block in ``target``, preserving other content.
 
     ``body`` is the inner content (no markers); this wraps it via :func:`_build_block`.
-    ``prefix`` is content that must lead the file when we *create* it (a dedicated file's
-    front-matter); on an existing file the prefix is left to whatever the file already has.
+    ``prefix`` is the tool-activating front-matter a dedicated file must lead with. ``dedicated``
+    marks a file bounds owns wholly (Claude/Cursor/Windsurf): such a file is always brought up to
+    date — a legacy bounds file with no markers is *migrated* to a stamped block rather than
+    skipped, and front-matter a human deleted is restored so the tool can't silently de-activate.
 
     Returns:
         ``created``        — file did not exist; created with ``prefix`` + our block.
-        ``updated``        — our marked block was inserted into / refreshed in an existing file.
-        ``unchanged``      — file already contained an identical marked block.
-        ``skipped_custom`` — the existing block's body was hand-edited (hash mismatch), or the
-                             file mentions bounds but has no markers at all. Left untouched.
+        ``updated``        — our marked block was inserted/refreshed, or a dedicated file was
+                             migrated / had its front-matter restored.
+        ``unchanged``      — file already held our block with an identical body and (for a
+                             dedicated file) intact front-matter. A differing version stamp
+                             alone does not count as a change.
+        ``skipped_custom`` — a *shared* file whose in-marker body was hand-edited, or which
+                             mentions bounds but has no markers. Left untouched. Dedicated files
+                             are never skipped — we own them.
     """
     start, end = (_YAML_START, _YAML_END) if fmt == _YAML else (_MD_START, _MD_END)
     block = _build_block(fmt, body)
@@ -448,13 +462,30 @@ def _upsert_block(target: Path, fmt: str, body: str, prefix: str = "") -> str:
         current_inner = _extract_inner(existing, start, end)
         if current_inner is not None and _is_hand_edited(current_inner, fmt):
             return "skipped_custom"  # human edited inside the markers — never clobber.
+
+        # Refresh the block, and for a dedicated file restore front-matter a human may have
+        # removed (which would otherwise silently de-activate the tool).
         new = _replace_block(existing, start, end, block)
-        if new == existing:
+        if dedicated:
+            new = _ensure_front_matter(new, prefix)
+
+        # A differing version stamp alone is not a real change: the dev version moves every
+        # commit, so decide on the body (and, for a dedicated file, front-matter presence).
+        current_body = _split_stamp(current_inner, fmt)[2] if current_inner is not None else None
+        if current_body == body and (not dedicated or _has_front_matter(existing)):
             return "unchanged"
         _write_text(target, new)
         return "updated"
 
-    # No markers. If the file already talks about bounds, a human wrote it — don't clobber.
+    # No markers.
+    if dedicated:
+        # We own a dedicated file wholly: migrate legacy bounds content (written before stamping
+        # existed) into a stamped block, keeping any front-matter a human may have tweaked.
+        front = _leading_front_matter(existing) or prefix
+        _write_text(target, (front + "\n" if front else "") + block + "\n")
+        return "updated"
+
+    # Shared file: if it already talks about bounds, a human wrote it — don't clobber.
     if _looks_bounds_authored(existing):
         return "skipped_custom"
 
@@ -462,6 +493,38 @@ def _upsert_block(target: Path, fmt: str, body: str, prefix: str = "") -> str:
     sep = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
     _write_text(target, existing + sep + block + "\n")
     return "updated"
+
+
+def _has_front_matter(text: str) -> bool:
+    """True when ``text`` opens (at line 1) with a ``---``-fenced front-matter block.
+
+    The fence must lead the file for the tool to parse it, so a leading blank line counts as
+    missing — and a re-sync will restore it.
+    """
+    return text.startswith("---")
+
+
+def _leading_front_matter(text: str) -> str:
+    """Return the leading ``---``-fenced front-matter block (trailing newline included), or ``""``."""
+    if not text.startswith("---"):
+        return ""
+    lines = text.split("\n")
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            return "\n".join(lines[: idx + 1]) + "\n"
+    return ""
+
+
+def _ensure_front_matter(text: str, prefix: str) -> str:
+    """Restore a dedicated file's leading front-matter when a human removed it.
+
+    Without it the tool silently de-activates (Claude drops the ``/bounds`` command, Cursor and
+    Windsurf stop auto-applying their rule). An existing front-matter is left untouched so a
+    human's edits to the description survive.
+    """
+    if not prefix or _has_front_matter(text):
+        return text
+    return prefix + "\n" + text
 
 
 def _extract_inner(text: str, start: str, end: str) -> str | None:
@@ -596,11 +659,12 @@ def _check(root: Path, selected: list[str]) -> dict:
 
       * ``missing``    — the config file doesn't exist, or exists but carries no bounds block
                          (no markers / never synced).
-      * ``stale``      — a bounds block is present but its stamped version+hash no longer match
-                         what the installed CLI would generate (the contract moved on, or the
-                         file was synced by an older bounds). Refresh with ``bounds agent --sync``.
-      * ``configured`` — a bounds block is present and its stamp matches the current expected
-                         body exactly.
+      * ``stale``      — a bounds block is present but its content no longer matches what the
+                         installed CLI would generate (the contract moved on, the body was
+                         hand-edited, or — for a dedicated file — its front-matter was removed).
+                         Refresh with ``bounds agent --sync``.
+      * ``configured`` — a bounds block is present and its stamped hash matches the current
+                         expected body exactly.
 
     Returns ``{"ok": bool, "missing": [...], "stale": [...], "configured": [...], "fix": "..."}``
     with sorted key lists; ``ok`` is True iff nothing is missing *and* nothing is stale. The
@@ -654,15 +718,22 @@ def _config_status(root: Path, agent: "_Agent") -> str:
     inner = _extract_inner(text, start, end)
     if inner is None:
         return "missing"
-    version, recorded, body = _split_stamp(inner, agent.fmt)
+    _version_stamp, recorded, body = _split_stamp(inner, agent.fmt)
 
     expected_body = _expected_body(agent)
     expected_hash = _body_hash(expected_body)
-    # Stale if: never stamped, stamped by a different version, the recorded hash doesn't match
-    # the current expected body, or the on-disk body itself drifted from its own stamp.
-    if recorded is None or version != _version() or recorded != expected_hash:
+    # Stale if: never stamped, the recorded hash doesn't match the current expected body, or the
+    # on-disk body itself drifted from its own stamp. The version string is deliberately *not*
+    # part of staleness — it moves every commit (setuptools-scm dev version), so keying on it
+    # would flag every freshly-committed file as stale; the body hash already catches real
+    # contract changes.
+    if recorded is None or recorded != expected_hash:
         return "stale"
     if _body_hash(body) != recorded:
+        return "stale"
+    # A dedicated file whose tool-activating front-matter was removed is effectively
+    # de-registered even though its block is current — flag it so a re-sync restores it.
+    if agent.dedicated and _front_matter(agent) and not _has_front_matter(text):
         return "stale"
     return "configured"
 
