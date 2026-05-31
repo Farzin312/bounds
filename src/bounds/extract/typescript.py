@@ -82,6 +82,9 @@ def _decl_symbols(decl: ts.Node, source: bytes, line: int, exported: bool) -> li
     if t in _DECL_KIND:
         name_node = decl.child_by_field_name("name")
         name = _text(name_node, source) if name_node is not None else "default"
+        table_name = _typeorm_table_name(decl, name, source) if t in ("class_declaration", "abstract_class_declaration") else None
+        if table_name is not None:
+            return [Symbol(name=table_name, kind="table", line=line, exported=exported, metadata={"model": name})]
         return [Symbol(name=name, kind=_DECL_KIND[t], line=line, exported=exported)]
     if t in ("lexical_declaration", "variable_declaration"):
         out: list[Symbol] = []
@@ -91,11 +94,49 @@ def _decl_symbols(decl: ts.Node, source: bytes, line: int, exported: bool) -> li
             name_node = declarator.child_by_field_name("name")
             if name_node is None:
                 continue
-            out.append(
-                Symbol(name=_text(name_node, source), kind="const", line=line, exported=exported)
-            )
+            symbol_name = _text(name_node, source)
+            table_name = _drizzle_table_name(declarator, symbol_name, source)
+            if table_name is not None:
+                out.append(Symbol(name=table_name, kind="table", line=line, exported=exported, metadata={"model": symbol_name}))
+            else:
+                out.append(
+                    Symbol(name=symbol_name, kind="const", line=line, exported=exported)
+                )
         return out
     return []
+
+
+def _call_name(call: ts.Node, source: bytes) -> str | None:
+    fn = call.child_by_field_name("function")
+    return _text(fn, source) if fn is not None else None
+
+
+def _first_string_arg(call: ts.Node, source: bytes) -> str | None:
+    args = call.child_by_field_name("arguments")
+    if args is None:
+        return None
+    first = next(iter(args.named_children), None)
+    return _string_value(first, source) if first is not None and first.type == "string" else None
+
+
+def _drizzle_table_name(declarator: ts.Node, fallback: str, source: bytes) -> str | None:
+    value = declarator.child_by_field_name("value")
+    if value is None or value.type != "call_expression":
+        return None
+    if _call_name(value, source) not in {"pgTable", "sqliteTable", "mysqlTable"}:
+        return None
+    return _first_string_arg(value, source) or fallback
+
+
+def _typeorm_table_name(decl: ts.Node, fallback: str, source: bytes) -> str | None:
+    for child in decl.children:
+        if child.type != "decorator":
+            continue
+        call = next((c for c in child.named_children if c.type == "call_expression"), None)
+        if call is None or _call_name(call, source) != "Entity":
+            continue
+        return _first_string_arg(call, source) or fallback
+    return None
 
 
 def _export_clause_symbols(clause: ts.Node, source: bytes, line: int) -> list[Symbol]:
@@ -316,6 +357,13 @@ class TypeScriptAdapter(LanguageAdapter):
                         )
                     )
             elif ct in _DECL_KIND or ct in ("lexical_declaration", "variable_declaration"):
+                if ct in ("class_declaration", "abstract_class_declaration"):
+                    name_node = child.child_by_field_name("name")
+                    class_name = _text(name_node, source) if name_node is not None else "default"
+                    table_name = _typeorm_table_name(node, class_name, source)
+                    if table_name is not None:
+                        out.append(Symbol(name=table_name, kind="table", line=line, exported=True, metadata={"model": class_name}))
+                        continue
                 out.extend(_decl_symbols(child, source, line, exported=True))
             elif ct == "string":
                 continue  # handled as source_string above

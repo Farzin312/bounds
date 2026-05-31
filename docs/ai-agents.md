@@ -11,9 +11,10 @@
 Bounds is a plain CLI that emits JSON, so **any agent that can run a shell command can use it
 today**. The instruction is the same regardless of agent:
 
-> Prefer `bounds describe <name>` / `bounds list` over reading raw source to understand
-> architecture. Output is JSON by default — parse it. Run `bounds validate --quick` after edits
-> and treat a non-`fresh` `validation_status` as a signal to update the manifests.
+> Start with `bounds list`, then prefer `bounds describe <name>` over reading raw source or
+> migration history to understand architecture. Use `bounds impact <name>` before changing a
+> subsystem interface or table. Output is JSON by default — parse it. Run `bounds validate --quick`
+> after edits and treat a non-`fresh` `validation_status` as a signal to update the manifests.
 
 ## Compliance is advisory, not enforced
 
@@ -37,8 +38,8 @@ loop (pre-commit hooks + CI), see [./team-workflow.md](./team-workflow.md).
 
 No manual copy-paste. `bounds agent --sync` writes the canonical contract into `AGENTS.md` (the
 cross-ecosystem standard agents already read) plus a short pointer file for **eight** coding agents —
-telling each to query `bounds describe` / `bounds list` instead of reading raw source, and to run
-`bounds validate --quick` after edits:
+telling each to query `bounds list`, `bounds describe`, and `bounds impact` before broad source
+searches, and to run `bounds validate --quick` after edits:
 
 | Agent | Config file written |
 |-------|---------------------|
@@ -74,6 +75,32 @@ bounds agent --sync --claude   # scope --sync/--check to one agent (--codex, --c
 `bounds agent --sync` is the single supported path. The canonical contract lives in
 [`AGENTS.md`](../AGENTS.md) (committed; the standard filename agents already read) and every per-tool
 pointer is **generated from it**, so there is no template to copy or keep in sync.
+
+## Manual copy block
+
+Use this only when you cannot run `bounds agent --sync` yet, or when you want to paste the guidance
+into an existing `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor rule, or Copilot instruction file
+without letting Bounds write files. Add it under your existing project instructions; do not replace
+your current rules.
+
+```md
+## Bounds workflow for AI agents
+
+This repo uses Bounds for architecture context. Query architecture through the CLI before broad
+source search:
+
+- Run `bounds list` first to see the subsystem map.
+- Run `bounds describe <name>` to read one subsystem's verified public API/table catalog.
+- Run `bounds impact <name>` before changing a subsystem interface or table.
+- Run `bounds validate --quick` after edits and fix drift before expanding context.
+
+Do not read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/root.yaml`, or
+`.bounds/manifests/*.yaml` directly. The CLI is the API: raw manifests bypass tree-sitter
+verification, and the cache is a binary implementation detail.
+
+If commands like `impact`, `discover`, or `agent` are missing, the installed CLI is stale. Refresh
+with `bounds upgrade` or, from a local clone, `bounds upgrade --local .`.
+```
 
 ## Roadmap: MCP server
 

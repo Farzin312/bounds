@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bounds-cli"
 dynamic = ["version"]
-description = "A verified, CI-enforced architecture contract for AI-native codebases — zero-LLM structural validation via tree-sitter."
+description = "AI-first architecture context for coding agents — verified contracts, CI drift gates, zero-LLM structural validation."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -34,6 +34,7 @@ dependencies = [
     "packaging>=23.0",
     "tree-sitter>=0.25.2,<0.26",
     "tree-sitter-python>=0.25.0",
+    "tree-sitter-sql>=0.3.11,<0.4",
     "tree-sitter-typescript>=0.23.2",
 ]
 

@@ -71,6 +71,21 @@ def test_python_imports():
     assert {"c", "d"} <= set(ab.names)
 
 
+def test_python_orm_model_exports_table_name():
+    src = b"""from django.db import models
+
+class User(models.Model):
+    class Meta:
+        db_table = "users"
+
+class Account(Base):
+    __tablename__ = "accounts"
+"""
+    res = get_adapter("models.py").extract("models.py", src)
+    tables = {s.name: s.metadata.get("model") for s in res.symbols if s.kind == "table"}
+    assert tables == {"users": "User", "accounts": "Account"}
+
+
 # ---- TypeScript adapter ----
 def test_typescript_adapter_resolves_ts_and_tsx():
     assert get_adapter("auth.ts").language_name == "typescript"
@@ -100,6 +115,31 @@ def test_typescript_imports():
     assert "../database" in modules
     db = next(i for i in res.imports if i.module == "../database")
     assert {"findUser", "createUser"} <= set(db.names)
+
+
+def test_typescript_orm_exports_table_name():
+    src = b"""import { pgTable } from "drizzle-orm/pg-core";
+export const users = pgTable("users", {});
+
+@Entity("accounts")
+export class Account {}
+"""
+    res = get_adapter("schema.ts").extract("schema.ts", src)
+    tables = {s.name: s.metadata.get("model") for s in res.symbols if s.kind == "table"}
+    assert tables == {"users": "users", "accounts": "Account"}
+
+
+def test_sql_adapter_extracts_ddl_operations():
+    src = b"""CREATE TABLE users (id integer primary key, email text);
+ALTER TABLE users ADD COLUMN name text;
+ALTER TABLE users RENAME COLUMN name TO full_name;
+"""
+    res = get_adapter("001_init.sql").extract("001_init.sql", src)
+    assert res.language == "sql"
+    ops = [(s.kind, s.name, s.metadata.get("schema_op")) for s in res.symbols]
+    assert ("table", "users", "create_table") in ops
+    assert ("column", "users.name", "add_column") in ops
+    assert ("rename", "users.name", "rename_column") in ops
 
 
 # ---- TypeScript/JS: CommonJS ----
@@ -184,6 +224,7 @@ def test_supported_extensions():
     assert ".py" in exts
     assert ".ts" in exts
     assert ".tsx" in exts
+    assert ".sql" in exts
 
 
 def test_unsupported_extension_returns_none():

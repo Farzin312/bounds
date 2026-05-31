@@ -46,6 +46,8 @@ def emit(payload: dict, human: bool, stream=None, ci: bool = False) -> None:
         stream.write(_render_where_human(payload))
     elif isinstance(payload, dict) and {"current", "checked", "outdated"} <= payload.keys():
         stream.write(_render_upgrade_check_human(payload))
+    elif isinstance(payload, dict) and {"command", "dry_run", "source"} <= payload.keys():
+        stream.write(_render_upgrade_human(payload))
     elif isinstance(payload, dict) and "namespace" in payload and "subsystems" in payload:
         stream.write(_render_namespace_human(payload))
     elif isinstance(payload, dict) and "name" in payload and "role" in payload:
@@ -109,6 +111,17 @@ def _render_upgrade_check_human(payload: dict) -> str:
     """
     note = payload.get("note", "")
     return note or "upgrade check complete"
+
+
+def _render_upgrade_human(payload: dict) -> str:
+    """Render a ``bounds upgrade`` result from the same JSON fields."""
+    command = " ".join(str(p) for p in payload.get("command", []))
+    lines = [payload.get("note") or "upgrade complete", f"command: {command}"]
+    if not payload.get("ok", True):
+        stderr = payload.get("stderr", "")
+        if stderr:
+            lines.append(f"stderr: {stderr}")
+    return "\n".join(lines)
 
 
 def _render_namespace_human(payload: dict) -> str:
@@ -262,9 +275,21 @@ def _render_subsystem_human(payload: dict) -> str:
                 tag += " [entry-point]"
             loc = f"  {file}" if file else ""
             lines.append(f"  - {name} ({kind}){loc}{tag}")
+            columns = e.get("columns", [])
+            if columns:
+                lines.append(f"    columns: {', '.join(columns)}")
     else:
         lines.append("")
         lines.append("exposes:    (none)")
+
+    tables = payload.get("tables", [])
+    if tables:
+        lines.append("")
+        lines.append(f"tables ({len(tables)}):")
+        for table in tables:
+            columns = table.get("columns", [])
+            detail = f" [{', '.join(columns)}]" if columns else ""
+            lines.append(f"  - {table.get('name', '?')}{detail}")
 
     consumes = payload.get("consumes", [])
     if consumes:

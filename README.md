@@ -2,15 +2,16 @@
 
 # Bounds
 
-### A verified, CI-enforced contract of what your architecture is *supposed* to be
+### Verified architecture context for AI coding agents
 
-**Architecture tooling for AI-native codebases — zero LLM inside.**
+**Give agents the map before they search. Catch drift in CI. Zero LLM on structural paths.**
 
 <img src="assets/demo.svg" alt="Terminal session: Bounds in four commands — discover manifests, describe a subsystem's verified contract, see a change's blast radius, validate for drift" width="760">
 
-**Bounds** turns each subsystem's intended boundary — its public surface and its cross-module
-dependencies — into a tiny YAML contract, then uses **tree-sitter (zero LLM)** to verify that
-contract against your real source and **fail the build the moment they diverge**.
+**Bounds** turns each subsystem's intended boundary — its public surface, tables, and cross-module
+dependencies — into a tiny contract that AI agents can query before reading source. Then it uses
+**tree-sitter (zero LLM)** to verify that contract against your real code and **fail the build when
+the two diverge**.
 
 > *A code graph tells your agent what the code **is**; Bounds tells it what the code is **supposed
 > to be** — and fails the build when those diverge. Use a graph to explore, use Bounds to enforce.*
@@ -28,11 +29,9 @@ contract against your real source and **fail the build the moment they diverge**
 
 ---
 
-> **Who it's for.** A 3–8 person team running multiple coding agents in parallel on a mature
-> (50k+ LOC) Python/TypeScript service that's already been burned by agent-driven architectural
-> drift. Agents made drift *fast* — no single reviewer can hold the whole shape in their head
-> anymore. Bounds gives that architecture a verified contract and a CI gate that fails when the
-> code drifts from it.
+> **Who it's for.** A team using coding agents on a mature codebase where "just read the repo" is
+> expensive and unreliable. Bounds gives agents a small verified map first, then gives reviewers and
+> CI a deterministic way to catch architectural drift.
 
 ## The problem
 
@@ -54,20 +53,20 @@ machine can reason about it **deterministically**.
 Bounds maintains a hidden `.bounds/` directory of tiny YAML **subsystem manifests** and uses
 tree-sitter to validate them against your real source, in both directions.
 
-- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`.
+- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`; schema subsystems include the current table catalog folded from migrations.
 - **`bounds validate`** — catch drift the moment your code's exports stop matching the manifest. Six structural checks, zero LLM.
 - **`bounds validate --quick`** — git-diff incremental validation, safe for every commit.
 - **`bounds preflight`** — run all the pre-PR checks at once: drift, boundary violations, broken contracts, dependency cycles, orphaned subsystems, and impact.
-- **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface changes.
+- **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface or a table changes.
 - **`bounds discover` / `bounds calibrate`** — set up manifests for a repo that has none in one command, then keep them honest against what tree-sitter actually finds in your source.
 - **`bounds agent --sync`** — wire Bounds into eight coding agents (Claude Code, Codex, Cursor, …) with one command.
 - **Deterministic** — same input, same byte-stable output. No network, no flakiness.
 
 ## Why use it
 
-- **Catch architecture drift in CI before it merges** — boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows.
-- **Give agents a small verified contract instead of source** — one cheap CLI call returns a tree-sitter-confirmed public surface (a few hundred tokens for a small subsystem on this repo; cost scales with how many symbols it *exposes*, not how big it is), not a dozen files an agent has to read and guess at.
+- **Give agents a small verified contract instead of source** — one cheap CLI call returns a tree-sitter-confirmed public surface (a few hundred tokens for a small subsystem on this repo; cost scales with how many symbols/tables it *exposes*, not how big it is), not a dozen files an agent has to read and guess at.
 - **Show blast radius before a risky change** — `bounds impact` returns the transitive consumer set and the interfaces each one relies on, so you know the reach before you write the edit.
+- **Catch architecture drift in CI before it merges** — boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows.
 
 See [docs/why-bounds.md](docs/why-bounds.md) for the full rationale.
 
@@ -81,7 +80,9 @@ pipx install "git+https://github.com/Farzin312/bounds.git"
 
 cd your-project
 bounds discover --apply      # auto-generate root.yaml + manifests from your source
+bounds agent --sync          # teach Claude/Codex/Cursor/etc. to query Bounds first
 bounds describe auth         # one subsystem's verified surface, as JSON
+bounds impact users          # if users is a table/interface, see declared consumers before changing it
 bounds validate --quick      # fast incremental drift check
 bounds upgrade-check         # is a newer release available?
 ```
@@ -89,6 +90,9 @@ bounds upgrade-check         # is a newer release available?
 `bounds discover` groups source by directory, tree-sitter-extracts each subsystem's `exposes`, infers
 `consumes` from the import graph, and never overwrites existing manifests. See
 [docs/install.md](docs/install.md) for all install channels.
+
+If `bounds --help` does not list `impact`, `discover`, and `agent`, your installed CLI is stale; run
+`bounds upgrade` or see [docs/install.md](docs/install.md#verify).
 
 > `.bounds/` is hidden and **only** touched by the `bounds` CLI. Its extraction cache is a binary
 > SQLite file (`.bounds/cache.db`, **gitignored and regenerated** — never committed) so a tool that
@@ -114,8 +118,8 @@ measured numbers (one repo, one data point), the scaling argument, and the conte
 
 ## Languages & platforms
 
-**Python + TypeScript/JavaScript** are tree-sitter-verified today; runs on **Linux, macOS, and
-Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on the roadmap. See
+**Python, TypeScript/JavaScript, and SQL migrations** are tree-sitter-verified today; runs on
+**Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on the roadmap. See
 [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
 
 ---
@@ -123,7 +127,7 @@ Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on the roadmap. 
 ## Documentation
 
 **Start here**
-- [why-bounds.md](docs/why-bounds.md) — the rationale: drift control, token-lean retrieval, blast radius.
+- [why-bounds.md](docs/why-bounds.md) — the rationale: token-lean agent context, blast radius, drift control.
 - [team-workflow.md](docs/team-workflow.md) — how a team adopts Bounds day to day.
 - [use-cases.md](docs/use-cases.md) — concrete workflows: pre-PR safety, onboarding, CI enforcement.
 

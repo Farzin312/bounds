@@ -45,6 +45,19 @@ against a git ref.
 bounds --help    # verify the install
 ```
 
+If `bounds --help` does not show commands such as `impact`, `discover`, and `agent`, your PATH is
+pointing at an old install. Refresh it explicitly:
+
+```bash
+bounds upgrade
+```
+
+From a local development clone, use the editable local build:
+
+```bash
+bounds upgrade --local .
+```
+
 ---
 
 ## Install channels
@@ -100,6 +113,7 @@ bounds init --subsystem auth        # add .bounds/manifests/auth.yaml
 bounds list                         # whole-system map: every subsystem  (JSON)
 bounds describe auth                # one subsystem's verified surface    (JSON)
 bounds impact auth                  # who breaks if auth's surface changes
+bounds impact users                 # who declared they consume the users table/interface
 bounds validate --quick             # fast incremental check              (JSON)
 bounds validate --human             # same data, human-readable
 bounds preflight                    # 6 pre-PR checks, blocking

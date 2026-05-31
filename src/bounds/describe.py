@@ -19,9 +19,10 @@ from .extract import scan, supported_extensions
 from .ignore import IgnoreMatcher
 from .models import SubsystemCompact, ValidationReport
 from .validate import engine as validate_engine
+from .validate.schema import schema_catalog
 
 
-def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], list[str], list[str]]:
+def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], list[str], list[str], list[dict]]:
     """Tier-1 extraction for one subsystem.
 
     Returns ``(exported_symbol_name -> owning_file, owned_files, unparsed_files)``. Every file the
@@ -35,6 +36,8 @@ def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], li
     """
     exts = supported_extensions()
     extracted_symbols: dict[str, str] = {}  # symbol_name -> owning file (rel posix)
+    extracts = {}
+    file_owner = {}
     owned_files: list[str] = []
     unparsed_files: list[str] = []
 
@@ -44,13 +47,20 @@ def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], li
             owned_files.append(rel)
         result, _ = scan.extract_file(root, rel)
         if result is not None:
+            extracts[rel] = result
+            file_owner[rel] = sub.name
             for sym in result.symbols:
                 if sym.exported:
                     extracted_symbols[sym.name] = rel
         else:  # supported source file that didn't yield a result → a genuine extraction failure
             unparsed_files.append(rel)
 
-    return extracted_symbols, owned_files, unparsed_files
+    catalog = schema_catalog(sub.name, extracts, file_owner)
+    for table in catalog:
+        files = table.get("files", [])
+        if files:
+            extracted_symbols[str(table["name"])] = str(files[0])
+    return extracted_symbols, owned_files, unparsed_files, catalog
 
 
 def describe_one(
@@ -72,12 +82,16 @@ def describe_one(
     so an agent sees a symbol lives in a bootstrap file.
     """
     payload = sub.to_dict()
-    extracted_symbols, owned_files, unparsed_files = extract_owned(root, sub)
+    extracted_symbols, owned_files, unparsed_files, catalog = extract_owned(root, sub)
     for expose in payload.get("exposes", []):
         ename = expose.get("name", "")
         if ename in extracted_symbols:
             expose["file"] = extracted_symbols[ename]
             expose["verified"] = True
+            if expose.get("kind") == "table":
+                table = next((t for t in catalog if t["name"] == ename), None)
+                if table is not None:
+                    expose["columns"] = table["columns"]
             if entry_matcher and entry_matcher.matches(expose["file"]):
                 expose["entry_point"] = True
         else:
@@ -91,6 +105,8 @@ def describe_one(
     # agent never mistakes an unreadable/oversized file for "symbol absent from source".
     if unparsed_files:
         payload["unparsed_files"] = sorted(unparsed_files)
+    if catalog:
+        payload["tables"] = catalog
     payload["validation_status"] = subsystem_status(report, sub.name)
     payload["project_status"] = project_status(report)
     if deep:

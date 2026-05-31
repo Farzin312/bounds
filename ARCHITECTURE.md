@@ -60,6 +60,7 @@ bounds/
 │       │   ├── registry.py        # extension/lang → adapter resolution
 │       │   ├── scan.py            # shared filesystem→extraction helpers (discover/calibrate)
 │       │   ├── python.py          # PythonAdapter
+│       │   ├── sql.py             # SqlAdapter (.sql DDL statements)
 │       │   └── typescript.py      # TypeScriptAdapter (.ts/.tsx/.js/.jsx)
 │       ├── cache/
 │       │   ├── __init__.py
@@ -68,6 +69,7 @@ bounds/
 │           ├── __init__.py
 │           ├── engine.py          # mode dispatch + orchestration
 │           ├── propagation.py     # reference propagation (consumers of changed providers) + transitive_consumers
+│           ├── schema.py          # deterministic per-subsystem SQL migration fold
 │           └── checks.py          # the 6 structural checks + import resolution
 └── tests/                         # 10 files (the full suite; CI reports the live count)
     ├── conftest.py
@@ -151,8 +153,8 @@ All dataclasses use `@dataclass(slots=True)` where practical and provide `to_dic
 # ---- Manifest tier (declared) ----
 @dataclass
 class Interface:
-    name: str
-    kind: str = "unknown"          # function|class|const|type|interface|variable|unknown
+    name: str                      # exported symbol or table name
+    kind: str = "unknown"          # function|class|const|type|interface|variable|table|unknown
     signature: str | None = None   # Tier-3 (LLM) enrichment; None in MVP
     internal: bool = False         # exempt this expose from calibration add/remove (deliberately private)
 
@@ -201,9 +203,10 @@ class RootManifest:
 @dataclass
 class Symbol:
     name: str
-    kind: str                      # function|class|const|type|interface|variable
+    kind: str                      # function|class|const|type|interface|variable|table|column|drop|rename
     line: int
     exported: bool = True
+    metadata: dict = {}            # additive adapter facts (e.g. SQL op/table/column, ORM model)
 
 @dataclass
 class ImportRef:
@@ -486,22 +489,39 @@ def extract_file(project_root: Path, rel: str) -> tuple[ExtractResult | None, bo
 
 ### `describe.py` — Tier-1 + Tier-2 `describe` assembly
 ```python
-def extract_owned(root, sub) -> tuple[dict[str, str], list[str], list[str]]
-    # (exported symbol -> owning file, owned files, unparsed files) via the shared scan helpers.
+def extract_owned(root, sub) -> tuple[dict[str, str], list[str], list[str], list[dict]]
+    # (exported symbol/table -> owning file, owned files, unparsed files, table catalog)
+    # via the shared scan helpers + deterministic SQL fold.
 def describe_one(root, sub, deep, report, entry_matcher) -> dict
     # merged payload: SubsystemCompact.to_dict() + exposes[*].verified/file/entry_point, files,
-    # entry_points, unparsed_files?, validation_status (subsystem-scoped), project_status, semantic? (deep).
+    # entry_points, unparsed_files?, tables?, validation_status (subsystem-scoped),
+    # project_status, semantic? (deep).
 def status_report(root) -> ValidationReport | None   # one shared read-only quick run backing status
 def subsystem_status(report, name) -> str            # fresh|stale|unresolved, scoped to one subsystem
 def project_status(report) -> str                    # the project-wide status rollup
 # Kept out of cli.py so command modules stay arg-parse + one go() closure (no business logic).
 ```
 
+### `validate/schema.py` — deterministic SQL migration fold
+```python
+def _fold_subsystem_schema(subsystem, extracts, file_owner) -> dict[str, _TableState]
+    # order the subsystem's .sql files by filename prefix/name (never mtime), then apply
+    # create/drop/rename table and add/drop/rename column operations to produce the current catalog.
+def schema_catalog(subsystem, extracts, file_owner) -> list[dict]
+    # [{name, kind:"table", columns:[...], files:[...]}] for describe.
+```
+
+The SQL adapter is intentionally per-file and dumb: it emits raw DDL operation symbols with
+metadata, so cache validity remains content-addressed per migration. The fold is subsystem-level
+because the current schema is an ordered reduction across migration files. Query-string references
+are not verified edges and must never produce `E_BOUNDARY_VIOLATION`.
+
 ### `locate.py` — `where` + `impact` queries
 ```python
 def run_impact(project_root, name, verify=False) -> dict
-    # blast radius: declared-consumes count (an honest lower bound); --verify adds the resolved
-    # undeclared_consumer_edges. Raises E_SUBSYSTEM_NOT_FOUND for an unknown subsystem.
+    # subsystem blast radius: declared-consumes count (an honest lower bound); --verify adds the
+    # resolved undeclared_consumer_edges. If name is not a subsystem but is an exposed interface/table,
+    # returns declared consumers of that interface. Raises E_SUBSYSTEM_NOT_FOUND when neither exists.
 def run_where(project_root, symbol, prefix=False) -> dict
     # locate a symbol's definition(s) + owning subsystem (fresh extraction; Python + TS).
 # Kept out of cli.py (same reason as describe.py); reuses scan.extract_project + the one resolver.
@@ -627,9 +647,9 @@ consumes:
 
 ## 7. The 6 checks (logic)
 
-1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files. Declared-but-missing → drift (`error`). Undeclared-but-exported (a symbol in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (bidirectional drift; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). The `info` severity never blocks, so exit codes are unchanged. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
+1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files plus any surviving tables from the subsystem's SQL migration fold. Declared-but-missing → drift (`error`). Undeclared-but-exported (a symbol/table in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (bidirectional drift; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). The `info` severity never blocks, so exit codes are unchanged. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
 2. **Boundary compliance** (`E_BOUNDARY_VIOLATION`, error): for each import in subsystem A resolving to a file owned by subsystem B, the imported names must all be in B's `exposes`. Importing a non-exposed (internal) symbol → violation. Resolution: match import `module` against B's file paths (suffix/relative resolution). Fix: "import only B's exposed interfaces, or add `<name>` to B.exposes".
-3. **Contract compliance** (`E_CONTRACT_MISSING_EXPORT`, error): for each `consumes` entry, every listed interface must appear in the provider's `exposes`. Missing → contract break. Fix: "provider `<B>` does not expose `<iface>`; update consumer or provider".
+3. **Contract compliance** (`E_CONTRACT_MISSING_EXPORT`, error): for each `consumes` entry, every listed interface must appear in the provider's `exposes`. For schema contracts, `table.column` is valid only when `table` is exposed and the deterministic SQL fold still contains `column`. Missing → contract break. Fix: "provider `<B>` does not expose `<iface>`; update consumer or provider".
 4. **Cross-subsystem impact** (`E_STALE_INTERFACE`, error/stale): a provider's `structure_hash` changed (it's in `dirty`) and it has consumers (`consumed_by`) → those consumer interfaces may be stale. Emits one issue per affected consumer. Fix: "re-validate consumer `<C>`; provider `<B>` interface surface changed".
 5. **Cycle detection** (`E_CYCLE_DETECTED`, error): build the directed graph from `consumes`; DFS for back-edges; report each cycle as a chain `A → B → C → A`. Fix: "break the dependency cycle; introduce an interface/inversion".
 6. **Orphan detection** (`E_ORPHAN_EXPORT`, warning): an exposed interface that appears in no subsystem's `consumes`, where the owning subsystem's role does **not** carry `orphan_exposes` (the `service` base, and any custom role extending it, legitimately expose unconsumed surface — resolved via `RootManifest.role_registry()`). Fix: "interface `<x>` of `<A>` is consumed by no one; consider removing or marking entrypoint".
@@ -654,6 +674,8 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_MANIFEST_NOT_FOUND` | fatal | no `.bounds/` (or legacy `.compact/`) found |
 | `E_MANIFEST_PARSE_ERROR` | fatal | YAML parse failure |
 | `E_SCHEMA_INVALID` | error | manifest missing required keys / bad enum |
+| `E_SCHEMA_NO_ORDER` | warning | SQL migrations could not be totally ordered; fail soft |
+| `E_SCHEMA_UNPARSED` | warning | SQL schema source could not be folded; fail soft |
 | `E_SUBSYSTEM_NOT_FOUND` | fatal | unknown subsystem (raised by `describe <name>`, `impact <name>`, `calibrate --subsystem`) |
 | `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do) |
 | `E_UNSUPPORTED_LANGUAGE` | warning | file extension has no adapter (skipped) |
@@ -676,7 +698,8 @@ bounds list [--namespace NS]       → {project, subsystems:[{name, role, critic
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name>             → SubsystemCompact.to_dict() + {files, entry_points, validation_status,
                                        project_status, unparsed_files?, exposes[*].verified, exposes[*].file?,
-                                       exposes[*].entry_point?}
+                                       exposes[*].entry_point?, exposes[*].columns?, tables?}
+                                       # tables?: [{name, kind:"table", columns:[...], files:[...]}]
                                        # validation_status is SUBSYSTEM-SCOPED (this subsystem's own issues);
                                        # project_status is the project-wide rollup, kept additively.
                                        # unparsed_files (present only when non-empty): owned source files
@@ -692,6 +715,9 @@ bounds overview                    → {project, subsystems, roles:{...}, critic
 bounds impact <name> [--verify]    → {subsystem, criticality, direct_consumers, transitive_consumers,
                                        blast_radius:int, basis:"declared-consumes",
                                        blast_radius_is_lower_bound:true, note, consumers:[{name,via,interfaces}]}
+                                    OR {interface, providers:[...], direct_consumers, transitive_consumers,
+                                       blast_radius:int, basis:"declared-consumes-interface",
+                                       blast_radius_is_lower_bound:true, consumers:[{name,provider,via,interfaces}]}
                                        # blast_radius counts ONLY declared `consumes` edges (a lower bound).
                                        # --verify adds undeclared_consumer_edges:[{consumer, files:[...]}] — real
                                        # importers of <name> with no declared consume (resolved import graph; off

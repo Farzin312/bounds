@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .base import LanguageAdapter
 from .python import PythonAdapter
+from .sql import SqlAdapter
 from .typescript import TypeScriptAdapter
 
 # extension -> singleton adapter instance; built on first use.
@@ -26,7 +27,7 @@ def _ensure_built() -> None:
         return
     by_ext: dict[str, LanguageAdapter] = {}
     by_lang: dict[str, LanguageAdapter] = {}
-    for adapter in (PythonAdapter(), TypeScriptAdapter()):
+    for adapter in (PythonAdapter(), TypeScriptAdapter(), SqlAdapter()):
         by_lang[adapter.language_name] = adapter
         for ext in adapter.extensions:
             by_ext[ext] = adapter

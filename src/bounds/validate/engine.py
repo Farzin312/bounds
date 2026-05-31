@@ -128,6 +128,7 @@ def run(
     dirty: set[str] = set()
     parsed = 0
     cache_hits = 0
+    state_changed = False
 
     for rel, abs_path, owner in files:
         adapter = get_adapter(rel)
@@ -138,7 +139,9 @@ def run(
         # Quick mode: a file git says is unchanged is trusted from cache without hashing/parsing.
         if mode == "quick" and rel not in changed_rel and prev is not None and not _oversized(abs_path):
             extracts[rel] = prev.to_result()
-            prev.subsystem = owner  # keep the cached owner current (partial reads)
+            if prev.subsystem != owner:
+                prev.subsystem = owner  # keep the cached owner current (partial reads)
+                state_changed = True
             cache_hits += 1
             continue
 
@@ -174,7 +177,9 @@ def run(
         chash = content_hash(source)
         if prev is not None and prev.content_hash == chash:
             extracts[rel] = prev.to_result()
-            prev.subsystem = owner  # keep the cached owner current (partial reads)
+            if prev.subsystem != owner:
+                prev.subsystem = owner  # keep the cached owner current (partial reads)
+                state_changed = True
             cache_hits += 1
             continue
 
@@ -195,10 +200,14 @@ def run(
         if not was_cold and (prev is None or prev.structure_hash != result.structure_hash):
             dirty.add(owner)
         state.put(result, owner)
+        state_changed = True
         extracts[rel] = result
 
+    before_prune = set(state.files)
     state.prune(set(file_owner))
-    if persist:
+    if set(state.files) != before_prune:
+        state_changed = True
+    if persist and state_changed:
         try:
             cache_store.save_state(project_root, state)
         except (OSError, sqlite3.Error):

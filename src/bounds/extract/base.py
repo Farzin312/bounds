@@ -19,6 +19,8 @@ from __future__ import annotations
 import hashlib
 from abc import ABC, abstractmethod
 
+import json
+
 from ..models import ExtractResult, ImportRef, Symbol
 
 
@@ -54,7 +56,10 @@ def structure_hash(symbols: list[Symbol], imports: list[ImportRef]) -> str:
     Deterministic and body-insensitive: reordering declarations or editing
     function bodies does not change the digest.
     """
-    sym_lines = sorted(f"sym:{s.kind}:{s.name}" for s in symbols)
+    sym_lines = sorted(
+        f"sym:{s.kind}:{s.name}:{json.dumps(s.metadata, sort_keys=True, separators=(',', ':'))}"
+        for s in symbols
+    )
     imp_lines = sorted(f"imp:{i.module}" for i in imports)
     canonical = "\n".join(sym_lines + imp_lines)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

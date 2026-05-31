@@ -28,11 +28,10 @@ def run_impact(project_root: Path, name: str, verify: bool = False) -> dict:
     """
     _, subs, _ = manifest_loader.load_all(project_root)
     if name not in subs:
-        raise errors.BoundsError(
-            errors.E_SUBSYSTEM_NOT_FOUND,
-            f"subsystem '{name}' not found",
-            fix=f"known subsystems: {sorted(subs)}",
-        )
+        table_payload = _run_interface_impact(subs, name)
+        if table_payload is not None:
+            return table_payload
+        raise errors.BoundsError(errors.E_SUBSYSTEM_NOT_FOUND, f"subsystem or interface '{name}' not found", fix=f"known subsystems: {sorted(subs)}")
     direct = propagation.build_consumer_index(subs).get(name, [])
     transitive = propagation.transitive_consumers(name, subs)
     consumers = [
@@ -60,6 +59,34 @@ def run_impact(project_root: Path, name: str, verify: bool = False) -> dict:
     if verify:
         payload["undeclared_consumer_edges"] = _undeclared_consumer_edges(project_root, subs, name)
     return payload
+
+
+def _run_interface_impact(subs: dict, interface: str) -> dict | None:
+    providers = [name for name, sub in sorted(subs.items()) if interface in sub.expose_names()]
+    if not providers:
+        return None
+    consumers: list[dict] = []
+    direct: set[str] = set()
+    for provider in providers:
+        for cname, sub in sorted(subs.items()):
+            for c in sub.consumes:
+                if c.subsystem == provider and interface in c.interfaces:
+                    direct.add(cname)
+                    consumers.append({"name": cname, "provider": provider, "via": c.via, "interfaces": sorted(c.interfaces)})
+    transitive: set[str] = set()
+    for consumer in sorted(direct):
+        transitive.add(consumer)
+        transitive.update(propagation.transitive_consumers(consumer, subs))
+    return {
+        "interface": interface,
+        "providers": providers,
+        "direct_consumers": sorted(direct),
+        "transitive_consumers": sorted(transitive),
+        "blast_radius": len(transitive),
+        "basis": "declared-consumes-interface",
+        "blast_radius_is_lower_bound": True,
+        "consumers": consumers,
+    }
 
 
 def _undeclared_consumer_edges(project_root: Path, subs: dict, name: str) -> list[dict]:

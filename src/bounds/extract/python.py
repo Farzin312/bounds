@@ -31,6 +31,14 @@ def _text(node: ts.Node, source: bytes) -> str:
     return source[node.start_byte : node.end_byte].decode("utf-8", "replace")
 
 
+def _string_literal(node: ts.Node, source: bytes) -> str | None:
+    """Return a static Python string literal's value, or None for dynamic expressions."""
+    if node.type != "string":
+        return None
+    content = "".join(_text(c, source) for c in node.named_children if c.type == "string_content")
+    return content if content else _text(node, source).strip("\"'")
+
+
 def _line(node: ts.Node) -> int:
     """1-based start line of ``node`` (tree-sitter rows are 0-based)."""
     return node.start_point[0] + 1
@@ -43,7 +51,58 @@ def _symbol_from_definition(node: ts.Node, source: bytes) -> Symbol | None:
         return None
     name = _text(name_node, source)
     kind = "function" if node.type == "function_definition" else "class"
+    if node.type == "class_definition":
+        table_name = _orm_table_name(node, name, source)
+        if table_name is not None:
+            return Symbol(
+                name=table_name,
+                kind="table",
+                line=_line(node),
+                exported=not name.startswith("_"),
+                metadata={"model": name},
+            )
     return Symbol(name=name, kind=kind, line=_line(node), exported=not name.startswith("_"))
+
+
+def _orm_table_name(node: ts.Node, class_name: str, source: bytes) -> str | None:
+    """Static ORM table name for common Python model classes, or None when not a model."""
+    header = _text(node, source).split(":", 1)[0]
+    body = node.child_by_field_name("body")
+    explicit: str | None = None
+    django_table: str | None = None
+    if body is not None:
+        for stmt in body.named_children:
+            if stmt.type == "expression_statement":
+                lhs, rhs = _assignment_parts(stmt)
+                if lhs == "__tablename__" and rhs is not None:
+                    explicit = _string_literal(rhs, source) or class_name
+            elif stmt.type == "class_definition":
+                meta_name = stmt.child_by_field_name("name")
+                if meta_name is not None and _text(meta_name, source) == "Meta":
+                    meta_body = stmt.child_by_field_name("body")
+                    if meta_body is not None:
+                        for meta_stmt in meta_body.named_children:
+                            lhs, rhs = _assignment_parts(meta_stmt)
+                            if lhs == "db_table" and rhs is not None:
+                                django_table = _string_literal(rhs, source) or class_name
+    if explicit is not None:
+        return explicit
+    if "models.Model" in header:
+        return django_table or class_name
+    if "__tablename__" in _text(node, source):
+        return explicit or class_name
+    return None
+
+
+def _assignment_parts(stmt: ts.Node) -> tuple[str | None, ts.Node | None]:
+    for child in stmt.named_children:
+        if child.type != "assignment":
+            continue
+        lhs = child.child_by_field_name("left")
+        rhs = child.child_by_field_name("right")
+        if lhs is not None and lhs.type == "identifier":
+            return lhs.text.decode("utf-8", "replace"), rhs
+    return None, None
 
 
 def _symbol_from_assignment(stmt: ts.Node, source: bytes) -> Symbol | None:

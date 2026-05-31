@@ -100,4 +100,4 @@ Being explicit about the edges is part of why you can trust the parts that do wo
 | Replace exploratory code graphs | It **complements** them — graph to explore, Bounds to validate a declared boundary. |
 | Guarantee an agent reasons well or finishes the task | It cuts token load and validates structure; it makes no claim about task success. |
 | Auto-update your manifests | Drift is detected and proposed; you apply fixes with `calibrate --apply`. |
-| Validate every language | Python + TS/JS are tree-sitter-verified today; Go/Rust/Java are on the roadmap, and other languages fall back to YAML-only (declared files) or are skipped. |
+| Validate every language | Python + TS/JS + SQL migrations are tree-sitter-verified today; Go/Rust/Java are on the roadmap, and other languages fall back to YAML-only (declared files) or are skipped. |
