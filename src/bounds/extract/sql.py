@@ -197,11 +197,14 @@ class SqlAdapter(LanguageAdapter):
                     unparsed += 1
             if unparsed:
                 # Fail soft, report hard: surfaced as E_SCHEMA_UNPARSED (warning), not a
-                # silent drop and not a whole-file failure — the valid statements still folded.
+                # silent drop and not a whole-file failure - the valid statements still folded.
                 symbols.append(Symbol("<unparsed>", "schema_error", 1, exported=False,
                                       metadata={"schema_op": "unparsed", "count": unparsed}))
             # A file that is ALL error (no statement parsed at all) is a genuine hard failure.
-            if not any(s.kind != "schema_error" for s in symbols) and unparsed:
+            # A leading `schema_meta` header is not a parsed statement, so it must not mask an
+            # otherwise wholly-unparsable migration (e.g. `-- revision: 1` over a broken body).
+            valid = [s for s in symbols if s.kind not in ("schema_error", "schema_meta")]
+            if not valid and unparsed:
                 return make_result(rel_path, self.language_name, [], [], source,
                                    error="SQL parse error (no statement could be parsed)")
         except Exception as exc:

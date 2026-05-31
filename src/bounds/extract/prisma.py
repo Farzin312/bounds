@@ -21,8 +21,30 @@ from .base import LanguageAdapter, make_result
 
 _MODEL_RE = re.compile(r"^\s*model\s+([A-Za-z_]\w*)\s*\{")
 _MAP_RE = re.compile(r'@@map\(\s*"([^"]+)"\s*\)')
-_FIELD_RE = re.compile(r'^\s*([A-Za-z_]\w*)\s+\S+')          # `name  Type ...`
+_FIELD_RE = re.compile(r'^\s*([A-Za-z_]\w*)\s+([A-Za-z_]\w*(?:\[\])?\??)')  # `name  Type[]/Type? ...`
 _FIELD_MAP_RE = re.compile(r'@map\(\s*"([^"]+)"\s*\)')
+
+# Prisma's built-in scalar types. Everything else with a PascalCase type name references
+# another model or enum and is therefore a relation, not a database column.
+_SCALAR_TYPES = frozenset({
+    "String", "Boolean", "Int", "BigInt", "Float", "Decimal", "DateTime", "Json", "Bytes",
+})
+
+
+def _is_column_field(field_type: str) -> bool:
+    """True when a Prisma field is a real (scalar) column, not a model/enum relation.
+
+    Relation fields (``author User``, ``posts Post[]``, ``profile Profile?``) name another
+    model or enum in PascalCase; Prisma materializes them as joins, never as columns, so they
+    must stay out of the table's column surface (else ``describe`` reports phantom columns and a
+    column-granular contract like ``User.posts`` passes check_contract incorrectly). Scalar
+    fields use the built-in types (``String``, ``Int``, ``Json?`` ...), which are real columns.
+    """
+    base = field_type.rstrip("[]?")  # drop list `[]` / optional `?` modifiers
+    if base in _SCALAR_TYPES:
+        return True
+    # A PascalCase non-scalar type names another model/enum: a relation, not a column.
+    return not base[:1].isupper()
 
 
 def _strip_comment(line: str) -> str:
@@ -73,7 +95,7 @@ def _parse_model_body(lines: list[str], start: int) -> tuple[str | None, list[st
                 table = mp.group(1)
         elif stripped and not stripped.startswith("}"):
             fm = _FIELD_RE.match(raw)
-            if fm:
+            if fm and _is_column_field(fm.group(2)):
                 col_map = _FIELD_MAP_RE.search(raw)
                 columns.append(col_map.group(1) if col_map else fm.group(1))
         i += 1
