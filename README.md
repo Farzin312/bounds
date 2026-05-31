@@ -91,8 +91,8 @@ bounds upgrade-check         # is a newer release available?
 `consumes` from the import graph, and never overwrites existing manifests. See
 [docs/install.md](docs/install.md) for all install channels.
 
-If `bounds --help` does not list `impact`, `discover`, and `agent`, your installed CLI is stale; see
-[docs/install.md](docs/install.md#verify) for the one-command refresh path.
+If `bounds --help` does not list `impact`, `discover`, and `agent`, your installed CLI is stale; run
+`bounds upgrade` or see [docs/install.md](docs/install.md#verify).
 
 > `.bounds/` is hidden and **only** touched by the `bounds` CLI. Its extraction cache is a binary
 > SQLite file (`.bounds/cache.db`, **gitignored and regenerated** — never committed) so a tool that

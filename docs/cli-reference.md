@@ -32,7 +32,8 @@ list and severity/exit-code mapping.
 | `bounds agent` | Wire Bounds into eight coding agents so they query `list`/`describe`/`impact` before broad source search. `--sync`, `--detect`, `--check`, per-agent flags |
 | `bounds ci` | Generate CI gate config to enforce the agent workflow. `--install`, `--action`, `--precommit`, `--gitlab`, `--all` |
 | `bounds cache` | Manage the binary `.bounds/cache.db`. `--inspect`, `--prune`, `--migrate` |
-| `bounds upgrade-check` | Opt-in: ask the GitHub Releases API whether a newer Bounds release exists. Returns `current`, `latest`, `outdated`, `is_dev_build`, `checked`, `fix`, `note`. The **only** command that makes a network call (off the structural path); fails soft when offline and always exits `0` |
+| `bounds upgrade` | Opt-in self-upgrade through pipx. Defaults to GitHub `main`; `--ref <tag-or-branch>`, `--local <path>`, and `--dry-run` are available |
+| `bounds upgrade-check` | Opt-in: ask the GitHub Releases API whether a newer Bounds release exists. Returns `current`, `latest`, `outdated`, `is_dev_build`, `checked`, `fix`, `note`. Networked and off the structural path; fails soft when offline and always exits `0` |
 
 ---
 

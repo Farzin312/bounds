@@ -12,7 +12,7 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from bounds import config, update_check
+from bounds import config, update_check, upgrade
 from bounds.cli import main
 
 # The exact, stable JSON keys every `check()` result must carry (additive contract).
@@ -229,6 +229,59 @@ def test_cli_offline_exits_zero(monkeypatch):
     assert res.exit_code == 0
     data = json.loads(res.output)
     assert data["checked"] is False
+
+
+# ---------------------------------------------------------------------------
+# bounds upgrade: opt-in self-upgrade command, no real subprocess in tests
+# ---------------------------------------------------------------------------
+def test_upgrade_dry_run_reports_command():
+    result = upgrade.run_upgrade(dry_run=True)
+    assert result["ok"] is True
+    assert result["dry_run"] is True
+    assert result["command"] == ["pipx", "install", "--force", "git+https://github.com/Farzin312/bounds.git"]
+
+
+def test_upgrade_local_command_uses_editable_path(tmp_path):
+    result = upgrade.run_upgrade(local=tmp_path, dry_run=True)
+    assert result["source"] == "local"
+    assert result["command"] == ["pipx", "install", "--force", "-e", str(tmp_path)]
+
+
+def test_upgrade_fallback_reinstalls_when_force_fails(monkeypatch):
+    calls = []
+
+    def fake_run(command, capture_output=True, text=True, check=False):
+        calls.append(command)
+        if "--force" in command:
+            return upgrade.subprocess.CompletedProcess(command, 1, "", "venv exists")
+        return upgrade.subprocess.CompletedProcess(command, 0, "ok", "")
+
+    monkeypatch.setattr(upgrade.subprocess, "run", fake_run)
+    result = upgrade.run_upgrade()
+    assert result["ok"] is True
+    assert calls == [
+        ["pipx", "install", "--force", "git+https://github.com/Farzin312/bounds.git"],
+        ["pipx", "uninstall", "bounds-cli"],
+        ["pipx", "install", "git+https://github.com/Farzin312/bounds.git"],
+    ]
+
+
+def test_upgrade_cli_dry_run(monkeypatch):
+    res = CliRunner().invoke(main, ["upgrade", "--dry-run"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["dry_run"] is True
+    assert data["command"][0] == "pipx"
+
+
+def test_upgrade_cli_failure_exits_blocked(monkeypatch):
+    monkeypatch.setattr(
+        upgrade,
+        "run_upgrade",
+        lambda **kwargs: {"ok": False, "source": "github", "dry_run": False, "command": ["pipx"], "note": "upgrade failed"},
+    )
+    res = CliRunner().invoke(main, ["upgrade"])
+    assert res.exit_code == 1
 
 
 # ---------------------------------------------------------------------------

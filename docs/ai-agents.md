@@ -98,8 +98,8 @@ Do not read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/root.yaml`, or
 `.bounds/manifests/*.yaml` directly. The CLI is the API: raw manifests bypass tree-sitter
 verification, and the cache is a binary implementation detail.
 
-If commands like `impact`, `discover`, or `agent` are missing, the installed CLI is stale. Refresh:
-`pipx install --force "git+https://github.com/Farzin312/bounds.git"`.
+If commands like `impact`, `discover`, or `agent` are missing, the installed CLI is stale. Refresh
+with `bounds upgrade` or, from a local clone, `bounds upgrade --local .`.
 ```
 
 ## Roadmap: MCP server

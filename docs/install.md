@@ -49,13 +49,13 @@ If `bounds --help` does not show commands such as `impact`, `discover`, and `age
 pointing at an old install. Refresh it explicitly:
 
 ```bash
-pipx install --force "git+https://github.com/Farzin312/bounds.git"
+bounds upgrade
 ```
 
 From a local development clone, use the editable local build:
 
 ```bash
-pipx install --force -e .
+bounds upgrade --local .
 ```
 
 ---

@@ -25,6 +25,7 @@ from . import (
     errors,
     locate,
     output,
+    upgrade as upgrade_mod,
     update_check,
 )
 from .cache import store as cache_store
@@ -588,6 +589,27 @@ def cache_cmd(do_migrate: bool, do_prune: bool, do_inspect: bool, human: bool) -
         else:
             payload = cache_store.inspect(root)
         output.emit(payload, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
+# upgrade
+# ===========================================================================
+@main.command("upgrade")
+@click.option("--ref", "ref", default="main", show_default=True,
+              help="Git ref to install from when upgrading from GitHub.")
+@click.option("--local", "local", type=click.Path(path_type=Path, file_okay=False, dir_okay=True, exists=True),
+              default=None, help="Install editable from a local Bounds clone instead of GitHub.")
+@click.option("--dry-run", is_flag=True, default=False, help="Print the upgrade command without running it.")
+@_human
+def upgrade_cmd(ref: str, local: Path | None, dry_run: bool, human: bool) -> None:
+    """Upgrade a stale Bounds CLI through pipx."""
+
+    def go() -> None:
+        payload = upgrade_mod.run_upgrade(ref=ref, local=local, dry_run=dry_run)
+        output.emit(payload, human)
+        sys.exit(config.EXIT_OK if payload.get("ok") else config.EXIT_BLOCKED)
 
     _run(human, go)
 
