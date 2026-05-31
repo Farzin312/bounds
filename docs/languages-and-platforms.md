@@ -43,8 +43,10 @@ than validated.
 > - **SQL/ORM — query strings.** Raw query references are never verified edges. They are available
 >   only opt-in via `bounds impact <table> --include-raw-queries` as a low-confidence advisory and can
 >   never become a blocking boundary violation (the "verified, not guessed" moat).
-> - **Prisma/ORM — relation fields.** A Prisma relation field (`posts Post[]`) is captured as a column
->   like any other field; column granularity is declared-surface, not a typed scalar/relation split.
+> - **Prisma/ORM — relation fields.** A Prisma relation field (`posts Post[]`, `author User`) is
+>   excluded from the column catalog — it's a model reference, not a database column. Only scalar fields
+>   (`String`, `Int`, `Boolean`, `DateTime`, `Float`, `Json`, `Bytes`, `BigInt`, `Decimal`) and their
+>   list forms (`String[]`) produce column entries.
 >
 > These are extraction limits, not validation bugs: a symbol Bounds can't see simply won't appear in a
 > contract. Declaring such a symbol in a manifest's `exposes` will surface it as unverified.

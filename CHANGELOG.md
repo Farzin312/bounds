@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased] — 2026-05-30
+## [Unreleased] — 2026-05-31
+
+### Fixed
+
+- **Prisma adapter** — relation fields (`posts Post[]`, `author User`, `profile Profile?`) are no longer captured as columns. Only scalar types produce column entries, preventing phantom columns in `bounds describe` and false passes in column-granular `check_contract`.
+- **SQL adapter** — `schema_meta` symbols (revision headers) no longer mask all-error SQL files. A migration with a valid `-- revision` header but zero parseable statements now correctly returns a hard parse failure instead of folding partial data.
 
 ### Added
 
