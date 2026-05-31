@@ -128,6 +128,18 @@ def _drizzle_table_name(declarator: ts.Node, fallback: str, source: bytes) -> st
     return _first_string_arg(value, source) or fallback
 
 
+def _object_prop_string(obj: ts.Node, key: str, source: bytes) -> str | None:
+    """Value of a string-valued ``key: "..."`` pair in an object literal, or None."""
+    for pair in obj.named_children:
+        if pair.type != "pair":
+            continue
+        k = pair.child_by_field_name("key")
+        v = pair.child_by_field_name("value")
+        if k is not None and v is not None and v.type == "string" and _text(k, source).strip("\"'") == key:
+            return _string_value(v, source)
+    return None
+
+
 def _typeorm_table_name(decl: ts.Node, fallback: str, source: bytes) -> str | None:
     for child in decl.children:
         if child.type != "decorator":
@@ -135,7 +147,16 @@ def _typeorm_table_name(decl: ts.Node, fallback: str, source: bytes) -> str | No
         call = next((c for c in child.named_children if c.type == "call_expression"), None)
         if call is None or _call_name(call, source) != "Entity":
             continue
-        return _first_string_arg(call, source) or fallback
+        # `@Entity("accounts")` — first string arg; `@Entity({ name: "accounts" })` — the
+        # name property; otherwise fall back to the class name (still tagged as a table).
+        by_arg = _first_string_arg(call, source)
+        if by_arg is not None:
+            return by_arg
+        args = call.child_by_field_name("arguments")
+        first = next(iter(args.named_children), None) if args is not None else None
+        if first is not None and first.type == "object":
+            return _object_prop_string(first, "name", source) or fallback
+        return fallback
     return None
 
 

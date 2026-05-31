@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Data-boundary / schema mapping** — a database TABLE is modeled as just another exposed symbol of a schema subsystem, so the existing contract/drift/boundary/impact/propagation machinery works on tables. Spans the full pipeline:
+  - **ORM table recognition** (zero new deps) — Python SQLAlchemy (`__tablename__`, imperative `__table__ = Table("…")`), Django (`models.Model`, `Meta.db_table`; abstract models are correctly *not* tables), and TypeScript Drizzle (`pgTable`/`sqliteTable`/`mysqlTable`) and TypeORM (`@Entity("…")` and `@Entity({ name: "…" })`) model classes are tagged `kind: table` with their real table name. Detection is structural (no substring/eval), so a comment mentioning `__tablename__` or an f-string table name never fabricates a phantom table.
+  - **SQL adapter (`.sql`)** — deterministic DDL extraction via **`tree-sitter-sql`** (a new runtime dependency, prebuilt wheels). Per-statement fail-soft: one unparsable statement is reported (`E_SCHEMA_UNPARSED`) without dropping the file's other valid statements. Double-quoted Postgres identifiers are preserved.
+  - **Migration fold** — applies CREATE / ADD / DROP / RENAME (table & column) in deterministic order (filename numeric/timestamp prefix → `revision`/`down_revision` header chain → explicit `-- bounds:order N`; **never** file mtime) to materialize the current table catalog as the subsystem's effective `exposes`. Undetermined order is surfaced as the advisory `E_SCHEMA_NO_ORDER`.
+  - **Prisma adapter (`.prisma`)** — `model` blocks fold like SQL tables (`@@map`/`@map` honored); no new dependency.
+  - **`bounds describe <db>`** returns the verified table catalog (+ a deterministic `schema_hash`); **`bounds impact <table>`** returns the read/write blast radius before a migration; `table.column`-granular `exposes`/`consumes` catch a dropped-column drift in both directions.
+  - **`bounds impact <table> --include-raw-queries`** — opt-in, low-confidence raw-SQL string consumers, surfaced as an advisory `heuristic_consumers` block. By construction it is never counted in `blast_radius` and can never produce a blocking `E_BOUNDARY_VIOLATION` (the "verified, not guessed" moat).
 - **`bounds discover`** — bootstrap manifest generation: auto-discovers candidate subsystems from source and proposes `.bounds/` manifests for a new project.
 - **`bounds calibrate`** — reconciles manifests against tree-sitter reality, proposing exports to add or remove. Honors a new per-export `internal` flag (mark a symbol deliberately private and calibration leaves it alone).
 - **`bounds impact <name>`** — transitive blast radius: which subsystems break if the named subsystem changes. Backed by a new `transitive_consumers` graph walk in the propagation engine.
@@ -23,7 +30,7 @@
 
 ### Tests
 
-- **The full test suite across 10 files** now passes (expanded from the v0.1.0 figure), covering the new `discover`, `calibrate`, `impact`, `agent`, `ci`, and SQLite-cache surfaces in addition to extraction, validation, and schema flexibility.
+- **The full test suite** now passes (expanded from the v0.1.0 figure), covering the new `discover`, `calibrate`, `impact`, `agent`, `ci`, and SQLite-cache surfaces, the data-boundary feature (SQL/Prisma migration fold, ORM table recognition, column-level drift, the raw-query moat guardrail, and false-positive/false-negative guards for each), in addition to extraction, validation, and schema flexibility.
 
 ## [0.1.0] — 2026-05-29
 

@@ -118,9 +118,10 @@ measured numbers (one repo, one data point), the scaling argument, and the conte
 
 ## Languages & platforms
 
-**Python, TypeScript/JavaScript, and SQL migrations** are tree-sitter-verified today; runs on
-**Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on the roadmap. See
-[docs/languages-and-platforms.md](docs/languages-and-platforms.md).
+**Python, TypeScript/JavaScript, SQL migrations, and Prisma schemas** are verified today — including
+database tables, whether declared as raw DDL, ORM models (SQLAlchemy/Django/Drizzle/TypeORM), or
+Prisma `model` blocks. Runs on **Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java
+adapters are on the roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
 
 ---
 

@@ -100,6 +100,101 @@ def test_schema_describe_impact_and_column_contract(monkeypatch, tmp_path):
     )
 
 
+def _write_exposes_column_project(root, drop_email=False):
+    (root / ".bounds" / "manifests").mkdir(parents=True)
+    (root / ".bounds" / "root.yaml").write_text(
+        'version: "1"\nproject: s\nlanguages: [sql]\nenforce: "on"\nsubsystems: [db]\n', encoding="utf-8")
+    # db exposes a COLUMN-granular surface: users.email
+    (root / ".bounds" / "manifests" / "db.yaml").write_text(
+        "name: db\nrole: library\ncriticality: core\npaths: [migrations]\n"
+        "exposes:\n  - { name: users.email, kind: table }\nconsumes: []\n", encoding="utf-8")
+    (root / "migrations").mkdir()
+    (root / "migrations" / "001_create.sql").write_text(
+        "CREATE TABLE users (id integer, email text);\n", encoding="utf-8")
+    if drop_email:
+        (root / "migrations" / "002_drop.sql").write_text(
+            "ALTER TABLE users DROP COLUMN email;\n", encoding="utf-8")
+
+
+def test_exposes_column_present_does_not_drift(monkeypatch, tmp_path):
+    # FALSE-POSITIVE guard: a column-granular expose that still exists must NOT report drift.
+    _write_exposes_column_project(tmp_path, drop_email=False)
+    data = json.loads(_invoke(monkeypatch, tmp_path, ["validate"]).output)
+    assert not any(
+        i["code"] == "E_STRUCTURAL_DRIFT" and "users.email" in i["message"] for i in data["issues"]
+    )
+
+
+def test_exposes_column_dropped_drifts(monkeypatch, tmp_path):
+    # FALSE-NEGATIVE guard: dropping the exposed column must surface as drift.
+    _write_exposes_column_project(tmp_path, drop_email=True)
+    data = json.loads(_invoke(monkeypatch, tmp_path, ["validate"]).output)
+    assert any(
+        i["code"] == "E_STRUCTURAL_DRIFT" and "users.email" in i["message"] for i in data["issues"]
+    )
+
+
+def _write_raw_query_project(root):
+    (root / ".bounds" / "manifests").mkdir(parents=True)
+    (root / ".bounds" / "root.yaml").write_text(
+        'version: "1"\nproject: s\nlanguages: [sql, python]\nenforce: "on"\nsubsystems: [db, app]\n',
+        encoding="utf-8")
+    (root / ".bounds" / "manifests" / "db.yaml").write_text(
+        "name: db\nrole: library\ncriticality: core\npaths: [migrations]\n"
+        "exposes:\n  - { name: users, kind: table }\nconsumes: []\n", encoding="utf-8")
+    # app declares NOTHING about db, yet runs a raw SQL query against users.
+    (root / ".bounds" / "manifests" / "app.yaml").write_text(
+        "name: app\nrole: service\ncriticality: leaf\npaths: [app]\nexposes: []\nconsumes: []\n",
+        encoding="utf-8")
+    (root / "migrations").mkdir()
+    (root / "migrations" / "001.sql").write_text("CREATE TABLE users (id int);\n", encoding="utf-8")
+    (root / "app").mkdir()
+    (root / "app" / "main.py").write_text(
+        'def run(db):\n    return db.execute("SELECT id FROM users")\n', encoding="utf-8")
+
+
+def test_raw_query_ref_never_blocks_validation(monkeypatch, tmp_path):
+    # MOAT GUARDRAIL: a raw-SQL string reference must NEVER produce a blocking boundary error.
+    _write_raw_query_project(tmp_path)
+    data = json.loads(_invoke(monkeypatch, tmp_path, ["validate"]).output)
+    assert not any(i["code"] == "E_BOUNDARY_VIOLATION" for i in data["issues"])
+
+
+def test_impact_include_raw_queries_is_advisory(monkeypatch, tmp_path):
+    _write_raw_query_project(tmp_path)
+    res = _invoke(monkeypatch, tmp_path, ["impact", "users", "--include-raw-queries"])
+    data = json.loads(res.output)
+    heur = data["heuristic_consumers"]
+    assert any(h["subsystem"] == "app" and h["confidence"] == "heuristic" for h in heur)
+    # Advisory only: the verified blast radius does not count it.
+    assert data["blast_radius"] == 0
+
+
+def test_prisma_schema_describe_and_impact(monkeypatch, tmp_path):
+    (tmp_path / ".bounds" / "manifests").mkdir(parents=True)
+    (tmp_path / ".bounds" / "root.yaml").write_text(
+        'version: "1"\nproject: s\nlanguages: [prisma, python]\nenforce: "on"\nsubsystems: [db, app]\n',
+        encoding="utf-8")
+    (tmp_path / ".bounds" / "manifests" / "db.yaml").write_text(
+        "name: db\nrole: library\ncriticality: core\npaths: [prisma]\n"
+        "exposes:\n  - { name: users, kind: table }\nconsumes: []\n", encoding="utf-8")
+    (tmp_path / ".bounds" / "manifests" / "app.yaml").write_text(
+        "name: app\nrole: service\ncriticality: leaf\npaths: [app]\nexposes: []\n"
+        "consumes:\n  - subsystem: db\n    via: reads\n    interfaces: [users]\n", encoding="utf-8")
+    (tmp_path / "prisma").mkdir()
+    (tmp_path / "prisma" / "schema.prisma").write_text(
+        'model User {\n  id Int @id\n  email String\n  @@map("users")\n}\n', encoding="utf-8")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
+
+    describe = json.loads(_invoke(monkeypatch, tmp_path, ["describe", "db"]).output)
+    assert describe["tables"] == [
+        {"name": "users", "kind": "table", "columns": ["email", "id"], "files": ["prisma/schema.prisma"]}
+    ]
+    impact = json.loads(_invoke(monkeypatch, tmp_path, ["impact", "users"]).output)
+    assert impact["direct_consumers"] == ["app"]
+
+
 def test_cache_inspect_cli(monkeypatch, py_project):
     # Populate the cache first via a validate run, then inspect it.
     assert _invoke(monkeypatch, py_project, ["validate"]).exit_code in (0, 1)

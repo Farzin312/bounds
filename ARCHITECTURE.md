@@ -59,9 +59,11 @@ bounds/
 │       │   ├── base.py            # LanguageAdapter ABC + hashing helpers
 │       │   ├── registry.py        # extension/lang → adapter resolution
 │       │   ├── scan.py            # shared filesystem→extraction helpers (discover/calibrate)
-│       │   ├── python.py          # PythonAdapter
-│       │   ├── sql.py             # SqlAdapter (.sql DDL statements)
-│       │   └── typescript.py      # TypeScriptAdapter (.ts/.tsx/.js/.jsx)
+│       │   ├── python.py          # PythonAdapter (+ SQLAlchemy/Django ORM table recognition)
+│       │   ├── sql.py             # SqlAdapter (.sql DDL statements, per-statement fail-soft)
+│       │   ├── prisma.py          # PrismaAdapter (.prisma model blocks → tables)
+│       │   ├── rawquery.py        # opt-in advisory raw-SQL string table refs (never blocking)
+│       │   └── typescript.py      # TypeScriptAdapter (.ts/.tsx/.js/.jsx; + Drizzle/TypeORM tables)
 │       ├── cache/
 │       │   ├── __init__.py
 │       │   └── store.py           # State + FileRecord + binary SQLite cache.db (migrate/prune/inspect)
@@ -69,9 +71,9 @@ bounds/
 │           ├── __init__.py
 │           ├── engine.py          # mode dispatch + orchestration
 │           ├── propagation.py     # reference propagation (consumers of changed providers) + transitive_consumers
-│           ├── schema.py          # deterministic per-subsystem SQL migration fold
-│           └── checks.py          # the 6 structural checks + import resolution
-└── tests/                         # 10 files (the full suite; CI reports the live count)
+│           ├── schema.py          # deterministic per-subsystem SQL/Prisma schema fold
+│           └── checks.py          # the 6 structural checks + schema-health advisory + import resolution
+└── tests/                         # the full suite (CI reports the live count)
     ├── conftest.py
     ├── test_extract.py
     ├── test_validate.py
@@ -502,26 +504,38 @@ def project_status(report) -> str                    # the project-wide status r
 # Kept out of cli.py so command modules stay arg-parse + one go() closure (no business logic).
 ```
 
-### `validate/schema.py` — deterministic SQL migration fold
+### `validate/schema.py` — deterministic schema fold (SQL + Prisma)
 ```python
+SCHEMA_LANGUAGES = {"sql", "prisma"}   # languages whose symbols carry DDL schema_op metadata
+def order_migrations(subsystem, extracts, file_owner) -> tuple[list[str], bool]
+    # deterministic order + a no_total_order flag. Priority: explicit `-- bounds:order N`
+    # -> revision/down_revision header chain -> filename numeric/timestamp prefix -> lexical.
 def _fold_subsystem_schema(subsystem, extracts, file_owner) -> dict[str, _TableState]
-    # order the subsystem's .sql files by filename prefix/name (never mtime), then apply
-    # create/drop/rename table and add/drop/rename column operations to produce the current catalog.
+    # apply create/drop/rename table and add/drop/rename column ops in that order -> current catalog.
 def schema_catalog(subsystem, extracts, file_owner) -> list[dict]
     # [{name, kind:"table", columns:[...], files:[...]}] for describe.
+def schema_structure_hash(subsystem, extracts, file_owner) -> str   # sha256 over the ordered fold
+def schema_diagnostics(subsystem, extracts, file_owner) -> list[(code, message, file)]
+    # E_SCHEMA_UNPARSED (a statement didn't parse; siblings still folded) + E_SCHEMA_NO_ORDER.
 ```
 
-The SQL adapter is intentionally per-file and dumb: it emits raw DDL operation symbols with
-metadata, so cache validity remains content-addressed per migration. The fold is subsystem-level
-because the current schema is an ordered reduction across migration files. Query-string references
-are not verified edges and must never produce `E_BOUNDARY_VIOLATION`.
+The SQL/Prisma adapters are intentionally per-file and dumb: they emit raw DDL operation symbols
+(`schema_op` metadata, `exported=False`), so cache validity stays content-addressed per migration and
+the **fold is the single authority** on a schema's current surface — a dropped/renamed table can't
+linger via its CREATE symbol. The fold is subsystem-level because the current schema is an ordered
+reduction across migration files; `checks`/`describe` memoize it per subsystem. Per-statement
+fail-soft: one unparsable statement is reported, never dropping the file's other statements.
+Query-string references are **not** verified edges, are available only opt-in
+(`impact --include-raw-queries`) as a low-confidence advisory, and never produce `E_BOUNDARY_VIOLATION`.
 
 ### `locate.py` — `where` + `impact` queries
 ```python
-def run_impact(project_root, name, verify=False) -> dict
+def run_impact(project_root, name, verify=False, include_raw=False) -> dict
     # subsystem blast radius: declared-consumes count (an honest lower bound); --verify adds the
     # resolved undeclared_consumer_edges. If name is not a subsystem but is an exposed interface/table,
-    # returns declared consumers of that interface. Raises E_SUBSYSTEM_NOT_FOUND when neither exists.
+    # returns declared consumers of that interface. --include-raw-queries adds an advisory
+    # heuristic_consumers block (raw-SQL string refs; never counted in blast_radius, never blocking).
+    # Raises E_SUBSYSTEM_NOT_FOUND when neither exists.
 def run_where(project_root, symbol, prefix=False) -> dict
     # locate a symbol's definition(s) + owning subsystem (fresh extraction; Python + TS).
 # Kept out of cli.py (same reason as describe.py); reuses scan.extract_project + the one resolver.
@@ -647,12 +661,14 @@ consumes:
 
 ## 7. The 6 checks (logic)
 
-1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files plus any surviving tables from the subsystem's SQL migration fold. Declared-but-missing → drift (`error`). Undeclared-but-exported (a symbol/table in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (bidirectional drift; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). The `info` severity never blocks, so exit codes are unchanged. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
+1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files plus any surviving tables from the subsystem's SQL/Prisma schema fold. Declared-but-missing → drift (`error`); a column-granular expose (`users.email`) is resolved against the fold (table exposed **and** column still present), so a dropped column drifts in both the exposes and consumes directions. Undeclared-but-exported (a symbol/table in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (bidirectional drift; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). The `info` severity never blocks, so exit codes are unchanged. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
 2. **Boundary compliance** (`E_BOUNDARY_VIOLATION`, error): for each import in subsystem A resolving to a file owned by subsystem B, the imported names must all be in B's `exposes`. Importing a non-exposed (internal) symbol → violation. Resolution: match import `module` against B's file paths (suffix/relative resolution). Fix: "import only B's exposed interfaces, or add `<name>` to B.exposes".
 3. **Contract compliance** (`E_CONTRACT_MISSING_EXPORT`, error): for each `consumes` entry, every listed interface must appear in the provider's `exposes`. For schema contracts, `table.column` is valid only when `table` is exposed and the deterministic SQL fold still contains `column`. Missing → contract break. Fix: "provider `<B>` does not expose `<iface>`; update consumer or provider".
 4. **Cross-subsystem impact** (`E_STALE_INTERFACE`, error/stale): a provider's `structure_hash` changed (it's in `dirty`) and it has consumers (`consumed_by`) → those consumer interfaces may be stale. Emits one issue per affected consumer. Fix: "re-validate consumer `<C>`; provider `<B>` interface surface changed".
 5. **Cycle detection** (`E_CYCLE_DETECTED`, error): build the directed graph from `consumes`; DFS for back-edges; report each cycle as a chain `A → B → C → A`. Fix: "break the dependency cycle; introduce an interface/inversion".
 6. **Orphan detection** (`E_ORPHAN_EXPORT`, warning): an exposed interface that appears in no subsystem's `consumes`, where the owning subsystem's role does **not** carry `orphan_exposes` (the `service` base, and any custom role extending it, legitimately expose unconsumed surface — resolved via `RootManifest.role_registry()`). Fix: "interface `<x>` of `<A>` is consumed by no one; consider removing or marking entrypoint".
+
+Plus one **schema-health advisory** (`check_schema`, warnings only — never blocks): a migration statement that didn't parse → `E_SCHEMA_UNPARSED` (the file's other statements still folded); order-dependent migrations with no deterministic order → `E_SCHEMA_NO_ORDER`. Runs in `quick`/`full`/`preflight`/`audit`.
 
 Forward references (a `consumes.subsystem` or path that doesn't resolve to a known subsystem) → `E_UNRESOLVED_REFERENCE` (warning) and set report status `unresolved`.
 
@@ -674,8 +690,8 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_MANIFEST_NOT_FOUND` | fatal | no `.bounds/` (or legacy `.compact/`) found |
 | `E_MANIFEST_PARSE_ERROR` | fatal | YAML parse failure |
 | `E_SCHEMA_INVALID` | error | manifest missing required keys / bad enum |
-| `E_SCHEMA_NO_ORDER` | warning | SQL migrations could not be totally ordered; fail soft |
-| `E_SCHEMA_UNPARSED` | warning | SQL schema source could not be folded; fail soft |
+| `E_SCHEMA_NO_ORDER` | warning | order-dependent migrations with no deterministic order (no prefix/revision-chain/explicit header); folded in lexical order |
+| `E_SCHEMA_UNPARSED` | warning | a migration statement couldn't be parsed; the file's other statements still folded |
 | `E_SUBSYSTEM_NOT_FOUND` | fatal | unknown subsystem (raised by `describe <name>`, `impact <name>`, `calibrate --subsystem`) |
 | `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do) |
 | `E_UNSUPPORTED_LANGUAGE` | warning | file extension has no adapter (skipped) |

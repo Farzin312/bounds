@@ -18,18 +18,22 @@ from .validate import propagation
 from .validate.checks import index_extracts, resolve_import
 
 
-def run_impact(project_root: Path, name: str, verify: bool = False) -> dict:
+def run_impact(project_root: Path, name: str, verify: bool = False, include_raw: bool = False) -> dict:
     """Blast radius of ``name``: who breaks if its public surface changes.
 
     The headline ``blast_radius`` counts only *declared* ``consumes`` edges, so it is an honest
     lower bound — a real import that no manifest declares is not counted. ``--verify`` resolves the
     actual import graph and lists consumers that import from ``name`` without declaring it.
+    ``include_raw`` adds an advisory ``heuristic_consumers`` block (raw-SQL string refs to the
+    table) — opt-in, clearly low-confidence, and never part of the verified blast radius.
     Raises ``E_SUBSYSTEM_NOT_FOUND`` for an unknown subsystem.
     """
     _, subs, _ = manifest_loader.load_all(project_root)
     if name not in subs:
         table_payload = _run_interface_impact(subs, name)
         if table_payload is not None:
+            if include_raw:
+                _attach_heuristic_consumers(project_root, subs, name, table_payload)
             return table_payload
         raise errors.BoundsError(errors.E_SUBSYSTEM_NOT_FOUND, f"subsystem or interface '{name}' not found", fix=f"known subsystems: {sorted(subs)}")
     direct = propagation.build_consumer_index(subs).get(name, [])
@@ -58,7 +62,25 @@ def run_impact(project_root: Path, name: str, verify: bool = False) -> dict:
     }
     if verify:
         payload["undeclared_consumer_edges"] = _undeclared_consumer_edges(project_root, subs, name)
+    if include_raw:
+        _attach_heuristic_consumers(project_root, subs, name, payload)
     return payload
+
+
+def _attach_heuristic_consumers(project_root: Path, subs: dict, table: str, payload: dict) -> None:
+    """Add the opt-in, advisory raw-SQL-query consumers of ``table`` (never blocking, never verified)."""
+    from .extract import rawquery, supported_extensions
+
+    exts = supported_extensions()
+    file_owner: dict[str, str] = {}
+    for nm in sorted(subs):
+        for abs_path in scan.iter_subsystem_files(project_root, subs[nm], exts):
+            file_owner.setdefault(abs_path.relative_to(project_root).as_posix(), nm)
+    payload["heuristic_consumers"] = rawquery.scan_table_consumers(project_root, file_owner, table)
+    payload["heuristic_note"] = (
+        "heuristic_consumers come from raw-SQL string matching and are LOW-CONFIDENCE / "
+        "advisory only — they are never counted in blast_radius and never block validation."
+    )
 
 
 def _run_interface_impact(subs: dict, interface: str) -> dict | None:

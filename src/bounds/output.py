@@ -285,7 +285,9 @@ def _render_subsystem_human(payload: dict) -> str:
     tables = payload.get("tables", [])
     if tables:
         lines.append("")
-        lines.append(f"tables ({len(tables)}):")
+        schema_hash = payload.get("schema_hash", "")
+        suffix = f"  (schema_hash {schema_hash[:12]})" if schema_hash else ""
+        lines.append(f"tables ({len(tables)}):{suffix}")
         for table in tables:
             columns = table.get("columns", [])
             detail = f" [{', '.join(columns)}]" if columns else ""

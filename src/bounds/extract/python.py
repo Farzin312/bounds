@@ -32,11 +32,36 @@ def _text(node: ts.Node, source: bytes) -> str:
 
 
 def _string_literal(node: ts.Node, source: bytes) -> str | None:
-    """Return a static Python string literal's value, or None for dynamic expressions."""
+    """Return a *static* Python string literal's value, or None for dynamic expressions.
+
+    An f-string with interpolation (``f"prefix_{x}"``) is dynamic — we return None so the
+    caller falls back to the class name rather than fabricating a wrong literal table name.
+    """
     if node.type != "string":
         return None
+    if any(c.type == "interpolation" for c in node.named_children):
+        return None  # f-string with a {placeholder}: not statically knowable
     content = "".join(_text(c, source) for c in node.named_children if c.type == "string_content")
-    return content if content else _text(node, source).strip("\"'")
+    return content or None
+
+
+def _base_names(node: ts.Node, source: bytes) -> set[str]:
+    """Base-class names of a class_definition, read structurally (not by substring)."""
+    sc = node.child_by_field_name("superclasses")
+    if sc is None:
+        return set()
+    return {_text(c, source) for c in sc.named_children if c.type in ("identifier", "attribute")}
+
+
+def _call_first_string(node: ts.Node, source: bytes) -> str | None:
+    """First string argument of a ``Name(...)`` call (e.g. ``Table("users", meta)``), or None."""
+    if node.type != "call":
+        return None
+    args = node.child_by_field_name("arguments")
+    if args is None:
+        return None
+    first = next(iter(args.named_children), None)
+    return _string_literal(first, source) if first is not None else None
 
 
 def _line(node: ts.Node) -> int:
@@ -65,32 +90,49 @@ def _symbol_from_definition(node: ts.Node, source: bytes) -> Symbol | None:
 
 
 def _orm_table_name(node: ts.Node, class_name: str, source: bytes) -> str | None:
-    """Static ORM table name for common Python model classes, or None when not a model."""
-    header = _text(node, source).split(":", 1)[0]
+    """Static ORM table name for common Python model classes, or None when not a model.
+
+    Detection is structural, never substring-based:
+      * SQLAlchemy — a real ``__tablename__ = "..."`` (or ``__table__ = Table("...", ...)``)
+        assignment in the class body. Dynamic names fall back to the class name.
+      * Django — a base class named ``Model`` / ``*.Model``; table = ``Meta.db_table`` or the
+        class name. An abstract model (``Meta.abstract = True``) is a base/mixin, not a table.
+    """
+    bases = _base_names(node, source)
+    is_django = any(b == "Model" or b.endswith(".Model") for b in bases)
     body = node.child_by_field_name("body")
-    explicit: str | None = None
+    table_attr: str | None = None      # SQLAlchemy __tablename__/__table__ literal
+    has_table_attr = False
     django_table: str | None = None
+    abstract = False
     if body is not None:
         for stmt in body.named_children:
             if stmt.type == "expression_statement":
                 lhs, rhs = _assignment_parts(stmt)
                 if lhs == "__tablename__" and rhs is not None:
-                    explicit = _string_literal(rhs, source) or class_name
+                    has_table_attr = True
+                    table_attr = _string_literal(rhs, source)
+                elif lhs == "__table__" and rhs is not None:
+                    name = _call_first_string(rhs, source)
+                    if name:
+                        has_table_attr = True
+                        table_attr = name
             elif stmt.type == "class_definition":
                 meta_name = stmt.child_by_field_name("name")
                 if meta_name is not None and _text(meta_name, source) == "Meta":
                     meta_body = stmt.child_by_field_name("body")
-                    if meta_body is not None:
-                        for meta_stmt in meta_body.named_children:
-                            lhs, rhs = _assignment_parts(meta_stmt)
-                            if lhs == "db_table" and rhs is not None:
-                                django_table = _string_literal(rhs, source) or class_name
-    if explicit is not None:
-        return explicit
-    if "models.Model" in header:
+                    for meta_stmt in (meta_body.named_children if meta_body is not None else []):
+                        lhs, rhs = _assignment_parts(meta_stmt)
+                        if lhs == "db_table" and rhs is not None:
+                            django_table = _string_literal(rhs, source)
+                        elif lhs == "abstract" and rhs is not None and _text(rhs, source) == "True":
+                            abstract = True
+    if is_django and abstract:
+        return None  # abstract base / mixin maps to no table
+    if has_table_attr:
+        return table_attr or class_name  # SQLAlchemy: literal name, else the class name
+    if is_django:
         return django_table or class_name
-    if "__tablename__" in _text(node, source):
-        return explicit or class_name
     return None
 
 

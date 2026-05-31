@@ -19,13 +19,14 @@ from .extract import scan, supported_extensions
 from .ignore import IgnoreMatcher
 from .models import SubsystemCompact, ValidationReport
 from .validate import engine as validate_engine
-from .validate.schema import schema_catalog
+from .validate.schema import schema_catalog, schema_structure_hash
 
 
-def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], list[str], list[str], list[dict]]:
+def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], list[str], list[str], list[dict], str]:
     """Tier-1 extraction for one subsystem.
 
-    Returns ``(exported_symbol_name -> owning_file, owned_files, unparsed_files)``. Every file the
+    Returns ``(exported_symbol_name -> owning_file, owned_files, unparsed_files, table_catalog,
+    schema_hash)``. Every file the
     subsystem owns is recorded in ``owned_files`` regardless of whether it parses (so ``files``
     reflects the declared surface); only cleanly-extracted exported symbols populate the symbol map
     used to mark ``exposes`` entries ``verified``. A supported owned file that fails to extract
@@ -60,7 +61,8 @@ def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], li
         files = table.get("files", [])
         if files:
             extracted_symbols[str(table["name"])] = str(files[0])
-    return extracted_symbols, owned_files, unparsed_files, catalog
+    schema_hash = schema_structure_hash(sub.name, extracts, file_owner) if catalog else ""
+    return extracted_symbols, owned_files, unparsed_files, catalog, schema_hash
 
 
 def describe_one(
@@ -82,7 +84,7 @@ def describe_one(
     so an agent sees a symbol lives in a bootstrap file.
     """
     payload = sub.to_dict()
-    extracted_symbols, owned_files, unparsed_files, catalog = extract_owned(root, sub)
+    extracted_symbols, owned_files, unparsed_files, catalog, schema_hash = extract_owned(root, sub)
     for expose in payload.get("exposes", []):
         ename = expose.get("name", "")
         if ename in extracted_symbols:
@@ -107,6 +109,7 @@ def describe_one(
         payload["unparsed_files"] = sorted(unparsed_files)
     if catalog:
         payload["tables"] = catalog
+        payload["schema_hash"] = schema_hash
     payload["validation_status"] = subsystem_status(report, sub.name)
     payload["project_status"] = project_status(report)
     if deep:
