@@ -1,11 +1,25 @@
-"""Bootstrap discovery (s-14)."""
+"""Bootstrap discovery: the bounds discover command."""
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+
+import pytest
 import yaml
 
 from bounds import config
 from bounds.discover import run_discover
+
+
+def _git_init(path) -> None:
+    """Initialize a git repo at ``path`` (identity set so commands don't warn)."""
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=path, check=True)
+
+
+requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
 
 def _project(tmp_path):
@@ -124,3 +138,60 @@ def test_discover_merge_into(tmp_path):
     names = {c["name"] for c in result["candidates"] if not c["dropped"]}
     assert "core" in names
     assert "db" not in names and "auth" not in names
+
+
+# ---- .gitignore awareness (FIX) ----
+@requires_git
+def test_discover_skips_gitignored_paths(tmp_path):
+    # A gitignored build dir must not become a candidate subsystem.
+    _git_init(tmp_path)
+    _project(tmp_path)
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    for i in range(5):
+        (dist / f"bundle{i}.py").write_text(f"def junk{i}():\n    pass\n")
+    (tmp_path / ".gitignore").write_text("dist/\n")
+
+    result = run_discover(tmp_path)
+    names = {c["name"] for c in result["candidates"]}  # includes dropped, to be strict
+    assert "dist" not in names
+    assert "db" in names and "auth" in names
+
+
+@requires_git
+def test_discover_does_not_skip_tracked_paths(tmp_path):
+    # Sanity: with no .gitignore, every real source dir is still discovered.
+    _git_init(tmp_path)
+    _project(tmp_path)
+    result = run_discover(tmp_path)
+    names = {c["name"] for c in result["candidates"] if not c["dropped"]}
+    assert {"db", "auth"} <= names
+
+
+def test_discover_non_git_repo_still_works(tmp_path):
+    # No .git here: gitignore filtering fails soft, DEFAULT_IGNORES behavior is unchanged.
+    assert not (tmp_path / ".git").exists()
+    _project(tmp_path)
+    result = run_discover(tmp_path)
+    names = {c["name"] for c in result["candidates"] if not c["dropped"]}
+    assert {"db", "auth"} <= names
+
+
+# ---- explicit "0 written / N skipped" signal (FIX) ----
+def test_discover_apply_zero_written_emits_notice(tmp_path):
+    _project(tmp_path)
+    first = run_discover(tmp_path, apply=True)
+    assert "notice" not in first  # real manifests were written -> no confusing notice
+
+    again = run_discover(tmp_path, apply=True)  # all candidates already exist
+    assert again["written"] == [f"{config.BOUNDS_DIR}/{config.ROOT_FILE}"]  # only root re-merged
+    assert again["skipped"]  # the per-candidate manifests were skipped
+    assert "notice" in again
+    assert "0 new manifests" in again["notice"]
+    assert "calibrate" in again["notice"]  # points the user at the reconcile path
+
+
+def test_discover_dry_run_has_no_notice(tmp_path):
+    _project(tmp_path)
+    result = run_discover(tmp_path)  # dry-run never claims to have written anything
+    assert "notice" not in result

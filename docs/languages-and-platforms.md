@@ -10,8 +10,8 @@
 
 | Language | Extraction | Describe Merge | Validate | Status |
 |----------|-----------|---------------|----------|--------|
-| **Python** | Full (functions, classes, decorators) | Yes | Yes | **Implemented** |
-| **TypeScript / JavaScript** | Full (exports, classes, interfaces) | Yes | Yes | **Implemented** |
+| **Python** | Functions, classes, decorators (see gaps below) | Yes | Yes | **Implemented** |
+| **TypeScript / JavaScript** | ESM `import`/`export` (functions, classes, interfaces); plain `.js`/`.jsx` parse too (see gaps below) | Yes | Yes | **Implemented** |
 | **Go** | Functions, methods, exported symbols | Planned | Planned | Future (v0.2.0 target) |
 | **Rust** | `pub fn`, `pub struct`, `pub enum`, traits | Planned | Planned | Future (v0.2.0 target) |
 | **Java** | Classes, interfaces, public methods | Planned | Planned | Future (v0.3.0 target) |
@@ -22,6 +22,22 @@ roadmap. The **fallback path is not a catch-all** — it only covers files a man
 directly** (metadata is preserved, but there is no tree-sitter verification). Files in an unsupported
 language that are only **auto-discovered** (not declared in a manifest) are silently skipped rather
 than validated.
+
+> **Known gaps (current extractors).** Extraction is intentionally surface-level and ESM-first, so a
+> few constructs are **not** yet captured:
+>
+> - **TS/JS — CommonJS.** `require(...)` imports and `module.exports` / `exports.foo` are not
+>   extracted. Only ESM `import`/`export` is. (Plain `.js`/`.jsx` files still parse — they go through
+>   the TypeScript grammar — but only their ESM syntax is read.)
+> - **TS/JS — `export *` barrel re-exports.** A `export * from "./mod"` re-export contributes no
+>   symbols; only explicitly named exports (`export { foo } from "./mod"`) are captured.
+> - **TS/JS — `.pyi`-style decl files & namespaces.** TypeScript `namespace` blocks are not descended,
+>   and only **top-level** imports/exports are captured (nested or conditional ones are skipped).
+> - **Python — `.pyi` stubs** are not analyzed, and **`__all__` is not honored** — the extractor reports
+>   the actual top-level definitions rather than an `__all__`-declared surface.
+>
+> These are extraction limits, not validation bugs: a symbol Bounds can't see simply won't appear in a
+> contract. Declaring such a symbol in a manifest's `exposes` will surface it as unverified.
 
 **Adding a language is one adapter class** (`extract.base.LanguageAdapter` — set `language_name`,
 `extensions`, implement `extract`) plus a single registry entry in `extract/registry.py`. Use

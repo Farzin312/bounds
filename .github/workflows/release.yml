@@ -3,12 +3,13 @@ name: Release
 # Publishes to PyPI when a version tag (e.g. v0.1.0) is pushed.
 #
 # ONE-TIME SETUP (no secrets needed — uses PyPI Trusted Publishing / OIDC):
-#   1. Create the project on PyPI (or reserve the name) and add a Trusted Publisher:
+#   1. Create the bounds-cli project on PyPI (reserve the name) and add a Trusted Publisher:
 #        PyPI → project → Settings → Publishing → Add a GitHub publisher
 #        owner: Farzin312   repo: bounds   workflow: release.yml   environment: pypi
 #   2. In GitHub → Settings → Environments, create an environment named `pypi`.
-#   Then: bump the version in pyproject.toml + src/bounds/__init__.py, commit, and
-#         git tag v0.1.0 && git push origin v0.1.0
+#   Then tag the release — setuptools-scm derives the version from the tag, so there is
+#   no version string to bump anywhere:
+#         git tag -a v0.1.0 -m "Release v0.1.0" && git push origin v0.1.0
 #
 # Prefer trusted publishing (below). If you must use a token instead, set the
 # repo secret PYPI_API_TOKEN and add `with: { password: ${{ secrets.PYPI_API_TOKEN }} }`

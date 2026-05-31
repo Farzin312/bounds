@@ -3,9 +3,9 @@ requires = ["setuptools>=82.0.1", "wheel", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bounds"
+name = "bounds-cli"
 dynamic = ["version"]
-description = "Architecture contract enforcer for AI-native codebase understanding — zero-LLM structural validation via tree-sitter."
+description = "A verified, CI-enforced architecture contract for AI-native codebases — zero-LLM structural validation via tree-sitter."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -31,6 +31,7 @@ classifiers = [
 dependencies = [
     "click>=8.4.1",
     "PyYAML>=6.0.3",
+    "packaging>=23.0",
     "tree-sitter>=0.25.2,<0.26",
     "tree-sitter-python>=0.25.0",
     "tree-sitter-typescript>=0.23.2",

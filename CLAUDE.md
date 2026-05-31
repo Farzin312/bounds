@@ -66,8 +66,9 @@ GitHub is the single source of truth. To prevent staleness and ensure `pipx upgr
 
 `config.py` constants · `errors.py` codes · `models.py` data model · `manifest/` load+schema ·
 `extract/` tree-sitter adapters (`registry.get_adapter` dispatches by extension; `scan.py` = the
-**single home** for fs→extraction helpers — `iter_subsystem_files`/`iter_repo_source`/`extract_file`/
-`strip_ext`/`in_default_ignores`, shared by engine + describe + discover/calibrate; never copy a walk) ·
+**single home** for fs→extraction helpers — `walk_supported` (the one recursive source walk) /
+`iter_subsystem_files`/`iter_repo_source`/`extract_file`/`strip_ext`/`in_default_ignores`, shared by
+engine + describe + discover/calibrate; never copy a walk) ·
 `cache/store.py` SQLite `cache.db` (+ migration/partial-read/inspect) ·
 `validate/{engine,propagation,checks}` (`checks.resolve_import`/`build_suffix_index` = the one import
 resolver) · `describe.py` Tier-1+2 describe assembly · `cli.py` command wiring (arg-parse + one

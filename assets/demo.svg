@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 440" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" role="img" aria-label="Bounds CLI demo: install, discover, describe, impact">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 404" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" role="img" aria-label="Terminal session: the Bounds CLI installing, discovering manifests, describing a subsystem's verified contract, showing a change's blast radius, and validating for drift">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#0d1117"/>
@@ -12,49 +12,48 @@
     </style>
   </defs>
 
-  <rect width="760" height="440" rx="10" fill="url(#bg)"/>
+  <rect width="760" height="404" rx="10" fill="url(#bg)"/>
   <rect width="760" height="34" rx="10" fill="#161b22"/>
   <rect y="24" width="760" height="10" fill="#161b22"/>
   <circle cx="22" cy="17" r="6" fill="#ff5f56"/>
   <circle cx="42" cy="17" r="6" fill="#ffbd2e"/>
   <circle cx="62" cy="17" r="6" fill="#27c93f"/>
-  <text x="380" y="22" text-anchor="middle" class="h">bounds — architecture as a token-cheap contract</text>
+  <text x="380" y="22" text-anchor="middle" class="h">Terminal session — bounds CLI (architecture as a token-cheap contract)</text>
 
   <!-- Each line fades in on a slot, holds, then the 7s cycle loops. -->
   <g transform="translate(24,68)">
     <g opacity="1"><animate attributeName="opacity" values="0;1;1;1;1;1;1;0;0" keyTimes="0;0.06;0.2;0.4;0.6;0.8;0.93;0.98;1" dur="7s" repeatCount="indefinite"/>
-      <text class="g">$</text><text x="18" class="c">pipx install bounds</text>
+      <text class="g">$</text><text x="18" class="c">pipx install git+https://github.com/Farzin312/bounds.git</text>
     </g>
     <g opacity="1" transform="translate(0,34)"><animate attributeName="opacity" values="0;0;1;1;1;1;1;0;0" keyTimes="0;0.16;0.2;0.4;0.6;0.8;0.93;0.98;1" dur="7s" repeatCount="indefinite"/>
       <text class="g">$</text><text x="18" class="c">bounds discover --apply</text>
-      <text x="250" class="dim">› wrote 8 subsystem manifests + root.yaml</text>
+      <text x="250" class="dim">{ "applied": true, "written": [ … ] }</text>
     </g>
     <g opacity="1" transform="translate(0,68)"><animate attributeName="opacity" values="0;0;0;1;1;1;1;0;0" keyTimes="0;0.16;0.36;0.4;0.6;0.8;0.93;0.98;1" dur="7s" repeatCount="indefinite"/>
       <text class="g">$</text><text x="18" class="c">bounds describe auth</text>
     </g>
     <g opacity="1" transform="translate(0,98)"><animate attributeName="opacity" values="0;0;0;1;1;1;1;0;0" keyTimes="0;0.16;0.38;0.42;0.6;0.8;0.93;0.98;1" dur="7s" repeatCount="indefinite"/>
       <text x="18" class="dim">{</text>
-      <text x="34" y="0"><tspan class="b">"exposes"</tspan><tspan class="dim">: [</tspan><tspan class="c">"login","verify","register"</tspan><tspan class="dim">],</tspan></text>
+      <text x="34" y="0"><tspan class="b">"exposes"</tspan><tspan class="dim">: [{ </tspan><tspan class="b">"name"</tspan><tspan class="dim">:</tspan><tspan class="c">"login"</tspan><tspan class="dim">, </tspan><tspan class="b">"verified"</tspan><tspan class="dim">:</tspan><tspan class="g">true</tspan><tspan class="dim"> }, … ],</tspan></text>
     </g>
     <g opacity="1" transform="translate(0,122)"><animate attributeName="opacity" values="0;0;0;1;1;1;1;0;0" keyTimes="0;0.16;0.38;0.44;0.6;0.8;0.93;0.98;1" dur="7s" repeatCount="indefinite"/>
-      <text x="34"><tspan class="b">"verified"</tspan><tspan class="dim">: </tspan><tspan class="g">true</tspan><tspan class="dim">, </tspan><tspan class="b">"consumed_by"</tspan><tspan class="dim">: [</tspan><tspan class="c">"billing","api"</tspan><tspan class="dim">] }</tspan></text>
-      <text x="540" class="y">~400 tokens</text>
+      <text x="34"><tspan class="b">"consumed_by"</tspan><tspan class="dim">: [</tspan><tspan class="c">"billing","api"</tspan><tspan class="dim">], </tspan><tspan class="b">"validation_status"</tspan><tspan class="dim">: </tspan><tspan class="g">"fresh"</tspan><tspan class="dim"> }</tspan></text>
     </g>
     <g opacity="1" transform="translate(0,156)"><animate attributeName="opacity" values="0;0;0;0;0;1;1;0;0" keyTimes="0;0.16;0.38;0.5;0.58;0.62;0.93;0.98;1" dur="7s" repeatCount="indefinite"/>
       <text class="g">$</text><text x="18" class="c">bounds impact auth</text>
-      <text x="220" class="m">› blast radius: 3 subsystems</text>
+      <text x="220" class="m">{ "blast_radius": 3, "transitive_consumers": [ … ] }</text>
     </g>
     <g opacity="1" transform="translate(0,190)"><animate attributeName="opacity" values="0;0;0;0;0;0;1;1;0" keyTimes="0;0.16;0.38;0.5;0.58;0.78;0.82;0.95;1" dur="7s" repeatCount="indefinite"/>
       <text class="g">$</text><text x="18" class="c">bounds validate --quick</text>
-      <text x="280" class="g">✓ fresh · 0 drift · 141ms</text>
+      <text x="280" class="g">{ "validation_status": "fresh", "ok": true }</text>
     </g>
   </g>
 
-  <!-- value strip: three clean full-width rows -->
-  <g transform="translate(24,322)">
-    <rect x="-4" y="-4" width="712" height="86" rx="8" fill="#11161d" stroke="#21262d"/>
-    <text x="14" y="24"><tspan class="b">▸ </tspan><tspan class="c" font-size="14">~400 tokens to understand a subsystem</tspan><tspan class="dim" font-size="12">   ·   not thousands spent reading source</tspan></text>
-    <text x="14" y="48"><tspan class="g">▸ </tspan><tspan class="c" font-size="14">zero LLM in the structural path</tspan><tspan class="dim" font-size="12">   ·   tree-sitter + pure Python · sub-200ms</tspan></text>
-    <text x="14" y="72"><tspan class="m">▸ </tspan><tspan class="c" font-size="14">drift caught on every commit</tspan><tspan class="dim" font-size="12">   ·   one command wires 8 coding agents</tspan></text>
+  <!-- value strip: three short rows; the measured token range + caveat live in the README prose -->
+  <g transform="translate(24,312)">
+    <rect x="-4" y="-4" width="712" height="80" rx="8" fill="#11161d" stroke="#21262d"/>
+    <text x="14" y="22"><tspan class="b">▸ </tspan><tspan class="c" font-size="14">a few hundred tokens for a small subsystem</tspan><tspan class="dim" font-size="12">   ·   not source you read</tspan></text>
+    <text x="14" y="46"><tspan class="g">▸ </tspan><tspan class="c" font-size="14">zero LLM in the structural path</tspan><tspan class="dim" font-size="12">   ·   tree-sitter + pure Python</tspan></text>
+    <text x="14" y="70"><tspan class="m">▸ </tspan><tspan class="c" font-size="14">drift caught on every commit</tspan><tspan class="dim" font-size="12">   ·   one command wires 8 agents</tspan></text>
   </g>
 </svg>

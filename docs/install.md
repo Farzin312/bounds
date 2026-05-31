@@ -27,16 +27,17 @@ cd bounds
 pip install -e ".[dev]"     # editable install + pytest
 ```
 
-**Bootstrap installer (`install.sh`)** — the PEP-668-safe bootstrap (pipx-preferred). It targets the
-PyPI package by default (so it fully works once `bounds` is published), but you can point it at a git
-ref today:
+**Bootstrap installer (`install.sh`)** — the PEP-668-safe bootstrap (pipx-preferred). Because the PyPI
+name is not yet reserved for this project, the installer **defaults to the git ref** so you never pull
+the wrong package; set `BOUNDS_REF` to pin a branch or tag:
 
 ```bash
-BOUNDS_REF=main ./install.sh   # installs git+https://github.com/Farzin312/bounds@main
+./install.sh                   # installs git+https://github.com/Farzin312/bounds@main (default)
+BOUNDS_REF=v0.1.0 ./install.sh # pin a specific tag
 ```
 
 The installer never does `curl | sh` remote execution, `eval`, or `sudo` — it only runs `pipx`/`pip`
-against the package name.
+against a git ref.
 
 ### Verify
 
@@ -53,15 +54,18 @@ bounds --help    # verify the install
 | **pipx (git)** | `pipx install "git+https://github.com/Farzin312/bounds.git"` | **Works today** |
 | **pip (git)** | `pip install "git+https://github.com/Farzin312/bounds.git"` | **Works today** |
 | **Clone + editable** | `pip install -e ".[dev]"` | **Works today** |
-| **install.sh** | `BOUNDS_REF=main ./install.sh` (git ref) | **Works today** (PyPI default mode pending publish) |
-| **pip / pipx (PyPI)** | `pipx install bounds` | Release workflow configured — pending PyPI publish |
-| **Homebrew** | `brew install Farzin312/bounds/bounds` | Bootstrapped — depends on PyPI publish |
-| **curl** | `curl -sSL .../install.sh \| bash` | Bootstrapped — depends on PyPI publish |
+| **install.sh** | `BOUNDS_REF=main ./install.sh` (git ref) | **Works today** (defaults to the git ref) |
+| **pip / pipx (PyPI)** | `pipx install bounds-cli` | **Reserved as `bounds-cli` — publish pending** |
+| **Homebrew** | `brew install --HEAD Farzin312/bounds/bounds` | **`--HEAD` builds from main today; stable pending publish** |
+| **curl** | `curl -sSL .../install.sh \| bash` | **Pending publish (installer defaults to the git ref today)** |
 | **Standalone signed binary** | (no Python required) | Planned (v0.2.0) |
 | **conda-forge / Docker** | `conda install` / `docker pull` | Planned (v0.2.0) |
 
-The Homebrew tap formula (`Formula/bounds.rb`) and `curl | bash` flow are wired up but resolve the
-package from PyPI, so both depend on the PyPI publish landing first.
+> **Heads-up on the PyPI name.** The bare name `bounds` on PyPI is currently held by an *unrelated*
+> package (a geographic-raster utility), so **do not** `pip install bounds` expecting this tool — you
+> would get the wrong package. This tool is published as **`bounds-cli`** (publish pending); until then, install from the git ref
+> above. The Homebrew tap formula (`Formula/bounds.rb`) and `curl | bash` flow are wired up but resolve
+> the package from PyPI, so both also wait on that reservation.
 
 ---
 

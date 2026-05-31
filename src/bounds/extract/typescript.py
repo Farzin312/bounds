@@ -9,6 +9,14 @@ const/let bindings, interfaces, type aliases, enums, default exports and
 re-export clauses). Non-exported top-level declarations are still captured (with
 ``exported=False``) so boundary checks can see that internals exist.
 ``import_statement`` and ``export ... from`` clauses yield import references.
+
+CommonJS is covered too: a ``require("mod")`` call (including inside a
+``const x = require(...)`` or ``const {a} = require(...)`` binding) yields an
+import reference, and a top-level ``module.exports = ...`` / ``module.exports.foo
+= ...`` / ``exports.foo = ...`` assignment yields an exported symbol. Barrel
+re-exports (``export * from "./m"`` and ``export * as ns from "./m"``) yield an
+import reference so the dependency stays visible to validation/propagation; the
+cross-file union of ``export *`` is not expanded into individual symbols here.
 """
 
 from __future__ import annotations
@@ -126,6 +134,107 @@ def _import_names(clause: ts.Node, source: bytes) -> list[str]:
     return names
 
 
+def _require_module(call: ts.Node, source: bytes) -> str | None:
+    """If ``call`` is a ``require("mod")`` call, return ``"mod"``, else ``None``.
+
+    Recognizes a ``call_expression`` whose callee is the identifier ``require`` and
+    whose first argument is a string literal. A dynamic ``require(expr)`` with a
+    non-literal argument yields ``None`` (no statically knowable module).
+    """
+    if call.type != "call_expression":
+        return None
+    fn = call.child_by_field_name("function")
+    if fn is None or fn.type != "identifier" or _text(fn, source) != "require":
+        return None
+    args = call.child_by_field_name("arguments")
+    if args is None:
+        return None
+    first = next(iter(args.named_children), None)
+    if first is None or first.type != "string":
+        return None
+    return _string_value(first, source)
+
+
+def _collect_requires(node: ts.Node, source: bytes, imports: list[ImportRef]) -> None:
+    """Append an ImportRef for every ``require("mod")`` call found under ``node``.
+
+    Walks the subtree so a require inside a binding (``const x = require("m")``,
+    ``const {a} = require("m")``) or a bare side-effect ``require("m")`` is captured.
+    Module specifiers are deduplicated per statement (a single statement requiring the
+    same module twice records it once) while preserving source order.
+    """
+    seen: set[str] = set()
+    stack: list[ts.Node] = [node]
+    while stack:
+        cur = stack.pop()
+        mod = _require_module(cur, source)
+        if mod is not None and mod not in seen:
+            seen.add(mod)
+            imports.append(ImportRef(module=mod, names=[], line=_line(cur)))
+        stack.extend(reversed(cur.named_children))
+
+
+def _commonjs_export_target(left: ts.Node, source: bytes, line: int) -> Symbol | None:
+    """The exported Symbol named by a single CommonJS assignment target, or None.
+
+    A target is the ``left`` of one assignment: ``module.exports`` (a ``default``
+    export), or ``module.exports.<name>`` / ``exports.<name>`` (named export ``name``).
+    """
+    if left.type != "member_expression":
+        return None
+    obj = left.child_by_field_name("object")
+    prop = left.child_by_field_name("property")
+    if obj is None or prop is None:
+        return None
+    obj_text = _text(obj, source)
+    prop_text = _text(prop, source)
+    # `module.exports = ...` -> a single default-style export.
+    if obj_text == "module" and prop_text == "exports":
+        return Symbol(name="default", kind="default", line=line, exported=True)
+    # `module.exports.foo = ...` -> named export `foo`.
+    if obj.type == "member_expression":
+        inner_obj = obj.child_by_field_name("object")
+        inner_prop = obj.child_by_field_name("property")
+        if (
+            inner_obj is not None
+            and inner_prop is not None
+            and _text(inner_obj, source) == "module"
+            and _text(inner_prop, source) == "exports"
+        ):
+            return Symbol(name=prop_text, kind="unknown", line=line, exported=True)
+    # `exports.foo = ...` -> named export `foo`.
+    if obj_text == "exports":
+        return Symbol(name=prop_text, kind="unknown", line=line, exported=True)
+    return None
+
+
+def _commonjs_export_symbols(node: ts.Node, source: bytes) -> list[Symbol]:
+    """Exported Symbol(s) from a top-level CommonJS assignment expression.
+
+    Handles ``module.exports = <expr>`` (a single ``default`` export), and the named
+    forms ``module.exports.<name> = <expr>`` / ``exports.<name> = <expr>`` (one symbol
+    per assigned property name). Chained assignments
+    (``exports.foo = exports.bar = <expr>``) yield one symbol per target in source
+    order. A non-export assignment yields nothing.
+    """
+    if node.type != "expression_statement":
+        return []
+    assign = next((c for c in node.named_children if c.type == "assignment_expression"), None)
+    if assign is None:
+        return []
+    line = _line(node)
+    symbols: list[Symbol] = []
+    # Walk the assignment chain left-to-right, collecting each export target.
+    while assign is not None and assign.type == "assignment_expression":
+        left = assign.child_by_field_name("left")
+        if left is not None:
+            sym = _commonjs_export_target(left, source, line)
+            if sym is not None:
+                symbols.append(sym)
+        assign = assign.child_by_field_name("right")
+    return symbols
+
+
 class TypeScriptAdapter(LanguageAdapter):
     """Extracts top-level exports and imports from TS/JS source files."""
 
@@ -144,8 +253,15 @@ class TypeScriptAdapter(LanguageAdapter):
                 elif t in _DECL_KIND or t in ("lexical_declaration", "variable_declaration"):
                     # Non-exported top-level declaration: capture as internal.
                     symbols.extend(_decl_symbols(node, source, _line(node), exported=False))
+                    # A `const x = require("mod")` binding still carries an import edge.
+                    _collect_requires(node, source, imports)
                 elif t == "import_statement":
                     self._collect_import(node, source, imports)
+                elif t == "expression_statement":
+                    # CommonJS: `module.exports = ...` / `exports.foo = ...` exports,
+                    # and bare `require("mod")` calls (e.g. side-effect requires).
+                    symbols.extend(_commonjs_export_symbols(node, source))
+                    _collect_requires(node, source, imports)
         except Exception as e:  # fail soft: bad file -> result carrying the error
             return make_result(rel_path, self.language_name, [], [], source, error=str(e))
 
@@ -165,10 +281,29 @@ class TypeScriptAdapter(LanguageAdapter):
                 source_string = c
                 break
 
+        # Barrel re-export: `export * from "mod"` / `export * as ns from "mod"`.
+        # Record the dependency as an import edge so validation/propagation can see
+        # it; the cross-file union of `export *` is not expanded into symbols here.
+        # `export * as ns` additionally binds a namespace symbol, which we emit.
+        is_star = any(c.type in ("namespace_export", "*") for c in node.children)
+        if is_star and source_string is not None:
+            imports.append(
+                ImportRef(module=_string_value(source_string, source), names=[], line=line)
+            )
+
         out: list[Symbol] = []
         for child in node.named_children:
             ct = child.type
-            if ct == "export_clause":
+            if ct == "namespace_export":
+                # `export * as ns from "mod"`: the namespace alias is an exported symbol.
+                name_node = next(
+                    (c for c in child.named_children if c.type == "identifier"), None
+                )
+                if name_node is not None:
+                    out.append(
+                        Symbol(name=_text(name_node, source), kind="const", line=line, exported=True)
+                    )
+            elif ct == "export_clause":
                 clause_syms = _export_clause_symbols(child, source, line)
                 out.extend(clause_syms)
                 if source_string is not None:

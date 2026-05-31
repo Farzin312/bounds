@@ -4,7 +4,9 @@
 
 ### A verified, CI-enforced contract of what your architecture is *supposed* to be
 
-<img src="assets/demo.svg" alt="Bounds in four commands: discover manifests, describe a subsystem in ~400 tokens, see a change's blast radius, validate for drift" width="760">
+**Architecture tooling for AI-native codebases — zero LLM inside.**
+
+<img src="assets/demo.svg" alt="Terminal session: Bounds in four commands — discover manifests, describe a subsystem's verified contract, see a change's blast radius, validate for drift" width="760">
 
 **Bounds** turns each subsystem's intended boundary — its public surface and its cross-module
 dependencies — into a tiny YAML contract, then uses **tree-sitter (zero LLM)** to verify that
@@ -44,7 +46,7 @@ But an agent doesn't need every function in `auth.ts`. It needs *"auth exposes `
 machine can reason about it **deterministically**.
 
 <div align="center">
-<img src="assets/before-after.svg" alt="Without Bounds an agent reads 5-15 source files for thousands of unverified tokens; with Bounds a single describe call returns a tree-sitter-verified contract in about 400 tokens" width="760">
+<img src="assets/before-after.svg" alt="How a coding agent retrieves context: without Bounds it reads 5-15 source files for thousands of unverified tokens; with Bounds a single describe call returns a tree-sitter-verified contract in a few hundred tokens" width="760">
 </div>
 
 ## What Bounds does
@@ -64,7 +66,7 @@ tree-sitter to validate them against your real source, in both directions.
 ## Why use it
 
 - **Catch architecture drift in CI before it merges** — boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows.
-- **Give agents a ~400-token verified contract instead of source** — one cheap CLI call returns a tree-sitter-confirmed public surface, not a dozen files an agent has to read and guess at.
+- **Give agents a small verified contract instead of source** — one cheap CLI call returns a tree-sitter-confirmed public surface (a few hundred tokens for a small subsystem on this repo; cost scales with how many symbols it *exposes*, not how big it is), not a dozen files an agent has to read and guess at.
 - **Show blast radius before a risky change** — `bounds impact` returns the transitive consumer set and the interfaces each one relies on, so you know the reach before you write the edit.
 
 See [docs/why-bounds.md](docs/why-bounds.md) for the full rationale.
@@ -81,6 +83,7 @@ cd your-project
 bounds discover --apply      # auto-generate root.yaml + manifests from your source
 bounds describe auth         # one subsystem's verified surface, as JSON
 bounds validate --quick      # fast incremental drift check
+bounds upgrade-check         # is a newer release available?
 ```
 
 `bounds discover` groups source by directory, tree-sitter-extracts each subsystem's `exposes`, infers
@@ -95,13 +98,15 @@ bounds validate --quick      # fast incremental drift check
 
 ---
 
-## Scales as your codebase grows
+## Scales with your public API, not your code size
 
-Reading source is **O(files)** — the bigger the codebase, the bigger the read. A Bounds contract is
-**O(public API)** — a subsystem with 50 internal functions and 5 exports stays roughly flat.
+Reading source is **O(files)** — the bigger the subsystem, the more an agent reads. A Bounds contract
+is **O(public API)** — it grows only with what a subsystem *exposes*, not its internal size, so it
+climbs far more slowly: from a few hundred tokens for a small subsystem (a subsystem with 50 internal
+functions and 5 exports stays small).
 
 <div align="center">
-<img src="assets/token-scaling.svg" alt="Line chart: reading source climbs steeply as O of files toward tens of thousands of tokens, while a Bounds describe contract stays flat near 400 tokens as O of public API" width="700">
+<img src="assets/token-scaling.svg" alt="Line chart: reading a subsystem's source climbs steeply as the subsystem grows, toward tens of thousands of tokens, while a Bounds describe contract grows only with how much public API the subsystem exposes — far more slowly, from a few hundred tokens for a small subsystem" width="700">
 </div>
 
 The token win *widens* with size. See [docs/token-economics.md](docs/token-economics.md) for the

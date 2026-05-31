@@ -37,6 +37,12 @@ pip install -e ".[dev]"
 bounds --help
 ```
 
+> **After `git pull`, re-run `pip install -e .`** to refresh `bounds --version`. This repo derives its
+> version from git tags via `setuptools-scm`, and that version is computed at **(re)build time**, not on
+> every `git pull` — so an editable install keeps reporting the version from when it was last built until
+> you reinstall. (No version string is ever hand-edited; see "Source of Truth & Versioning" in
+> [CLAUDE.md](CLAUDE.md).)
+
 ## Project Structure
 
 ```
@@ -58,7 +64,7 @@ bounds/
 │   ├── calibrate.py        # Manifest↔source reconciliation
 │   ├── agentsync.py        # Cross-agent config generation
 │   └── ciconfig.py         # CI config generation
-├── tests/                  # Pytest test suite (10 files, 157 tests)
+├── tests/                  # Pytest test suite (10 files; CI reports the live count)
 ├── docs/                   # Deep-dive documentation (linked from the README entrance)
 ├── ARCHITECTURE.md         # Engineering contract
 ├── CONTRIBUTING.md         # This file
@@ -158,7 +164,7 @@ All tests must pass. If you add a new feature, include tests.
 
 ### Writing Tests
 
-- Tests live in `tests/` and are grouped by feature area (10 files, 157 tests):
+- Tests live in `tests/` and are grouped by feature area (10 files; run the full suite — CI reports the count):
   `test_extract.py`, `test_validate.py`, `test_schema_flex.py` (roles/criticality),
   `test_cache_sqlite.py`, `test_discover.py`, `test_calibrate.py`, `test_agentsync.py`,
   `test_ciconfig.py`, `test_cli.py`, and `test_commands_cli.py`.

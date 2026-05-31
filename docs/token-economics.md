@@ -6,7 +6,7 @@
 
 ---
 
-An AI agent's only real cost is **tokens into context**, so that is the only unit that matters here. The core claim: Bounds reduces the context an agent needs to understand your codebase from thousands of tokens to a few hundred.
+An AI agent's only real cost is **tokens into context**, so that is the only unit that matters here. The core claim: Bounds replaces reading a subsystem's source with a compact, tree-sitter-verified contract whose cost tracks how many symbols the subsystem *exposes* — a few hundred tokens for a small, well-factored subsystem, and still far below re-reading the full source for a large one.
 
 ## Token cost comparison
 
@@ -14,14 +14,14 @@ An AI agent's only real cost is **tokens into context**, so that is the only uni
 
 ### Measured on this repo
 
-To understand the `models` subsystem's public API (9 exports, consumed by 5 subsystems):
+To understand the `models` subsystem's public API (10 exports, consumed by 5 subsystems) — a small, well-factored subsystem:
 
 | Read this | Size | Token estimate |
 |-----------|------|----------------|
-| `bounds describe models` (verified JSON contract) | 1,593 bytes | **~400 tokens** |
-| `src/bounds/models.py` (the full source file) | 11,489 bytes | **~2,900 tokens** |
+| `bounds describe models` (verified JSON contract) | ~1,620 bytes | **~400 tokens** |
+| `src/bounds/models.py` (the full source file) | ~11,660 bytes | **~2,900 tokens** |
 
-The agent gets the verified public surface for **~400 tokens** instead of **~2,900 tokens** of source — and in real cases a subsystem spans several files, so the source side is usually far larger.
+The agent gets the verified public surface for **~400 tokens** instead of **~2,900 tokens** of source — and in real cases a subsystem spans several files, so the source side is usually far larger. This is one small subsystem on one repo: a contract's size tracks the number of symbols a subsystem exposes, so a wide-API subsystem costs proportionally more (see the measured range below).
 
 For the whole-system map across all 8 subsystems:
 
@@ -33,7 +33,7 @@ For the whole-system map across all 8 subsystems:
 
 | Scenario | Without Bounds | With Bounds | Token savings |
 |----------|----------------|-------------|---------------|
-| Understand one subsystem | Read 1–15 source files (thousands of tokens) | `bounds describe <name>` (~400 tokens of verified contract) | ~85–99% |
+| Understand one subsystem | Read 1–15 source files (thousands of tokens) | `bounds describe <name>` (a few hundred tokens for a small subsystem; scales with its exposed API) | ~85–99% for well-factored subsystems |
 | Map all subsystems | Grep `class\|def\|export` across the tree | `bounds list` (~660 tokens) | Near-total |
 | Dependency blast radius | Trace imports by hand | `bounds impact <name>` (transitive consumers + relied-on interfaces) | ~99% |
 | Detect architecture drift | Manual code review | `bounds validate` (structured report, 0 LLM) | Subjective → deterministic |
@@ -46,13 +46,17 @@ These percentages follow from the single-repo measurements above; the same cavea
 The token win isn't a flat discount — it *widens* with codebase size, and that is the whole point.
 
 - **Reading source is O(files).** To understand a subsystem by reading it, an agent's token cost grows with how much code that subsystem (and its neighbors) contains. Bigger codebase → bigger reads.
-- **A Bounds contract is O(public API).** `bounds describe` returns only the declared, tree-sitter-verified surface — `exposes`, `consumes`, `consumed_by`. A subsystem with 50 internal functions and 5 exports is still ~5 lines. As the implementation grows, the contract stays roughly **flat**.
+- **A Bounds contract is O(symbols exposed).** `bounds describe` returns only the declared, tree-sitter-verified surface — `exposes`, `consumes`, `consumed_by`. A subsystem with 50 internal functions and 5 exports is still ~5 expose entries. So the contract stays roughly **flat as a subsystem's *internals* grow** — but it **scales with how many symbols it *exposes***. A small, well-factored subsystem is cheap; a sprawling one with hundreds of exports is not.
 
-| Codebase size | Read the subsystem's source | `bounds describe <name>` |
-|---------------|-----------------------------|--------------------------|
-| Small (a few files) | hundreds–low-thousands of tokens | ~400 tokens |
-| Medium (dozens of files) | many thousands of tokens | ~400 tokens |
-| Large (hundreds of files) | tens of thousands of tokens | ~400 tokens |
+The table below tracks the dimension that matters for the contract — *internal* size at a roughly fixed public API — so the describe column stays flat. (Widen the public API and that column grows; see the measured range below.)
+
+| Subsystem internals (fixed public API) | Read the subsystem's source | `bounds describe <name>` |
+|----------------------------------------|-----------------------------|--------------------------|
+| Small (a few files) | hundreds–low-thousands of tokens | flat (a few hundred tokens) |
+| Medium (dozens of files) | many thousands of tokens | flat (a few hundred tokens) |
+| Large (hundreds of files) | tens of thousands of tokens | flat (a few hundred tokens) |
+
+**Measured range (single-source data point, not a guarantee).** On a 185-manifest TypeScript repo, a `describe` contract measured **~170–570 tokens for a small, well-factored subsystem**, rising to **~1.5k–13k tokens** for large or poorly-factored ones (median ~3,240; max ~13,360 for a 255-export subsystem). The driver is the export count, not the line count — the takeaway is *factor your subsystems*, not *every contract is ~400 tokens*.
 
 ### The context-rot risk (framed as risk, not a guaranteed fix)
 

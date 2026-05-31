@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" role="img" aria-label="Agent context before and after Bounds: dozens of source files and thousands of tokens versus one describe call at about 400 verified tokens">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" role="img" aria-label="How a coding agent retrieves codebase context: without Bounds it reads many source files for thousands of unverified tokens; with Bounds one describe call returns a tree-sitter-verified contract in a few hundred tokens">
   <defs>
     <linearGradient id="ba_bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#0d1117"/>
@@ -11,18 +11,17 @@
     </style>
   </defs>
 
-  <rect width="760" height="300" rx="10" fill="url(#ba_bg)"/>
+  <rect width="760" height="320" rx="10" fill="url(#ba_bg)"/>
 
-  <!-- Staged reveal fades in, holds, then the 8s cycle resets and loops so it
-       replays whenever a reader scrolls the image into view on GitHub. -->
+  <text x="380" y="26" text-anchor="middle" class="c" font-size="13" font-weight="bold">How a coding agent retrieves context</text>
+  <text x="380" y="44" text-anchor="middle" class="dim" font-size="11">reading many source files vs one bounds describe call</text>
 
   <!-- WITHOUT panel -->
-  <g transform="translate(20,24)">
+  <g transform="translate(20,56)">
     <rect x="0" y="0" width="340" height="252" rx="8" fill="#11161d" stroke="#21262d"/>
     <text x="16" y="28" class="r" font-size="12" font-weight="bold">WITHOUT BOUNDS</text>
     <text x="16" y="50" class="c" font-size="12">agent reads source to guess structure</text>
 
-    <!-- file stack: rows fade in one by one (the slow read) -->
     <g transform="translate(16,66)">
       <g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.019;0.069;0.81;0.91;1" dur="8s" repeatCount="indefinite"/>
         <rect x="0" y="0" width="150" height="18" rx="3" fill="#161b22" stroke="#30363d"/><text x="8" y="13" class="dim" font-size="11">auth.ts</text></g>
@@ -45,10 +44,10 @@
 
   <!-- arrow -->
   <g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.188;0.238;0.81;0.91;1" dur="8s" repeatCount="indefinite"/>
-    <text x="375" y="158" text-anchor="middle" class="b" font-size="26">→</text></g>
+    <text x="375" y="190" text-anchor="middle" class="b" font-size="26">→</text></g>
 
-  <!-- WITH panel: structure static, content arrives in one beat (the single fast call) -->
-  <g transform="translate(400,24)">
+  <!-- WITH panel -->
+  <g transform="translate(400,56)">
     <rect x="0" y="0" width="340" height="252" rx="8" fill="#11161d" stroke="#21262d"/>
     <text x="16" y="28" class="g" font-size="12" font-weight="bold">WITH BOUNDS</text>
     <g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.219;0.281;0.81;0.91;1" dur="8s" repeatCount="indefinite"/>
@@ -57,14 +56,14 @@
         <text class="g" font-size="12">$</text><text x="14" class="c" font-size="12">bounds describe auth</text>
       </g>
       <g transform="translate(16,86)">
-        <rect x="0" y="0" width="300" height="92" rx="6" fill="#161b22" stroke="#30363d"/>
-        <text x="12" y="22" class="dim" font-size="12">{</text>
-        <text x="24" y="42" font-size="12"><tspan class="b">"exposes"</tspan><tspan class="dim">: [</tspan><tspan class="c">"login","verify",…</tspan><tspan class="dim">],</tspan></text>
-        <text x="24" y="62" font-size="12"><tspan class="b">"verified"</tspan><tspan class="dim">: </tspan><tspan class="g">true</tspan></text>
-        <text x="12" y="82" class="dim" font-size="12">}</text>
+        <rect x="0" y="0" width="300" height="96" rx="6" fill="#161b22" stroke="#30363d"/>
+        <text x="12" y="22" font-size="11"><tspan class="dim">{ </tspan><tspan class="b">"exposes"</tspan><tspan class="dim">: [</tspan></text>
+        <text x="26" y="44" font-size="11"><tspan class="dim">{</tspan><tspan class="b">"name"</tspan><tspan class="dim">:</tspan><tspan class="c">"login"</tspan><tspan class="dim">,</tspan><tspan class="b">"verified"</tspan><tspan class="dim">:</tspan><tspan class="g">true</tspan><tspan class="dim">}</tspan></text>
+        <text x="12" y="66" font-size="11"><tspan class="dim">], </tspan><tspan class="b">"validation_status"</tspan><tspan class="dim">:</tspan></text>
+        <text x="26" y="86" font-size="11"><tspan class="g">"fresh"</tspan><tspan class="dim"> }</tspan></text>
       </g>
-      <text x="16" y="212" class="y" font-size="20" font-weight="bold">≈ 400 tokens</text>
-      <text x="16" y="234" class="dim" font-size="11">tree-sitter-verified · flat as code grows</text>
+      <text x="16" y="216" class="y" font-size="18" font-weight="bold">≈ a few hundred tokens</text>
+      <text x="16" y="236" class="dim" font-size="11">tree-sitter-verified · O(exposed API)</text>
     </g>
   </g>
 </svg>
