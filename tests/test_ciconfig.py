@@ -1,4 +1,4 @@
-"""Tests for the CI gate generator (s-20), bounds.ciconfig."""
+"""Tests for the CI gate generator, bounds.ciconfig."""
 
 from __future__ import annotations
 

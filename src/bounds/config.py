@@ -52,19 +52,34 @@ ROLE_BASE_BEHAVIOR = {
 # any hand-written source file; legitimately-huge generated files should be gitignored anyway.
 MAX_FILE_BYTES = 1_000_000
 
-# Directories never descended into when globbing subsystem files.
+# Directories never descended into when globbing subsystem files. Kept here so `discover`
+# never mines build/generated output into garbage manifests. Grouped by ecosystem for
+# readability; this is a set, so iteration order is irrelevant to determinism (callers sort
+# at serialization boundaries).
 DEFAULT_IGNORES = {
+    # Dependencies & VCS
     "node_modules",
     ".git",
+    # Generic build output
     "dist",
     "build",
+    "out",
+    "coverage",
+    # JS/TS framework build & tooling dirs
+    ".next",
+    ".turbo",
+    ".svelte-kit",
+    ".vercel",
+    ".cache",
+    # Python
     "__pycache__",
     ".venv",
     "venv",
-    ".bounds",
-    ".compact",  # legacy config dir
     ".mypy_cache",
     ".pytest_cache",
+    # Bounds itself
+    ".bounds",
+    ".compact",  # legacy config dir
 }
 
 # ---- Propagation ----

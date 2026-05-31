@@ -20,18 +20,19 @@ list and severity/exit-code mapping.
 
 | Command | What it returns |
 |---------|-----------------|
-| `bounds init` | Scaffolds `.bounds/`. `--root`, `--subsystem <name>`, `--namespace <ns>`, `--root <path>` |
+| `bounds init` | Scaffolds `.bounds/`. `--root` (flag — writes `root.yaml`), `--subsystem <name>`, `--namespace <ns>` |
 | `bounds list` | All subsystems with role, criticality, exposes, consumes, consumed_by. `--namespace <ns>` filters |
-| `bounds describe <name>` | One subsystem's merged Tier-1+2 surface as JSON (`verified`/`file`/`entry_point` per expose). `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
+| `bounds describe <name>` | One subsystem's merged Tier-1+2 surface as JSON: per-expose `name`/`kind`/`file`/`verified`, plus subsystem-level `consumes`/`consumed_by`/`entry_points`/`validation_status`. `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
 | `bounds impact <name>` | Transitive consumer blast radius + which interfaces each direct consumer relies on. Zero LLM |
 | `bounds validate` | Full validation — all 6 checks. `--quick`, `--mode quick\|full\|preflight\|hotfix\|audit`, `--enforce on\|off`, `--base <ref>` |
 | `bounds preflight` | 6 pre-PR checks in blocking mode |
-| `bounds overview` | Project dashboard: subsystem health, file counts, language breakdown |
+| `bounds overview` | Project dashboard: `project`, subsystem count, `roles`/`criticality` breakdown, dependency `edges` (from/to/interfaces), `cycles`, `schema_issues`, and a `health` summary (`ok`/`schema_errors`/`cycles`) |
 | `bounds discover` | Auto-generate candidate manifests from un-bounded source. `--apply`, `--namespace <ns>`, `--merge-into 'name=p1,p2'` |
 | `bounds calibrate` | Reconcile manifests vs tree-sitter reality (ADD / REMOVE / NEEDS_REVIEW / `consumes` fixes). `--apply`, `--subsystem <n>` |
 | `bounds agent` | Wire Bounds into eight coding agents. `--sync`, `--detect`, `--check`, per-agent flags |
 | `bounds ci` | Generate CI gate config. `--install`, `--action`, `--precommit`, `--gitlab`, `--all` |
 | `bounds cache` | Manage the binary `.bounds/cache.db`. `--inspect`, `--prune`, `--migrate` |
+| `bounds upgrade-check` | Opt-in: ask the GitHub Releases API whether a newer Bounds release exists. Returns `current`, `latest`, `outdated`, `is_dev_build`, `checked`, `fix`, `note`. The **only** command that makes a network call (off the structural path); fails soft when offline and always exits `0` |
 
 ---
 

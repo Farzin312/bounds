@@ -1,4 +1,4 @@
-"""Calibration (s-16): reconcile manifests against tree-sitter reality."""
+"""Calibration: reconcile manifests against tree-sitter reality."""
 
 from __future__ import annotations
 

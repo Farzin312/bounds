@@ -44,6 +44,8 @@ def emit(payload: dict, human: bool, stream=None, ci: bool = False) -> None:
         stream.write(_render_report_dict_human(payload))
     elif isinstance(payload, dict) and {"symbol", "match", "results"} <= payload.keys():
         stream.write(_render_where_human(payload))
+    elif isinstance(payload, dict) and {"current", "checked", "outdated"} <= payload.keys():
+        stream.write(_render_upgrade_check_human(payload))
     elif isinstance(payload, dict) and "namespace" in payload and "subsystems" in payload:
         stream.write(_render_namespace_human(payload))
     elif isinstance(payload, dict) and "name" in payload and "role" in payload:
@@ -95,6 +97,18 @@ def _render_where_human(payload: dict) -> str:
             f"  → {r.get('owning_subsystem')}{tag}"
         )
     return "\n".join(lines)
+
+
+def _render_upgrade_check_human(payload: dict) -> str:
+    """Render a ``bounds upgrade-check`` result as one short line.
+
+    Re-renders the same data the JSON carries — the ``note`` already holds the
+    human-facing summary for every branch (up to date / newer release / dev build /
+    couldn't check / no release yet), so we surface it verbatim rather than
+    re-deriving the verdict and risking drift from the JSON.
+    """
+    note = payload.get("note", "")
+    return note or "upgrade check complete"
 
 
 def _render_namespace_human(payload: dict) -> str:
@@ -232,7 +246,7 @@ def _render_subsystem_human(payload: dict) -> str:
 
     exposes = payload.get("exposes", [])
     if exposes:
-        lines.append(f"")
+        lines.append("")
         lines.append(f"exposes ({len(exposes)}):")
         for e in exposes:
             name = e.get("name", "?")
@@ -249,12 +263,12 @@ def _render_subsystem_human(payload: dict) -> str:
             loc = f"  {file}" if file else ""
             lines.append(f"  - {name} ({kind}){loc}{tag}")
     else:
-        lines.append(f"")
+        lines.append("")
         lines.append("exposes:    (none)")
 
     consumes = payload.get("consumes", [])
     if consumes:
-        lines.append(f"")
+        lines.append("")
         lines.append(f"consumes ({len(consumes)}):")
         for c in consumes:
             sub = c.get("subsystem", "?")
@@ -264,7 +278,7 @@ def _render_subsystem_human(payload: dict) -> str:
             iface_str = f" [{', '.join(iface)}]" if iface else ""
             lines.append(f"  - {sub}{iface_str}{detail}")
     else:
-        lines.append(f"")
+        lines.append("")
         lines.append("consumes:   (none)")
 
     consumed_by = payload.get("consumed_by", [])

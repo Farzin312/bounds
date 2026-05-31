@@ -10,10 +10,10 @@
 #
 # STABLE (non-HEAD) install is intentionally not wired yet — it needs the
 # package published. To enable `brew install bounds`, after publishing to PyPI
-# (or cutting a GitHub release tag), add a `url` + `sha256` for the bounds sdist
+# (or cutting a GitHub release tag), add a `url` + `sha256` for the bounds-cli sdist
 # above `license`, e.g.:
 #
-#     url "https://files.pythonhosted.org/packages/source/b/bounds/bounds-X.Y.Z.tar.gz"
+#     url "https://files.pythonhosted.org/packages/source/b/bounds-cli/bounds_cli-X.Y.Z.tar.gz"
 #     sha256 "<sha256 of that sdist>"
 #
 # and refresh the resource pins with:  brew update-python-resources Formula/bounds.rb

@@ -126,7 +126,6 @@ To add a language:
 
 ---
 
-*When a review finds a real issue that gets fixed, leave one short `SUPERVISOR-NOTE (review, <date>):
-<what> — <why>.` at the fix site so later agents understand the decision. Respect existing notes
-before changing annotated code; delete a note only when a later change wholly replaces what it
-annotated.*
+*When a fix turns on a non-obvious decision, leave a short comment at the site explaining **why**
+(not just what), so the next contributor doesn't undo it. Keep these comments accurate and remove
+them once a later change makes them obsolete.*

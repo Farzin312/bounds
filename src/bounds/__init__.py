@@ -1,7 +1,15 @@
 """Bounds — AI-native codebase understanding via subsystem boundary manifests."""
 
-try:
-    from importlib.metadata import version as _version
-    __version__ = _version("bounds")
-except Exception:
-    __version__ = "unknown"
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _version
+
+# Published on PyPI as "bounds-cli" (the bare "bounds" name belongs to an unrelated
+# project); the import package and the CLI command stay "bounds". Resolve across both
+# names so the version works whether installed from PyPI or as an editable checkout.
+__version__ = "unknown"
+for _dist in ("bounds-cli", "bounds"):
+    try:
+        __version__ = _version(_dist)
+        break
+    except PackageNotFoundError:
+        continue

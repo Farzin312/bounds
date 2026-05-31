@@ -27,7 +27,7 @@ from pathlib import Path
 
 import yaml
 
-from . import config, errors
+from . import config, errors, gitutil
 from .extract.scan import extract_file, iter_repo_source
 from .ignore import load_matcher
 from .validate.checks import index_extracts, resolve_import
@@ -43,12 +43,18 @@ def run_discover(
     """Discover candidate subsystems and propose manifests (writing them when ``apply``)."""
     matcher = load_matcher(project_root)
     sources = iter_repo_source(project_root, matcher)
+    # Skip git-ignored paths by default so build/dist dirs don't become garbage manifests.
+    # Fail soft: in a non-git repo (no .git) gitignored() returns an empty set, leaving the
+    # existing DEFAULT_IGNORES + .boundsignore behavior untouched.
+    ignored = gitutil.gitignored(project_root, sources)
+    if ignored:
+        sources = [rel for rel in sources if rel not in ignored]
     if not sources:
         raise errors.BoundsError(
             errors.E_USAGE,
             "no supported source files found to discover",
             fix="run from a project root containing .py/.ts/.js sources, "
-            "or check your .boundsignore",
+            "or check your .boundsignore / .gitignore",
         )
 
     # Map each source file to its candidate subsystem (merges win over directory grouping).
@@ -123,7 +129,7 @@ def run_discover(
         written, skipped = _write(project_root, root_proposal, candidates)
         applied = True
 
-    return {
+    result = {
         "mode": "discover",
         "applied": applied,
         "root": root_proposal,
@@ -131,6 +137,33 @@ def run_discover(
         "written": sorted(written),
         "skipped": sorted(skipped),
     }
+    notice = _apply_notice(applied, written, skipped)
+    if notice is not None:
+        result["notice"] = notice
+    return result
+
+
+def _apply_notice(applied: bool, written: list[str], skipped: list[str]) -> str | None:
+    """A human-facing line explaining a write run whose effect isn't obvious from the lists.
+
+    Without this, an ``--apply`` run that wrote nothing because every candidate manifest
+    already existed looks like a silent no-op. Returns ``None`` for dry-run and for the
+    ordinary case where new manifests were written; otherwise names the 0-written outcome.
+    ``written`` always carries ``root.yaml`` (merged each run), so the per-candidate manifest
+    count is what was written minus that root file.
+    """
+    if not applied:
+        return None
+    manifests_prefix = f"{config.BOUNDS_DIR}/{config.MANIFESTS_DIR}/"
+    new_manifests = [w for w in written if w.startswith(manifests_prefix)]
+    if new_manifests:
+        return None
+    if skipped:
+        return (
+            f"wrote 0 new manifests; {len(skipped)} already exist "
+            "-- run `bounds calibrate` to reconcile them against the current source"
+        )
+    return "wrote 0 new manifests (no candidate subsystems to create)"
 
 
 # ---------------------------------------------------------------------------

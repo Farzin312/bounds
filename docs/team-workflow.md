@@ -79,7 +79,7 @@ The loop an agent should follow:
 # An agent is about to change the `auth` subsystem's surface.
 
 bounds impact auth              # who breaks? → billing, api, frontend (+ the exact interfaces)
-bounds describe billing         # what does billing rely on from auth? (verified, ~400 tokens)
+bounds describe billing         # what does billing rely on from auth? (verified, a few hundred tokens for a small subsystem)
 
 # ... the agent makes the edit, now knowing the reach ...
 

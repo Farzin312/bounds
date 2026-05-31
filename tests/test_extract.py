@@ -102,6 +102,72 @@ def test_typescript_imports():
     assert {"findUser", "createUser"} <= set(db.names)
 
 
+# ---- TypeScript/JS: CommonJS ----
+CJS_SRC = b"""const fs = require("fs");
+const { readFile, writeFile } = require("./io");
+require("./side-effect");
+
+function helper() {}
+module.exports = helper;
+module.exports.named = helper;
+exports.flag = true;
+"""
+
+
+def test_commonjs_require_becomes_import_edge():
+    res = get_adapter("io.cjs").extract("io.cjs", CJS_SRC)
+    modules = {i.module for i in res.imports}
+    # Plain, destructured, and bare side-effect requires all record an edge.
+    assert {"fs", "./io", "./side-effect"} <= modules
+
+
+def test_commonjs_module_exports_become_symbols():
+    res = get_adapter("io.cjs").extract("io.cjs", CJS_SRC)
+    exported = {s.name for s in res.symbols if s.exported}
+    # `module.exports = helper` -> default; named property assignments -> their names.
+    assert "default" in exported  # module.exports = helper
+    assert "named" in exported  # module.exports.named = ...
+    assert "flag" in exported  # exports.flag = ...
+
+
+def test_commonjs_dynamic_require_records_no_edge():
+    # require() with a non-literal argument has no statically knowable module.
+    res = get_adapter("dyn.js").extract(
+        "dyn.js", b'const name = "x";\nconst mod = require(name);\nconst ok = require("static");\n'
+    )
+    modules = {i.module for i in res.imports}
+    assert "static" in modules
+    assert "name" not in modules and "x" not in modules
+
+
+# ---- TypeScript/JS: barrel re-exports ----
+def test_barrel_export_star_records_import_edge():
+    # `export * from "./m"` is a propagation dependency; capture it as an import edge.
+    res = get_adapter("barrel.ts").extract("barrel.ts", b'export * from "./m";\n')
+    modules = {i.module for i in res.imports}
+    assert "./m" in modules
+    # The cross-file union of `export *` is intentionally not expanded into symbols.
+    assert not res.symbols
+
+
+def test_barrel_export_star_as_namespace():
+    # `export * as ns from "./m"` records the edge AND binds the namespace symbol `ns`.
+    res = get_adapter("barrel.ts").extract("barrel.ts", b'export * as ns from "./other";\n')
+    modules = {i.module for i in res.imports}
+    assert "./other" in modules
+    exported = {s.name for s in res.symbols if s.exported}
+    assert "ns" in exported
+
+
+def test_esm_named_reexport_still_records_edge_and_symbols():
+    # Regression guard: `export { a as b } from "mod"` keeps both symbol and edge.
+    res = get_adapter("re.ts").extract("re.ts", b'export { a as b, c } from "./named";\n')
+    modules = {i.module for i in res.imports}
+    assert "./named" in modules
+    exported = {s.name for s in res.symbols if s.exported}
+    assert {"b", "c"} <= exported
+
+
 # ---- registry ----
 def test_supported_extensions():
     exts = supported_extensions()

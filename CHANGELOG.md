@@ -12,18 +12,18 @@
 - **`bounds cache --migrate/--inspect/--prune`** — manage the binary extraction cache.
 - **Schema flexibility** — `root.yaml` now accepts extensible roles and criticality values rather than a fixed enum.
 - **Per-export `internal` flag** — exposes can be marked `internal: true` to exempt them from calibration add/remove and signal a deliberately-private symbol.
-- **Install artifacts** — `install.sh` (pip/pipx, with `BOUNDS_REF` for git installs), a Homebrew `Formula/bounds.rb`, and a `Makefile` (`make install/dev/test/validate/benchmark`).
+- **Install artifacts** — `install.sh` (pipx-preferred, installs from the git ref by default since the PyPI name is pending; `BOUNDS_REF` pins a tag/branch), a Homebrew `Formula/bounds.rb`, and a `Makefile` (`make install/dev/test/validate/benchmark`).
 
 ### Changed
 
 - **Cache format changed from `state.json` (JSON) to `.bounds/cache.db` (binary SQLite).** The new cache adds context-armor integrity. Bounds **auto-migrates** an existing `state.json` to `cache.db` on first run; `bounds cache --migrate` does the same on demand. SQLite is Python stdlib, so no new dependency was added.
-- **Renamed the project, CLI, and Python package from `compact` to `bounds`.** The console entry point is now `bounds` (was `compact`); install with `pip install bounds`. The Python package import path is now `bounds` (was `compact`).
+- **Renamed the project, CLI, and Python package from `compact` to `bounds`.** The console entry point is now `bounds` (was `compact`); install from the git ref (`pipx install "git+https://github.com/Farzin312/bounds.git"`) — the PyPI name `bounds` is held by an unrelated package, so a PyPI install is not yet available. The Python package import path is now `bounds` (was `compact`).
 - **Config directory moved from `.compact/` to `.bounds/`.** A backward-compatible fallback is in place: if `.bounds/` is absent, Bounds still reads a legacy `.compact/` directory and prints a deprecation notice to stderr when it does.
 - **`CompactError` exception renamed to `BoundsError`.** The old `CompactError` name is kept as a deprecated alias for backward compatibility.
 
 ### Tests
 
-- **150 tests across 10 files** now pass (up from the v0.1.0 figure), covering the new `discover`, `calibrate`, `impact`, `agent`, `ci`, and SQLite-cache surfaces in addition to extraction, validation, and schema flexibility.
+- **The full test suite across 10 files** now passes (expanded from the v0.1.0 figure), covering the new `discover`, `calibrate`, `impact`, `agent`, `ci`, and SQLite-cache surfaces in addition to extraction, validation, and schema flexibility.
 
 ## [0.1.0] — 2026-05-29
 

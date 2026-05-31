@@ -20,7 +20,7 @@ Bounds is a plain CLI that emits JSON, so any agent that can run a shell command
 
 | Win | Command | Why it matters |
 |-----|---------|----------------|
-| A cheap, verified map | `bounds describe <name>` | The agent reads a ~400-token subsystem contract instead of opening a dozen source files (thousands of tokens) to reconstruct what a part does and what it touches. |
+| A cheap, verified map | `bounds describe <name>` | The agent reads a compact subsystem contract (a few hundred tokens for a small subsystem; cost scales with its exposed API) instead of opening a dozen source files (thousands of tokens) to reconstruct what a part does and what it touches. |
 | A trust signal | every `describe` expose carries `verified: true/false` | `verified: true` means tree-sitter confirmed the symbol actually exists in source — the agent can rely on the manifest without re-reading the file. |
 | Blast radius **before** editing | `bounds impact <name>` | The agent sees the transitive consumer set and the exact interfaces each consumer relies on *before* writing the change — so it doesn't blindly break `api/` and `frontend/`. This is the biggest single agent win: fewer blind breakages. |
 | A deterministic post-edit self-check | `bounds validate --quick` | After editing, the agent runs a fast, zero-LLM structural check and reads `validation_status` to know whether its change drifted from the declared boundary. |
@@ -29,7 +29,7 @@ The pattern: pull a verified slice of architecture into context with one CLI cal
 
 ## Token savings (the secondary benefit)
 
-An agent's only real cost is tokens into context. A Bounds contract is `O(public API)` — a subsystem with 50 internal functions and 5 exports is still ~5 lines — while reading source is `O(files)` and grows with the codebase. So the token win *widens* as the codebase grows.
+An agent's only real cost is tokens into context. A Bounds contract is `O(symbols exposed)` — a subsystem with 50 internal functions and 5 exports is still ~5 expose entries, so the contract stays flat as a subsystem's *internals* grow (it scales with how many symbols it *exposes*, not its line count) — while reading source is `O(files)` and grows with the codebase. So the token win *widens* as a subsystem's implementation grows behind a stable public API.
 
 The numbers in the README are **measured on this repo only** — a single data point, estimated at roughly 4 chars/token, not a cross-repo study. Treat them as illustrative, not a guaranteed average. As one example from this repo, `bounds describe models` returned the verified public surface in ~400 tokens versus ~2,900 tokens for the full source file. The shape of the win is reliable; the exact ratio depends on your code.
 

@@ -23,10 +23,13 @@ agents — lowering the cost of the right behavior rather than blocking the wron
 the one **hard** enforcement point, and it runs in your pipeline, not in the agent. For the enforced
 loop (pre-commit hooks + CI), see [./team-workflow.md](./team-workflow.md).
 
-> **Claude Code plugin auto-detection.** Claude Code (and compatible agents) can auto-detect a
-> project's `.bounds/` directory and use the `bounds` CLI to load subsystem manifests on demand — no
-> manual wiring needed. When the directory is present, the agent reads boundary contracts instead of
-> raw source automatically.
+> **No auto-detection — wiring is one explicit command.** There is **no** plugin that auto-detects a
+> project's `.bounds/` directory; nothing auto-loads it (by design — see the binary-cache note below).
+> The supported path is to run `bounds agent --sync` **once** per repo: it writes an instruction file
+> that each coding agent already reads (see the table below), telling the agent to query `bounds
+> describe` / `bounds list` instead of reading raw source. Native MCP detection — where an MCP-aware
+> agent discovers Bounds as a structured tool with no instruction file — is on the roadmap (v0.3),
+> not shipped today.
 
 ---
 

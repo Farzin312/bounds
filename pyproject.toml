@@ -3,7 +3,7 @@ requires = ["setuptools>=82.0.1", "wheel", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bounds"
+name = "bounds-cli"
 dynamic = ["version"]
 description = "Architecture contract enforcer for AI-native codebase understanding — zero-LLM structural validation via tree-sitter."
 readme = "README.md"

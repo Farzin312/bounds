@@ -5,10 +5,16 @@
 # This is the BOOTSTRAP installer for Bounds (https://github.com/Farzin312/bounds).
 #
 # What it does today (v0.1.x):
-#   - Installs the published Python package `bounds` from PyPI using an isolated,
+#   - Installs Bounds from a git ref (default: the `main` branch) using an isolated,
 #     PEP-668-safe method (pipx preferred, `pip install --user` fallback).
 #   - Honest about the macOS PEP 668 "externally-managed-environment" failure and
 #     guides you to the method that actually works.
+#
+# NOTE ON THE PyPI NAME:
+#   The bare name `bounds` on PyPI is currently held by an UNRELATED package, so this
+#   installer does NOT install from PyPI by default — doing so would pull the wrong
+#   package. It installs from the git ref instead. Once this project's PyPI name
+#   reservation lands, set PYPI_SPEC below and switch install_target() back to it.
 #
 # What it does NOT do (deliberately):
 #   - No `curl | sh`-style remote code execution, no `eval`, no `sudo`, no telemetry.
@@ -20,9 +26,9 @@
 #   These do not exist today; this script will NOT fabricate or download them.
 #
 # Optional override:
-#   BOUNDS_REF=<git-ref>  Install from a git ref instead of PyPI, e.g.:
-#       BOUNDS_REF=main ./install.sh
-#   installs:  git+https://github.com/Farzin312/bounds@main
+#   BOUNDS_REF=<git-ref>  Pin the git ref to install (default: main), e.g.:
+#       BOUNDS_REF=v0.1.0 ./install.sh
+#   installs:  git+https://github.com/Farzin312/bounds@v0.1.0
 #
 # Usage:
 #   chmod +x install.sh
@@ -32,7 +38,12 @@ set -eu
 
 REPO_URL="https://github.com/Farzin312/bounds"
 PKG_NAME="bounds"
-PYPI_SPEC="bounds"            # change to e.g. bounds==0.1.0 to pin
+# Distribution name on PyPI is `bounds-cli` (the bare `bounds` name belongs to an
+# unrelated package); the installed command is still `bounds`. PyPI publish is pending,
+# so this installer defaults to the git ref below. Once `bounds-cli` is published, set
+# this to e.g. bounds-cli==0.1.0 and re-enable the PyPI branch in install_target().
+PYPI_SPEC="bounds-cli"
+DEFAULT_REF="main"           # git ref used when BOUNDS_REF is unset
 GIT_BASE="git+${REPO_URL}"
 
 # ---- helpers --------------------------------------------------------------
@@ -44,13 +55,12 @@ fail()  { printf '\n[x] %s\n' "$1" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Build the install target: either a git ref (if BOUNDS_REF is set) or PyPI spec.
+# Build the install target. Defaults to the git ref (DEFAULT_REF) because the PyPI name
+# is not yet reserved for this project; BOUNDS_REF overrides which ref. The PyPI branch
+# stays disabled until the name reservation lands.
 install_target() {
-  if [ -n "${BOUNDS_REF:-}" ]; then
-    printf '%s@%s' "$GIT_BASE" "$BOUNDS_REF"
-  else
-    printf '%s' "$PYPI_SPEC"
-  fi
+  ref="${BOUNDS_REF:-$DEFAULT_REF}"
+  printf '%s@%s' "$GIT_BASE" "$ref"
 }
 
 # ---- detect OS ------------------------------------------------------------
@@ -66,11 +76,7 @@ esac
 info "Detected OS:   $PRETTY_OS ($ARCH_NAME)"
 
 TARGET="$(install_target)"
-if [ -n "${BOUNDS_REF:-}" ]; then
-  info "Install source: git ref '${BOUNDS_REF}' -> ${TARGET}"
-else
-  info "Install source: PyPI package '${PYPI_SPEC}'"
-fi
+info "Install source: git ref '${BOUNDS_REF:-$DEFAULT_REF}' -> ${TARGET}"
 
 # Already installed? Idempotent: report and exit cleanly.
 if have bounds; then

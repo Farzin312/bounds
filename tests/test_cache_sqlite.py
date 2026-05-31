@@ -1,4 +1,4 @@
-"""Binary SQLite cache + context armor + migration (s-15/s-19)."""
+"""Binary SQLite cache + context armor + migration."""
 
 from __future__ import annotations
 

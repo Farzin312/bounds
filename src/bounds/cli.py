@@ -25,6 +25,7 @@ from . import (
     errors,
     locate,
     output,
+    update_check,
 )
 from .cache import store as cache_store
 from .ignore import IgnoreMatcher
@@ -582,6 +583,22 @@ def cache_cmd(do_migrate: bool, do_prune: bool, do_inspect: bool, human: bool) -
         else:
             payload = cache_store.inspect(root)
         output.emit(payload, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
+# upgrade-check
+# ===========================================================================
+@main.command("upgrade-check")
+@_human
+def upgrade_check_cmd(human: bool) -> None:
+    """Check whether a newer Bounds release is available (opt-in; makes a network call)."""
+
+    def go() -> None:
+        # Informational only: being outdated is never an error, and the check fails
+        # soft when offline, so this command always exits 0.
+        output.emit(update_check.check(), human)
 
     _run(human, go)
 

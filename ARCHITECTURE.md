@@ -69,7 +69,7 @@ bounds/
 │           ├── engine.py          # mode dispatch + orchestration
 │           ├── propagation.py     # reference propagation (consumers of changed providers) + transitive_consumers
 │           └── checks.py          # the 6 structural checks + import resolution
-└── tests/                         # 10 files, 150 tests
+└── tests/                         # 10 files (the full suite; CI reports the live count)
     ├── conftest.py
     ├── test_extract.py
     ├── test_validate.py
@@ -466,6 +466,9 @@ def run(project_root: Path, mode: str = "full", base: str = "HEAD",
 
 ### `extract/scan.py` — shared filesystem→extraction helpers (the single home for fs walks)
 ```python
+def walk_supported(base: Path, exts: set[str]) -> list[Path]      # the ONE recursive source walk: supported
+    # files under `base`, symlink-cycle-safe, skips DEFAULT_IGNORES; order unspecified (callers sort).
+    # Every walking call site builds on this — never re-implement a bare rglob.
 def strip_ext(rel: str) -> str                                    # drop the extension (import-resolution stem)
 def in_default_ignores(path: Path, project_root: Path) -> bool    # path under any DEFAULT_IGNORES dir (one home)
 def iter_repo_source(project_root: Path, matcher: IgnoreMatcher | None = None) -> list[str]

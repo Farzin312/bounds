@@ -1,4 +1,4 @@
-"""Schema flexibility (s-17): extensible roles + criticality declared in root.yaml."""
+"""Schema flexibility: extensible roles + criticality declared in root.yaml."""
 
 from __future__ import annotations
 
