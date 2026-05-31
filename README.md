@@ -98,13 +98,15 @@ bounds upgrade-check         # is a newer release available?
 
 ---
 
-## Scales as your codebase grows
+## Scales with your public API, not your code size
 
-Reading source is **O(files)** — the bigger the codebase, the bigger the read. A Bounds contract is
-**O(public API)** — a subsystem with 50 internal functions and 5 exports stays roughly flat.
+Reading source is **O(files)** — the bigger the subsystem, the more an agent reads. A Bounds contract
+is **O(public API)** — it grows only with what a subsystem *exposes*, not its internal size, so it
+climbs far more slowly: from a few hundred tokens for a small subsystem (a subsystem with 50 internal
+functions and 5 exports stays small).
 
 <div align="center">
-<img src="assets/token-scaling.svg" alt="Conceptual line chart: reading source climbs steeply as O of files toward tens of thousands of tokens, while a Bounds describe contract scales with the number of symbols a subsystem exposes — flat as its internals grow" width="700">
+<img src="assets/token-scaling.svg" alt="Line chart: reading a subsystem's source climbs steeply as the subsystem grows, toward tens of thousands of tokens, while a Bounds describe contract grows only with how much public API the subsystem exposes — far more slowly, from a few hundred tokens for a small subsystem" width="700">
 </div>
 
 The token win *widens* with size. See [docs/token-economics.md](docs/token-economics.md) for the
