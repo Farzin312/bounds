@@ -52,9 +52,9 @@ The table below tracks the dimension that matters for the contract — *internal
 
 | Subsystem internals (fixed public API) | Read the subsystem's source | `bounds describe <name>` |
 |----------------------------------------|-----------------------------|--------------------------|
-| Small (a few files) | hundreds–low-thousands of tokens | flat (a few hundred tokens) |
-| Medium (dozens of files) | many thousands of tokens | flat (a few hundred tokens) |
-| Large (hundreds of files) | tens of thousands of tokens | flat (a few hundred tokens) |
+| Small (a few files) | hundreds–low-thousands of tokens | a few hundred tokens for a small exposed surface |
+| Medium (dozens of files) | many thousands of tokens | roughly unchanged if the exposed API/table count is unchanged |
+| Large (hundreds of files) | tens of thousands of tokens | still driven by exposed API/table count, not internal file count |
 
 **Measured range (single-source data point, not a guarantee).** On a 185-manifest TypeScript repo, a `describe` contract measured **~170–570 tokens for a small, well-factored subsystem**, rising to **~1.5k–13k tokens** for large or poorly-factored ones (median ~3,240; max ~13,360 for a 255-export subsystem). The driver is the export count, not the line count — the takeaway is *factor your subsystems*, not *every contract is ~400 tokens*.
 

@@ -54,11 +54,11 @@ machine can reason about it **deterministically**.
 Bounds maintains a hidden `.bounds/` directory of tiny YAML **subsystem manifests** and uses
 tree-sitter to validate them against your real source, in both directions.
 
-- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`.
+- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`; schema subsystems include the current table catalog folded from migrations.
 - **`bounds validate`** — catch drift the moment your code's exports stop matching the manifest. Six structural checks, zero LLM.
 - **`bounds validate --quick`** — git-diff incremental validation, safe for every commit.
 - **`bounds preflight`** — run all the pre-PR checks at once: drift, boundary violations, broken contracts, dependency cycles, orphaned subsystems, and impact.
-- **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface changes.
+- **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface or a table changes.
 - **`bounds discover` / `bounds calibrate`** — set up manifests for a repo that has none in one command, then keep them honest against what tree-sitter actually finds in your source.
 - **`bounds agent --sync`** — wire Bounds into eight coding agents (Claude Code, Codex, Cursor, …) with one command.
 - **Deterministic** — same input, same byte-stable output. No network, no flakiness.
@@ -81,7 +81,9 @@ pipx install "git+https://github.com/Farzin312/bounds.git"
 
 cd your-project
 bounds discover --apply      # auto-generate root.yaml + manifests from your source
+bounds agent --sync          # teach Claude/Codex/Cursor/etc. to query Bounds first
 bounds describe auth         # one subsystem's verified surface, as JSON
+bounds impact users          # if users is a table/interface, see declared consumers before changing it
 bounds validate --quick      # fast incremental drift check
 bounds upgrade-check         # is a newer release available?
 ```
@@ -114,8 +116,8 @@ measured numbers (one repo, one data point), the scaling argument, and the conte
 
 ## Languages & platforms
 
-**Python + TypeScript/JavaScript** are tree-sitter-verified today; runs on **Linux, macOS, and
-Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on the roadmap. See
+**Python, TypeScript/JavaScript, and SQL migrations** are tree-sitter-verified today; runs on
+**Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on the roadmap. See
 [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
 
 ---

@@ -11,14 +11,15 @@
 | Language | Extraction | Describe Merge | Validate | Status |
 |----------|-----------|---------------|----------|--------|
 | **Python** | Functions, classes, decorators (see gaps below) | Yes | Yes | **Implemented** |
-| **TypeScript / JavaScript** | ESM `import`/`export` (functions, classes, interfaces); plain `.js`/`.jsx` parse too (see gaps below) | Yes | Yes | **Implemented** |
+| **TypeScript / JavaScript** | ESM/CommonJS imports and exports; ORM table declarations (see gaps below) | Yes | Yes | **Implemented** |
+| **SQL** | DDL migrations: create/drop/rename tables, add/drop/rename columns | Table catalog | Yes | **Implemented** |
 | **Go** | Functions, methods, exported symbols | Planned | Planned | Future (v0.2.0 target) |
 | **Rust** | `pub fn`, `pub struct`, `pub enum`, traits | Planned | Planned | Future (v0.2.0 target) |
 | **Java** | Classes, interfaces, public methods | Planned | Planned | Future (v0.3.0 target) |
 | **Fallback** | YAML-only metadata, no tree-sitter | No merge | Data integrity only | Only for files **explicitly declared** in a manifest |
 
-Python and TypeScript/JavaScript are tree-sitter-verified today; Go, Rust, and Java are on the
-roadmap. The **fallback path is not a catch-all** — it only covers files a manifest **names
+Python, TypeScript/JavaScript, and SQL migrations are tree-sitter-verified today; Go, Rust, and Java
+are on the roadmap. The **fallback path is not a catch-all** — it only covers files a manifest **names
 directly** (metadata is preserved, but there is no tree-sitter verification). Files in an unsupported
 language that are only **auto-discovered** (not declared in a manifest) are silently skipped rather
 than validated.
@@ -26,15 +27,16 @@ than validated.
 > **Known gaps (current extractors).** Extraction is intentionally surface-level and ESM-first, so a
 > few constructs are **not** yet captured:
 >
-> - **TS/JS — CommonJS.** `require(...)` imports and `module.exports` / `exports.foo` are not
->   extracted. Only ESM `import`/`export` is. (Plain `.js`/`.jsx` files still parse — they go through
->   the TypeScript grammar — but only their ESM syntax is read.)
-> - **TS/JS — `export *` barrel re-exports.** A `export * from "./mod"` re-export contributes no
->   symbols; only explicitly named exports (`export { foo } from "./mod"`) are captured.
+> - **TS/JS — barrel re-exports.** `export * from "./mod"` records a dependency edge but does not
+>   expand the target file's symbols into the barrel's public surface.
 > - **TS/JS — `.pyi`-style decl files & namespaces.** TypeScript `namespace` blocks are not descended,
 >   and only **top-level** imports/exports are captured (nested or conditional ones are skipped).
 > - **Python — `.pyi` stubs** are not analyzed, and **`__all__` is not honored** — the extractor reports
 >   the actual top-level definitions rather than an `__all__`-declared surface.
+> - **SQL — migration ordering.** Plain migrations are ordered by filename prefix/name. Alembic and
+>   Django dependency-aware ordering are roadmap items; Bounds never uses file mtimes.
+> - **SQL — query strings.** Raw query references are not treated as verified edges. A query-string
+>   guess must not become a blocking boundary violation.
 >
 > These are extraction limits, not validation bugs: a symbol Bounds can't see simply won't appear in a
 > contract. Declaring such a symbol in a manifest's `exposes` will surface it as unverified.

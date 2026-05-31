@@ -22,8 +22,8 @@ list and severity/exit-code mapping.
 |---------|-----------------|
 | `bounds init` | Scaffolds `.bounds/`. `--root` (flag — writes `root.yaml`), `--subsystem <name>`, `--namespace <ns>` |
 | `bounds list` | All subsystems with role, criticality, exposes, consumes, consumed_by. `--namespace <ns>` filters |
-| `bounds describe <name>` | One subsystem's merged Tier-1+2 surface as JSON: per-expose `name`/`kind`/`file`/`verified`, plus subsystem-level `consumes`/`consumed_by`/`entry_points`/`validation_status`. `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
-| `bounds impact <name>` | Transitive consumer blast radius + which interfaces each direct consumer relies on. Zero LLM |
+| `bounds describe <name>` | One subsystem's merged Tier-1+2 surface as JSON: per-expose `name`/`kind`/`file`/`verified`, table exposes include `columns`, plus subsystem-level `tables`/`consumes`/`consumed_by`/`entry_points`/`validation_status`. `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
+| `bounds impact <name>` | Transitive consumer blast radius + which interfaces each direct consumer relies on. `<name>` may be a subsystem or an exposed interface/table. Zero LLM |
 | `bounds validate` | Full validation — all 6 checks. `--quick`, `--mode quick\|full\|preflight\|hotfix\|audit`, `--enforce on\|off`, `--base <ref>` |
 | `bounds preflight` | 6 pre-PR checks in blocking mode |
 | `bounds overview` | Project dashboard: `project`, subsystem count, `roles`/`criticality` breakdown, dependency `edges` (from/to/interfaces), `cycles`, `schema_issues`, and a `health` summary (`ok`/`schema_errors`/`cycles`) |
