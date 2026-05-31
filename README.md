@@ -2,15 +2,16 @@
 
 # Bounds
 
-### A verified, CI-enforced contract of what your architecture is *supposed* to be
+### Verified architecture context for AI coding agents
 
-**Architecture tooling for AI-native codebases — zero LLM inside.**
+**Give agents the map before they search. Catch drift in CI. Zero LLM on structural paths.**
 
 <img src="assets/demo.svg" alt="Terminal session: Bounds in four commands — discover manifests, describe a subsystem's verified contract, see a change's blast radius, validate for drift" width="760">
 
-**Bounds** turns each subsystem's intended boundary — its public surface and its cross-module
-dependencies — into a tiny YAML contract, then uses **tree-sitter (zero LLM)** to verify that
-contract against your real source and **fail the build the moment they diverge**.
+**Bounds** turns each subsystem's intended boundary — its public surface, tables, and cross-module
+dependencies — into a tiny contract that AI agents can query before reading source. Then it uses
+**tree-sitter (zero LLM)** to verify that contract against your real code and **fail the build when
+the two diverge**.
 
 > *A code graph tells your agent what the code **is**; Bounds tells it what the code is **supposed
 > to be** — and fails the build when those diverge. Use a graph to explore, use Bounds to enforce.*
@@ -28,11 +29,9 @@ contract against your real source and **fail the build the moment they diverge**
 
 ---
 
-> **Who it's for.** A 3–8 person team running multiple coding agents in parallel on a mature
-> (50k+ LOC) Python/TypeScript service that's already been burned by agent-driven architectural
-> drift. Agents made drift *fast* — no single reviewer can hold the whole shape in their head
-> anymore. Bounds gives that architecture a verified contract and a CI gate that fails when the
-> code drifts from it.
+> **Who it's for.** A team using coding agents on a mature codebase where "just read the repo" is
+> expensive and unreliable. Bounds gives agents a small verified map first, then gives reviewers and
+> CI a deterministic way to catch architectural drift.
 
 ## The problem
 
@@ -65,9 +64,9 @@ tree-sitter to validate them against your real source, in both directions.
 
 ## Why use it
 
-- **Catch architecture drift in CI before it merges** — boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows.
-- **Give agents a small verified contract instead of source** — one cheap CLI call returns a tree-sitter-confirmed public surface (a few hundred tokens for a small subsystem on this repo; cost scales with how many symbols it *exposes*, not how big it is), not a dozen files an agent has to read and guess at.
+- **Give agents a small verified contract instead of source** — one cheap CLI call returns a tree-sitter-confirmed public surface (a few hundred tokens for a small subsystem on this repo; cost scales with how many symbols/tables it *exposes*, not how big it is), not a dozen files an agent has to read and guess at.
 - **Show blast radius before a risky change** — `bounds impact` returns the transitive consumer set and the interfaces each one relies on, so you know the reach before you write the edit.
+- **Catch architecture drift in CI before it merges** — boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows.
 
 See [docs/why-bounds.md](docs/why-bounds.md) for the full rationale.
 
@@ -128,7 +127,7 @@ measured numbers (one repo, one data point), the scaling argument, and the conte
 ## Documentation
 
 **Start here**
-- [why-bounds.md](docs/why-bounds.md) — the rationale: drift control, token-lean retrieval, blast radius.
+- [why-bounds.md](docs/why-bounds.md) — the rationale: token-lean agent context, blast radius, drift control.
 - [team-workflow.md](docs/team-workflow.md) — how a team adopts Bounds day to day.
 - [use-cases.md](docs/use-cases.md) — concrete workflows: pre-PR safety, onboarding, CI enforcement.
 

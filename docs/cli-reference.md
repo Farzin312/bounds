@@ -1,6 +1,6 @@
 # CLI reference
 
-*Every command, its flags, the CI gate generator, and custom roles/criticality.*
+*Every command an agent should use for verified context, plus the CI gate and schema/manifest reference.*
 
 [← Docs index](./README.md) · [Bounds README](../README.md)
 
@@ -21,16 +21,16 @@ list and severity/exit-code mapping.
 | Command | What it returns |
 |---------|-----------------|
 | `bounds init` | Scaffolds `.bounds/`. `--root` (flag — writes `root.yaml`), `--subsystem <name>`, `--namespace <ns>` |
-| `bounds list` | All subsystems with role, criticality, exposes, consumes, consumed_by. `--namespace <ns>` filters |
-| `bounds describe <name>` | One subsystem's merged Tier-1+2 surface as JSON: per-expose `name`/`kind`/`file`/`verified`, table exposes include `columns`, plus subsystem-level `tables`/`consumes`/`consumed_by`/`entry_points`/`validation_status`. `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
-| `bounds impact <name>` | Transitive consumer blast radius + which interfaces each direct consumer relies on. `<name>` may be a subsystem or an exposed interface/table. Zero LLM |
-| `bounds validate` | Full validation — all 6 checks. `--quick`, `--mode quick\|full\|preflight\|hotfix\|audit`, `--enforce on\|off`, `--base <ref>` |
-| `bounds preflight` | 6 pre-PR checks in blocking mode |
+| `bounds list` | Agent starting map: all subsystems with role, criticality, exposes, consumes, consumed_by. `--namespace <ns>` filters |
+| `bounds describe <name>` | Agent context slice: one subsystem's merged Tier-1+2 surface as JSON. Per-expose `name`/`kind`/`file`/`verified`; table exposes include `columns`; subsystem-level `tables`/`consumes`/`consumed_by`/`entry_points`/`validation_status`. `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
+| `bounds impact <name>` | Pre-edit blast radius for a subsystem, interface, or table + which interfaces each direct consumer relies on. Zero LLM |
+| `bounds validate` | Post-edit drift check — all 6 checks. `--quick`, `--mode quick\|full\|preflight\|hotfix\|audit`, `--enforce on\|off`, `--base <ref>` |
+| `bounds preflight` | Blocking CI gate: 6 pre-PR checks |
 | `bounds overview` | Project dashboard: `project`, subsystem count, `roles`/`criticality` breakdown, dependency `edges` (from/to/interfaces), `cycles`, `schema_issues`, and a `health` summary (`ok`/`schema_errors`/`cycles`) |
 | `bounds discover` | Auto-generate candidate manifests from un-bounded source. `--apply`, `--namespace <ns>`, `--merge-into 'name=p1,p2'` |
 | `bounds calibrate` | Reconcile manifests vs tree-sitter reality (ADD / REMOVE / NEEDS_REVIEW / `consumes` fixes). `--apply`, `--subsystem <n>` |
-| `bounds agent` | Wire Bounds into eight coding agents. `--sync`, `--detect`, `--check`, per-agent flags |
-| `bounds ci` | Generate CI gate config. `--install`, `--action`, `--precommit`, `--gitlab`, `--all` |
+| `bounds agent` | Wire Bounds into eight coding agents so they query `list`/`describe`/`impact` before broad source search. `--sync`, `--detect`, `--check`, per-agent flags |
+| `bounds ci` | Generate CI gate config to enforce the agent workflow. `--install`, `--action`, `--precommit`, `--gitlab`, `--all` |
 | `bounds cache` | Manage the binary `.bounds/cache.db`. `--inspect`, `--prune`, `--migrate` |
 | `bounds upgrade-check` | Opt-in: ask the GitHub Releases API whether a newer Bounds release exists. Returns `current`, `latest`, `outdated`, `is_dev_build`, `checked`, `fix`, `note`. The **only** command that makes a network call (off the structural path); fails soft when offline and always exits `0` |
 

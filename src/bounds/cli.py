@@ -65,7 +65,12 @@ def _run(human: bool, fn, ci: bool = False):
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(__version__, prog_name="bounds")
 def main() -> None:
-    """Bounds — a verified, CI-enforced contract of what your architecture is supposed to be. Architecture tooling for AI-native codebases — zero LLM inside."""
+    """Bounds — AI-first architecture context for coding agents.
+
+    Give agents a verified, token-lean map before they search source; then catch
+    architecture drift in CI. Structural extraction and validation are deterministic
+    and zero-LLM.
+    """
 
 
 # ===========================================================================
@@ -75,7 +80,7 @@ def main() -> None:
 @click.option("--namespace", default=None, help="Only list subsystems in this namespace.")
 @_human
 def list_cmd(namespace: str | None, human: bool) -> None:
-    """Discover subsystems."""
+    """Show the subsystem map agents should read before broad source search."""
 
     def go() -> None:
         root = _require_root()
@@ -115,7 +120,7 @@ def list_cmd(namespace: str | None, human: bool) -> None:
 @click.option("--deep", is_flag=True, default=False, help="Include Tier-3 LLM enrichment (roadmap).")
 @_human
 def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: bool) -> None:
-    """Return a subsystem manifest as JSON, or every manifest in a namespace."""
+    """Return one verified subsystem API/table contract as JSON."""
 
     def go() -> None:
         if name is None and namespace is None:
@@ -196,7 +201,7 @@ def _scan_flags(fn):
 def validate_cmd(quick: bool, mode: str | None, enforce: str | None, base: str,
                  include_ignored: bool, include_gitignored: bool, follow_symlinks: bool,
                  fail_on_unowned: bool, ci: bool, human: bool) -> None:
-    """Validate manifests against source. Defaults to full mode."""
+    """Catch source-vs-contract drift after agent or human edits."""
 
     def go() -> None:
         root = _require_root()
@@ -220,7 +225,7 @@ def validate_cmd(quick: bool, mode: str | None, enforce: str | None, base: str,
 @_human
 def preflight_cmd(include_ignored: bool, include_gitignored: bool, follow_symlinks: bool,
                   fail_on_unowned: bool, ci: bool, human: bool) -> None:
-    """Run the 6 pre-PR structural checks (blocking)."""
+    """Run the blocking CI gate for drift, boundaries, contracts, and cycles."""
 
     def go() -> None:
         root = _require_root()
@@ -297,7 +302,7 @@ def overview_cmd(human: bool) -> None:
                    "(extracts source — off the fast path).")
 @_human
 def impact_cmd(name: str, verify: bool, human: bool) -> None:
-    """Show the transitive blast radius of a subsystem (who breaks if its surface changes)."""
+    """Show blast radius before changing a subsystem interface or table."""
 
     def go() -> None:
         output.emit(locate.run_impact(_require_root(), name, verify), human)
@@ -314,7 +319,7 @@ def impact_cmd(name: str, verify: bool, human: bool) -> None:
               help="Match symbols whose name starts with SYMBOL, instead of an exact match.")
 @_human
 def where_cmd(symbol: str, prefix: bool, human: bool) -> None:
-    """Locate a symbol: which file defines it, and which subsystem owns it."""
+    """Locate a symbol/table without asking an agent to grep blindly."""
 
     def go() -> None:
         output.emit(locate.run_where(_require_root(), symbol, prefix), human)
@@ -423,7 +428,7 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
 @_human
 def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
                  merge_into: tuple[str, ...], human: bool) -> None:
-    """Auto-discover candidate subsystems from source and propose manifests."""
+    """Create initial Bounds contracts so agents have a map to query."""
 
     def go() -> None:
         if do_apply and dry_run:
@@ -460,7 +465,7 @@ def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
               help="Explicitly show the diff without writing (the default).")
 @_human
 def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool, human: bool) -> None:
-    """Reconcile manifests against tree-sitter reality (proposes a diff; --apply to write)."""
+    """Keep contracts aligned with extracted source after code changes."""
 
     def go() -> None:
         if do_apply and dry_run:
@@ -498,7 +503,7 @@ def _agent_selectors(fn):
 @_agent_selectors
 @_human
 def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, human: bool, **selectors: bool) -> None:
-    """Wire Bounds into coding agents (Claude Code, Codex, Gemini, Copilot, Cursor, ...)."""
+    """Teach Claude, Codex, Gemini, Cursor, and other agents to query Bounds first."""
 
     def go() -> None:
         modes = [m for m, on in (("sync", do_sync), ("detect", do_detect), ("check", do_check)) if on]
@@ -528,7 +533,7 @@ def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, human: bool, **sel
 @_human
 def ci_cmd(do_install: bool, want_action: bool, want_precommit: bool, want_gitlab: bool,
            want_all: bool, human: bool) -> None:
-    """Generate CI gate config (GitHub Action, pre-commit, GitLab)."""
+    """Install drift/boundary gates so the agent workflow is enforced in CI."""
 
     def go() -> None:
         if not do_install:

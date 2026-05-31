@@ -5,7 +5,7 @@ command reference, and the deep dives on how Bounds works and why it pays off.
 
 ## Start here
 
-- [why-bounds.md](why-bounds.md) — the rationale: catching architecture drift in CI, giving agents a token-lean verified contract, and seeing blast radius before a change.
+- [why-bounds.md](why-bounds.md) — the rationale: giving agents a token-lean verified contract, seeing blast radius before a change, and catching drift in CI.
 - [team-workflow.md](team-workflow.md) — how a team adopts and lives with Bounds day to day.
 - [use-cases.md](use-cases.md) — concrete workflows: pre-PR safety, dropping an agent into a strange repo, enforcing architecture in CI.
 
@@ -13,7 +13,7 @@ command reference, and the deep dives on how Bounds works and why it pays off.
 
 - [cli-reference.md](cli-reference.md) — every command, every flag, and the JSON/exit-code contract.
 - [ai-agents.md](ai-agents.md) — `bounds agent --sync`, the canonical `AGENTS.md` contract, and why agent compliance is advisory (CI is the only hard enforcement).
-- [languages-and-platforms.md](languages-and-platforms.md) — the language support matrix (Python + TS/JS today) and cross-platform notes.
+- [languages-and-platforms.md](languages-and-platforms.md) — the language support matrix (Python + TS/JS + SQL today) and cross-platform notes.
 - [install.md](install.md) — all install channels and their current status.
 
 ## Deep dives
