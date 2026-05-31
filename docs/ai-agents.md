@@ -76,6 +76,32 @@ bounds agent --sync --claude   # scope --sync/--check to one agent (--codex, --c
 [`AGENTS.md`](../AGENTS.md) (committed; the standard filename agents already read) and every per-tool
 pointer is **generated from it**, so there is no template to copy or keep in sync.
 
+## Manual copy block
+
+Use this only when you cannot run `bounds agent --sync` yet, or when you want to paste the guidance
+into an existing `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor rule, or Copilot instruction file
+without letting Bounds write files. Add it under your existing project instructions; do not replace
+your current rules.
+
+```md
+## Bounds workflow for AI agents
+
+This repo uses Bounds for architecture context. Query architecture through the CLI before broad
+source search:
+
+- Run `bounds list` first to see the subsystem map.
+- Run `bounds describe <name>` to read one subsystem's verified public API/table catalog.
+- Run `bounds impact <name>` before changing a subsystem interface or table.
+- Run `bounds validate --quick` after edits and fix drift before expanding context.
+
+Do not read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/root.yaml`, or
+`.bounds/manifests/*.yaml` directly. The CLI is the API: raw manifests bypass tree-sitter
+verification, and the cache is a binary implementation detail.
+
+If commands like `impact`, `discover`, or `agent` are missing, the installed CLI is stale. Refresh:
+`pipx install --force "git+https://github.com/Farzin312/bounds.git"`.
+```
+
 ## Roadmap: MCP server
 
 A native MCP server (`bounds mcp`) is on the roadmap for **v0.3**, giving MCP-aware agents a
