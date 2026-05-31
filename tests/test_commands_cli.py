@@ -14,6 +14,31 @@ def _invoke(monkeypatch, cwd, args):
     return CliRunner().invoke(main, args)
 
 
+def _write_schema_project(root):
+    (root / ".bounds" / "manifests").mkdir(parents=True)
+    (root / ".bounds" / "root.yaml").write_text(
+        'version: "1"\nproject: schema\nlanguages: [sql, python]\nenforce: "on"\nsubsystems: [db, app]\n',
+        encoding="utf-8",
+    )
+    (root / ".bounds" / "manifests" / "db.yaml").write_text(
+        "name: db\nrole: library\ncriticality: core\npaths: [migrations]\n"
+        "exposes:\n  - { name: users, kind: table }\nconsumes: []\n",
+        encoding="utf-8",
+    )
+    (root / ".bounds" / "manifests" / "app.yaml").write_text(
+        "name: app\nrole: service\ncriticality: leaf\npaths: [app]\nexposes: []\n"
+        "consumes:\n  - subsystem: db\n    via: reads\n    interfaces: [users, users.email]\n",
+        encoding="utf-8",
+    )
+    (root / "migrations").mkdir()
+    (root / "migrations" / "001_create.sql").write_text(
+        "CREATE TABLE users (id integer primary key, email text);\n",
+        encoding="utf-8",
+    )
+    (root / "app").mkdir()
+    (root / "app" / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
+
+
 def test_impact_cli(monkeypatch, py_project):
     res = _invoke(monkeypatch, py_project, ["impact", "models"])
     assert res.exit_code == 0
@@ -48,6 +73,31 @@ def test_impact_unknown_subsystem_is_fatal(monkeypatch, py_project):
     res = _invoke(monkeypatch, py_project, ["impact", "nope"])
     assert res.exit_code == 2
     assert "E_SUBSYSTEM_NOT_FOUND" in res.output
+
+
+def test_schema_describe_impact_and_column_contract(monkeypatch, tmp_path):
+    _write_schema_project(tmp_path)
+
+    describe = json.loads(_invoke(monkeypatch, tmp_path, ["describe", "db"]).output)
+    assert describe["tables"] == [
+        {"name": "users", "kind": "table", "columns": ["email", "id"], "files": ["migrations/001_create.sql"]}
+    ]
+    users = next(e for e in describe["exposes"] if e["name"] == "users")
+    assert users["verified"] is True
+    assert users["columns"] == ["email", "id"]
+
+    impact = json.loads(_invoke(monkeypatch, tmp_path, ["impact", "users"]).output)
+    assert impact["interface"] == "users"
+    assert impact["direct_consumers"] == ["app"]
+
+    (tmp_path / "migrations" / "002_drop.sql").write_text(
+        "ALTER TABLE users DROP COLUMN email;\n", encoding="utf-8"
+    )
+    validate = json.loads(_invoke(monkeypatch, tmp_path, ["validate"]).output)
+    assert any(
+        issue["code"] == "E_CONTRACT_MISSING_EXPORT" and "users.email" in issue["message"]
+        for issue in validate["issues"]
+    )
 
 
 def test_cache_inspect_cli(monkeypatch, py_project):

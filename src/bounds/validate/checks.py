@@ -15,6 +15,7 @@ from posixpath import normpath
 from .. import errors
 from ..extract.scan import strip_ext
 from ..models import ExtractResult, Issue, RootManifest, SubsystemCompact
+from .schema import _fold_subsystem_schema
 
 
 def _issue(
@@ -69,6 +70,7 @@ class CheckContext:
         out: set[str] = set()
         for p in self.files_of(subsystem):
             out |= self.extracts[p].exported_names()
+        out |= set(_fold_subsystem_schema(subsystem, self.extracts, self.file_owner))
         return out
 
     def all_symbol_names(self, subsystem: str) -> set[str]:
@@ -76,7 +78,13 @@ class CheckContext:
         out: set[str] = set()
         for p in self.files_of(subsystem):
             out |= {s.name for s in self.extracts[p].symbols}
+        for table, state in _fold_subsystem_schema(subsystem, self.extracts, self.file_owner).items():
+            out.add(table)
+            out |= {f"{table}.{column}" for column in state.columns}
         return out
+
+    def schema_tables(self, subsystem: str):
+        return _fold_subsystem_schema(subsystem, self.extracts, self.file_owner)
 
     def _index(self) -> tuple[dict[str, str], dict[str, str]]:
         cached = getattr(self, "_idx", None)
@@ -305,17 +313,24 @@ def check_contract(ctx: CheckContext) -> list[Issue]:
                 )
                 continue
             exposed = provider.expose_names()
+            schema_tables = ctx.schema_tables(c.subsystem)
             for iface in sorted(c.interfaces):
-                if iface not in exposed:
-                    issues.append(
-                        _issue(
-                            errors.E_CONTRACT_MISSING_EXPORT,
-                            f"subsystem '{name}' depends on '{iface}' from '{c.subsystem}', "
-                            f"which does not expose it",
-                            subsystem=name,
-                            fix=f"add '{iface}' to {c.subsystem}.exposes, or update {name}.consumes",
-                        )
+                if iface in exposed:
+                    continue
+                if "." in iface:
+                    table, column = iface.split(".", 1)
+                    state = schema_tables.get(table)
+                    if table in exposed and state is not None and column in state.columns:
+                        continue
+                issues.append(
+                    _issue(
+                        errors.E_CONTRACT_MISSING_EXPORT,
+                        f"subsystem '{name}' depends on '{iface}' from '{c.subsystem}', "
+                        f"which does not expose it",
+                        subsystem=name,
+                        fix=f"add '{iface}' to {c.subsystem}.exposes, or update {name}.consumes",
                     )
+                )
     return issues
 
 

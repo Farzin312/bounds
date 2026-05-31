@@ -262,9 +262,21 @@ def _render_subsystem_human(payload: dict) -> str:
                 tag += " [entry-point]"
             loc = f"  {file}" if file else ""
             lines.append(f"  - {name} ({kind}){loc}{tag}")
+            columns = e.get("columns", [])
+            if columns:
+                lines.append(f"    columns: {', '.join(columns)}")
     else:
         lines.append("")
         lines.append("exposes:    (none)")
+
+    tables = payload.get("tables", [])
+    if tables:
+        lines.append("")
+        lines.append(f"tables ({len(tables)}):")
+        for table in tables:
+            columns = table.get("columns", [])
+            detail = f" [{', '.join(columns)}]" if columns else ""
+            lines.append(f"  - {table.get('name', '?')}{detail}")
 
     consumes = payload.get("consumes", [])
     if consumes:

@@ -129,6 +129,19 @@ export class Account {}
     assert tables == {"users": "users", "accounts": "Account"}
 
 
+def test_sql_adapter_extracts_ddl_operations():
+    src = b"""CREATE TABLE users (id integer primary key, email text);
+ALTER TABLE users ADD COLUMN name text;
+ALTER TABLE users RENAME COLUMN name TO full_name;
+"""
+    res = get_adapter("001_init.sql").extract("001_init.sql", src)
+    assert res.language == "sql"
+    ops = [(s.kind, s.name, s.metadata.get("schema_op")) for s in res.symbols]
+    assert ("table", "users", "create_table") in ops
+    assert ("column", "users.name", "add_column") in ops
+    assert ("rename", "users.name", "rename_column") in ops
+
+
 # ---- TypeScript/JS: CommonJS ----
 CJS_SRC = b"""const fs = require("fs");
 const { readFile, writeFile } = require("./io");
@@ -211,6 +224,7 @@ def test_supported_extensions():
     assert ".py" in exts
     assert ".ts" in exts
     assert ".tsx" in exts
+    assert ".sql" in exts
 
 
 def test_unsupported_extension_returns_none():
