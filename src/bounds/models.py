@@ -214,9 +214,13 @@ class Symbol:
     kind: str  # function|class|const|type|interface|variable
     line: int
     exported: bool = True
+    metadata: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "kind": self.kind, "line": self.line, "exported": self.exported}
+        d = {"name": self.name, "kind": self.kind, "line": self.line, "exported": self.exported}
+        if self.metadata:
+            d["metadata"] = dict(sorted(self.metadata.items()))
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Symbol":
@@ -225,6 +229,7 @@ class Symbol:
             kind=d.get("kind", "unknown"),
             line=int(d.get("line", 0)),
             exported=bool(d.get("exported", True)),
+            metadata=dict(d.get("metadata") or {}),
         )
 
 
