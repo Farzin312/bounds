@@ -83,8 +83,7 @@ ignore = [
 ]
 
 [tool.setuptools_scm]
-# Drop the git-hash/date local segment ("+g31f72715d.d20260531") from the version.
-# That suffix is noise to users and is rejected by PyPI anyway; a development build then
-# reads as a clean, monotonic "0.1.devN" (N = commits since the last tag). Cutting a real
-# release (git tag v0.1.0) yields a plain "0.1.0". Versioning stays fully dynamic.
-local_scheme = "no-local-version"
+# The version is dynamic CalVer ("YYYY.M.<build>", e.g. 2026.6.24) — git-derived, clean,
+# monotonic, no dev/local suffix. The scheme is a custom callable, which can't be expressed
+# in pyproject (entry points aren't discoverable during a package's own build), so it lives
+# in setup.py's use_scm_version. This empty table just keeps setuptools-scm enabled.

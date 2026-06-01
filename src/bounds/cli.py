@@ -110,12 +110,10 @@ def _interactive_human(explicit_human: bool) -> bool:
 
 
 def _version_display(raw: str) -> str:
-    """A coherent ``--version`` string: a clean release reads as-is; an untagged build is
-    labelled so ``0.1.dev21`` doesn't look like a broken release number to a user."""
+    """The ``--version`` string. Versions are dynamic CalVer (``YYYY.M.<build>``, e.g.
+    ``2026.6.24``) — already clean numbers — so this only annotates the not-installed case."""
     if raw == "unknown":
         return "unknown (not installed as a package)"
-    if "dev" in raw or "+" in raw:
-        return f"{raw} (development build — install a tagged release for a stable version)"
     return raw
 
 
