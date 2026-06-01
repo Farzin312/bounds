@@ -266,6 +266,40 @@ def test_upgrade_fallback_reinstalls_when_force_fails(monkeypatch):
     ]
 
 
+def test_upgrade_success_captures_version_and_drops_noise(monkeypatch):
+    """On success the report carries the installed version and omits stdout/fallback noise."""
+    stdout = (
+        "Installing to existing venv 'bounds-cli'\n"
+        "  installed package bounds-cli 0.1.dev21+g31f72715d, installed using Python 3.14.5\n"
+    )
+
+    def fake_run(command, capture_output=True, text=True, check=False):
+        return upgrade.subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(upgrade.subprocess, "run", fake_run)
+    result = upgrade.run_upgrade()
+    assert result["ok"] is True
+    assert result["version"] == "0.1.dev21+g31f72715d"
+    assert result["stderr"] == ""
+    # Internal mechanics no longer leak into the consumer-facing JSON contract.
+    assert "fallback_commands" not in result
+    assert "stdout" not in result
+
+
+def test_upgrade_failure_surfaces_stderr_only(monkeypatch):
+    """A failed upgrade reports stderr (for debugging) but no version."""
+
+    def fake_run(command, capture_output=True, text=True, check=False):
+        return upgrade.subprocess.CompletedProcess(command, 1, "", "boom")
+
+    monkeypatch.setattr(upgrade.subprocess, "run", fake_run)
+    result = upgrade.run_upgrade()
+    assert result["ok"] is False
+    assert result["version"] is None
+    assert "boom" in result["stderr"]
+    assert result["note"] == "upgrade failed"
+
+
 def test_upgrade_cli_dry_run(monkeypatch):
     res = CliRunner().invoke(main, ["upgrade", "--dry-run"])
     assert res.exit_code == 0
