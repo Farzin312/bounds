@@ -55,3 +55,13 @@ def supported_extensions() -> set[str]:
     _ensure_built()
     assert _ADAPTERS is not None
     return set(_ADAPTERS.keys())
+
+
+def is_language_file(rel_path: str, language_name: str) -> bool:
+    """True if ``rel_path``'s extension is handled by the adapter registered under ``language_name``.
+
+    Single home for "does this file belong to language X?" so callers (e.g. the advisory
+    raw-SQL scan) never re-hardcode an extension list that can drift from the adapter's own.
+    """
+    adapter = adapter_for_language(language_name)
+    return adapter is not None and Path(rel_path).suffix in adapter.extensions

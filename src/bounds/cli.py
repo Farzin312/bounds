@@ -11,7 +11,6 @@ from __future__ import annotations
 import itertools
 import sys
 import threading
-import time
 from collections import Counter
 from contextlib import nullcontext
 from pathlib import Path
@@ -55,22 +54,36 @@ def _require_root() -> Path:
 
 
 class _Spinner:
-    """Minimal stderr spinner for long-running commands; no-op when stderr is not a TTY."""
+    """Minimal stderr spinner for long-running commands; no-op when stderr is not a TTY.
+
+    The first frame is deferred by ``_DELAY_SECONDS`` so a command that finishes inside
+    the grace period draws *nothing* — that lets the spinner be applied to every command
+    uniformly without fast paths (cache hits, ``list``-class reads) flashing a spinner for
+    a single frame. Waits go through the stop ``Event`` (not ``time.sleep``) so the thread
+    also tears down instantly instead of lagging up to a frame on exit.
+    """
 
     _FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    _DELAY_SECONDS = 0.12  # grace period before the first frame — fast commands never flash
+    _INTERVAL_SECONDS = 0.08
 
     def __init__(self, message: str) -> None:
         self._msg = message
         self._stop = threading.Event()
+        self._drew = False
         self._thread = threading.Thread(target=self._spin, daemon=True)
 
     def _spin(self) -> None:
+        # Defer the first frame: if the work completes within the grace period, return
+        # without ever writing, so a fast command leaves stderr untouched.
+        if self._stop.wait(self._DELAY_SECONDS):
+            return
         for frame in itertools.cycle(self._FRAMES):
-            if self._stop.is_set():
-                break
             sys.stderr.write(f"\r{frame} {self._msg}")
             sys.stderr.flush()
-            time.sleep(0.08)
+            self._drew = True
+            if self._stop.wait(self._INTERVAL_SECONDS):
+                break
 
     def __enter__(self):
         if sys.stderr.isatty():
@@ -81,9 +94,23 @@ class _Spinner:
         self._stop.set()
         if self._thread.is_alive():
             self._thread.join()
-        if sys.stderr.isatty():
+        # Only clear if we actually drew — a sub-grace-period run wrote nothing to clear.
+        if self._drew:
             sys.stderr.write("\r\033[K")
             sys.stderr.flush()
+
+
+def _progress(message: str):
+    """Reusable loading indicator for any long-running command body.
+
+    Returns a context manager that shows a stderr spinner while the wrapped block runs.
+    Wrap ONLY the heavy compute — never ``output.emit`` — so the spinner line is cleared
+    before any stdout is written (otherwise the clear sequence would land after the
+    rendered result on a TTY). It is a no-op when stderr is not a TTY, so JSON/piped
+    output stays byte-clean and agents never see spinner frames. This is the single seam
+    every command reuses; the message is the only thing that varies.
+    """
+    return _Spinner(message)
 
 
 def _run(human: bool, fn, ci: bool = False):
@@ -199,12 +226,14 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, full: bool
 
         if namespace is not None:
             matched = [subs[n] for n in sorted(subs) if subs[n].namespace == namespace]
-            # One shared read-only quick run; each describe_one scopes status to its subsystem.
-            report = describe_mod.status_report(root) if matched else None
-            payload = {
-                "namespace": namespace,
-                "subsystems": [describe_mod.describe_one(root, s, deep, report, entry_matcher, full) for s in matched],
-            }
+            with _progress("reading subsystems..."):
+                # One shared read-only quick run; each describe_one scopes status to its subsystem.
+                report = describe_mod.status_report(root) if matched else None
+                payload = {
+                    "namespace": namespace,
+                    "subsystems": [describe_mod.describe_one(root, s, deep, report, entry_matcher, full)
+                                   for s in matched],
+                }
             output.emit(payload, human)
             return
 
@@ -214,10 +243,11 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, full: bool
                 f"subsystem '{name}' not found",
                 fix=f"known subsystems: {sorted(subs)}; or run 'bounds init --subsystem {name}'",
             )
-        output.emit(
-            describe_mod.describe_one(root, subs[name], deep, describe_mod.status_report(root), entry_matcher, full),
-            human,
-        )
+        with _progress("reading subsystem..."):
+            described = describe_mod.describe_one(
+                root, subs[name], deep, describe_mod.status_report(root), entry_matcher, full,
+            )
+        output.emit(described, human)
 
     _run(human, go)
 
@@ -264,11 +294,12 @@ def validate_cmd(quick: bool, mode: str | None, enforce: str | None, base: str,
     def go() -> None:
         root = _require_root()
         selected = "quick" if quick else (mode or "full")
-        report = validate_engine.run(
-            root, mode=selected, base=base, enforce=enforce,
-            include_ignored=include_ignored, include_gitignored=include_gitignored,
-            follow_symlinks=follow_symlinks, fail_on_unowned=fail_on_unowned,
-        )
+        with _progress("validating..."):
+            report = validate_engine.run(
+                root, mode=selected, base=base, enforce=enforce,
+                include_ignored=include_ignored, include_gitignored=include_gitignored,
+                follow_symlinks=follow_symlinks, fail_on_unowned=fail_on_unowned,
+            )
         output.emit(report.to_dict(), human, ci=ci)
         sys.exit(config.EXIT_OK if report.ok else config.EXIT_BLOCKED)
 
@@ -287,11 +318,12 @@ def preflight_cmd(include_ignored: bool, include_gitignored: bool, follow_symlin
 
     def go() -> None:
         root = _require_root()
-        report = validate_engine.run(
-            root, mode="preflight",
-            include_ignored=include_ignored, include_gitignored=include_gitignored,
-            follow_symlinks=follow_symlinks, fail_on_unowned=fail_on_unowned,
-        )
+        with _progress("running checks..."):
+            report = validate_engine.run(
+                root, mode="preflight",
+                include_ignored=include_ignored, include_gitignored=include_gitignored,
+                follow_symlinks=follow_symlinks, fail_on_unowned=fail_on_unowned,
+            )
         counts = Counter(i.code for i in report.issues)
         payload = report.to_dict()
         payload["checks"] = {
@@ -366,7 +398,9 @@ def impact_cmd(name: str, verify: bool, include_raw: bool, human: bool) -> None:
     """Show blast radius before changing a subsystem interface or table."""
 
     def go() -> None:
-        output.emit(locate.run_impact(_require_root(), name, verify, include_raw), human)
+        with _progress("computing impact..."):
+            result = locate.run_impact(_require_root(), name, verify, include_raw)
+        output.emit(result, human)
 
     _run(human, go)
 
@@ -383,7 +417,9 @@ def where_cmd(symbol: str, prefix: bool, human: bool) -> None:
     """Locate a symbol/table without asking an agent to grep blindly."""
 
     def go() -> None:
-        output.emit(locate.run_where(_require_root(), symbol, prefix), human)
+        with _progress("searching..."):
+            result = locate.run_where(_require_root(), symbol, prefix)
+        output.emit(result, human)
 
     _run(human, go)
 
@@ -509,9 +545,10 @@ def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
             name, _, paths = spec.partition("=")
             merges.append((name.strip(), [p.strip() for p in paths.split(",") if p.strip()]))
         root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
-        payload = discover_mod.run_discover(
-            root, apply=do_apply, namespace=namespace, merges=merges,
-        )
+        with _progress("scanning repo..."):
+            payload = discover_mod.run_discover(
+                root, apply=do_apply, namespace=namespace, merges=merges,
+            )
         output.emit(payload, human)
 
     _run(human, go)
@@ -549,13 +586,17 @@ def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
             )
         root = _require_root()
         if do_dump:
-            output.emit(calibrate_mod.dump_baseline(root, subsystem=subsystem), human)
+            with _progress("calibrating..."):
+                baseline = calibrate_mod.dump_baseline(root, subsystem=subsystem)
+            output.emit(baseline, human)
             return
         if do_check:
-            payload = calibrate_mod.check_drift(root, subsystem=subsystem)
+            with _progress("calibrating..."):
+                payload = calibrate_mod.check_drift(root, subsystem=subsystem)
             output.emit(payload, human)
             sys.exit(config.EXIT_OK if payload["ok"] else config.EXIT_BLOCKED)
-        payload = calibrate_mod.run_calibrate(root, subsystem=subsystem, apply=do_apply)
+        with _progress("calibrating..."):
+            payload = calibrate_mod.run_calibrate(root, subsystem=subsystem, apply=do_apply)
         output.emit(payload, human)
 
     _run(human, go)
@@ -735,8 +776,9 @@ def upgrade_cmd(ref: str, local: Path | None, dry_run: bool, human: bool) -> Non
     show_human = _interactive_human(human)
 
     def go() -> None:
-        msg = "upgrading bounds..." if not dry_run else ""
-        with _Spinner(msg) if (show_human and not dry_run) else nullcontext():
+        # dry-run does no real work, so there is nothing to spin on; otherwise reuse the
+        # shared progress seam (no-op when stderr isn't a TTY, like every other command).
+        with _progress("upgrading bounds...") if not dry_run else nullcontext():
             payload = upgrade_mod.run_upgrade(ref=ref, local=local, dry_run=dry_run)
         output.emit(payload, show_human)
         sys.exit(config.EXIT_OK if payload.get("ok") else config.EXIT_BLOCKED)

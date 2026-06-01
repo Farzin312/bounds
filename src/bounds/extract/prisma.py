@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 
 from ..models import ExtractResult, Issue, Symbol
-from .base import LanguageAdapter, make_result
+from .base import LanguageAdapter, canonical_columns, make_result
 
 _MODEL_RE = re.compile(r"^\s*model\s+([A-Za-z_]\w*)\s*\{")
 _MAP_RE = re.compile(r'@@map\(\s*"([^"]+)"\s*\)')
@@ -163,7 +163,7 @@ class PrismaAdapter(LanguageAdapter):
                 mapped, columns, i = _parse_model_body(lines, i + 1)
                 symbols.append(Symbol(
                     mapped or model, "table", start_line, exported=False,
-                    metadata={"schema_op": "create_table", "columns": sorted(set(columns)), "model": model},
+                    metadata={"schema_op": "create_table", "columns": canonical_columns(columns), "model": model},
                 ))
         except Exception as exc:  # fail soft
             return make_result(rel_path, self.language_name, [], [], source, error=str(exc))

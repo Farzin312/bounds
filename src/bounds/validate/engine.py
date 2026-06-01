@@ -137,7 +137,7 @@ def run(
         prev = state.get(rel)
 
         # Quick mode: a file git says is unchanged is trusted from cache without hashing/parsing.
-        if mode == "quick" and rel not in changed_rel and prev is not None and not _oversized(abs_path):
+        if mode == "quick" and rel not in changed_rel and prev is not None and not scan.is_oversized(abs_path):
             extracts[rel] = prev.to_result()
             if prev.subsystem != owner:
                 prev.subsystem = owner  # keep the cached owner current (partial reads)
@@ -146,9 +146,11 @@ def run(
             continue
 
         # Fail loud on an OWNED file we can't read or that's oversized — never silently drop it
-        # (a dropped owned file makes a real symbol look like verified:false).
-        try:
-            if abs_path.stat().st_size > config.MAX_FILE_BYTES:
+        # (a dropped owned file makes a real symbol look like verified:false). The size/read
+        # mechanics live in scan.read_source_bytes; only the loud-Issue policy is ours.
+        source, reason = scan.read_source_bytes(abs_path)
+        if source is None:
+            if reason == "oversized":
                 issues.append(
                     Issue(
                         errors.E_EXTRACTION_FAILED,
@@ -159,19 +161,17 @@ def run(
                         fix="file too large to extract; split it or exclude it via .boundsignore",
                     )
                 )
-                continue
-            source = abs_path.read_bytes()
-        except OSError as exc:
-            issues.append(
-                Issue(
-                    errors.E_EXTRACTION_FAILED,
-                    "warning",
-                    f"could not read '{rel}': {exc.strerror or type(exc).__name__}",
-                    subsystem=owner,
-                    file=rel,
-                    fix="check the file's permissions/encoding; Bounds skipped it",
+            else:
+                issues.append(
+                    Issue(
+                        errors.E_EXTRACTION_FAILED,
+                        "warning",
+                        f"could not read '{rel}': {reason}",
+                        subsystem=owner,
+                        file=rel,
+                        fix="check the file's permissions/encoding; Bounds skipped it",
+                    )
                 )
-            )
             continue
 
         chash = content_hash(source)
@@ -280,14 +280,6 @@ def run(
 # ===========================================================================
 # Helpers
 # ===========================================================================
-def _oversized(path: Path) -> bool:
-    """True if the file is larger than config.MAX_FILE_BYTES (fail soft on stat error)."""
-    try:
-        return path.stat().st_size > config.MAX_FILE_BYTES
-    except OSError:
-        return False
-
-
 def _is_external_symlink(abs_path: Path, project_root: Path) -> bool:
     """True if ``abs_path`` reaches its target through a symlink that escapes the project.
 

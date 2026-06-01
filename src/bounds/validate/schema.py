@@ -237,19 +237,27 @@ def schema_objects(subsystem: str, extracts: dict[str, ExtractResult], file_owne
     return out
 
 
-def schema_structure_hash(subsystem: str, extracts: dict[str, ExtractResult], file_owner: dict[str, str]) -> str:
-    """Deterministic sha256 over the ordered fold — the schema subsystem's structure hash.
+def hash_schema_catalog(catalog: list[dict]) -> str:
+    """Deterministic sha256 over an already-built table catalog (single home for the hash).
 
-    Stable across runs and insensitive to migration *count*: two migration sets that fold to
-    the same surviving ``{table: columns}`` hash identically. Surfaced in ``describe`` so an
-    agent (or a freshness gate) can detect a schema-surface change without re-reading DDL.
+    Insensitive to migration *count* and to non-structural fields — only ``{name, columns}``
+    feed the digest, so two migration sets that fold to the same surviving surface hash
+    identically. A caller that already holds a catalog (``describe``) passes it here instead
+    of re-folding via :func:`schema_structure_hash`.
     """
-    catalog = [
-        {"name": t["name"], "columns": t["columns"]}
-        for t in schema_catalog(subsystem, extracts, file_owner)
-    ]
-    blob = json.dumps(catalog, sort_keys=True, separators=(",", ":"))
+    surface = [{"name": t["name"], "columns": t["columns"]} for t in catalog]
+    blob = json.dumps(surface, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def schema_structure_hash(subsystem: str, extracts: dict[str, ExtractResult], file_owner: dict[str, str]) -> str:
+    """Fold ``subsystem``'s migrations and hash the resulting table surface (standalone path).
+
+    The schema subsystem's structure hash, surfaced in ``describe`` so an agent (or a freshness
+    gate) can detect a schema-surface change without re-reading DDL. Callers that already hold
+    the catalog should call :func:`hash_schema_catalog` directly to avoid a second fold.
+    """
+    return hash_schema_catalog(schema_catalog(subsystem, extracts, file_owner))
 
 
 def schema_diagnostics(
