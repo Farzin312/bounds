@@ -53,7 +53,7 @@ machine can reason about it **deterministically**.
 Bounds maintains a hidden `.bounds/` directory of tiny YAML **subsystem manifests** and uses
 tree-sitter to validate them against your real source, in both directions.
 
-- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`; schema subsystems include the current table catalog folded from migrations.
+- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`; schema subsystems include the current table catalog folded from migrations, plus — for Postgres/Supabase — the live policy/RLS surface and a derived **RLS posture** (which tables are protected vs exposed).
 - **`bounds validate`** — catch drift the moment your code's exports stop matching the manifest. Seven checks, zero LLM.
 - **`bounds validate --quick`** — git-diff incremental validation, safe for every commit.
 - **`bounds preflight`** — run all the pre-PR checks at once: drift, boundary violations, broken contracts, dependency cycles, orphaned subsystems, and cross-subsystem impact.
@@ -65,6 +65,7 @@ tree-sitter to validate them against your real source, in both directions.
 ## Why use it
 
 - **Give agents a small verified contract instead of source** — one cheap CLI call returns a tree-sitter-confirmed public surface (a few hundred tokens for a small subsystem on this repo; cost scales with how many symbols/tables it *exposes*, not how big it is), not a dozen files an agent has to read and guess at.
+- **Answer the database question an agent gets wrong by reading** — "what columns does `orders` have *now*, and is it row-level-security protected?" isn't in one file; it's a `CREATE` plus a dozen `ALTER`s across migrations. Bounds folds them into the current table + RLS-policy surface and a derived **RLS posture** (which tables are exposed *without* RLS). When a migration uses DDL it can't parse, `schema_coverage` says so — so an agent never reads a blind spot as "this doesn't exist."
 - **Show blast radius before a risky change** — `bounds impact` returns the transitive consumer set and the interfaces each one relies on, so you know the reach before you write the edit.
 - **Catch architecture drift in CI before it merges** — boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows.
 
@@ -120,8 +121,13 @@ measured numbers (one repo, one data point), the scaling argument, and the conte
 
 **Python, TypeScript/JavaScript, SQL migrations, and Prisma schemas** are verified today — including
 database tables, whether declared as raw DDL, ORM models (SQLAlchemy/Django/Drizzle/TypeORM), or
-Prisma `model` blocks. Runs on **Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java
-adapters are on the roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
+Prisma `model` blocks. For **Postgres/Supabase SQL** Bounds also folds functions, views, indexes,
+triggers, and **row-level-security policies** (descending into `BEGIN;…COMMIT;` transactions), and
+derives an RLS posture. tree-sitter-sql can't parse every Postgres construct (a `DO $$…$$` block,
+some pg_dump output); when a DDL statement is genuinely unparsable the catalog **self-reports it**
+(`E_SCHEMA_UNPARSED`) rather than silently dropping it, and a no-DDL file (seed/grant/cron) is never
+flagged. Runs on **Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on
+the roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
 
 ---
 

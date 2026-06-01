@@ -327,6 +327,115 @@ def test_sql_all_error_with_revision_header_is_hard_failure():
     assert not res.symbols  # no schema_meta / partial symbols leak through
 
 
+def test_sql_ddl_inside_transaction_block_is_extracted():
+    # The common Supabase shape: DDL wrapped in BEGIN; … COMMIT;. The walk must descend into
+    # the transaction container — table, RLS, and policy are all recovered, none dropped.
+    src = b"""BEGIN;
+CREATE TABLE accounts (id uuid primary key, owner uuid);
+ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY owner_rw ON accounts FOR ALL USING (owner = auth.uid());
+COMMIT;
+"""
+    res = get_adapter("010_txn.sql").extract("010_txn.sql", src)
+    assert res.error is None
+    by_kind = {s.kind: s for s in res.symbols}
+    assert by_kind["table"].name == "accounts"
+    assert by_kind["rls"].metadata.get("schema_op") == "enable_rls"
+    assert by_kind["policy"].name == "accounts.owner_rw"
+
+
+def test_sql_table_with_inline_constraint_is_recovered():
+    # tree-sitter-sql cannot parse a table-level CONSTRAINT clause and errors the whole
+    # CREATE TABLE; best-effort recovery keeps the table + its columns (the unmodeled
+    # constraint tail is not a catalog loss, so no schema_error is raised).
+    src = b"""CREATE TABLE IF NOT EXISTS public.saved (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  CONSTRAINT saved_unique UNIQUE (user_id, id)
+);"""
+    res = get_adapter("011_constraint.sql").extract("011_constraint.sql", src)
+    assert res.error is None
+    table = next(s for s in res.symbols if s.kind == "table")
+    assert table.name == "saved"  # schema qualifier dropped (canonical bare name)
+    assert table.metadata["columns"] == ["id", "user_id"]
+    assert not any(s.kind == "schema_error" for s in res.symbols)
+
+
+def test_sql_table_name_is_canonical_bare_across_ops():
+    # A table CREATEd schema-qualified but ALTERed bare (and vice-versa) must fold to one
+    # entry: every table reference canonicalises to its bare name.
+    create = get_adapter("a.sql").extract("a.sql", b"CREATE TABLE public.t (id int);")
+    alter = get_adapter("b.sql").extract("b.sql", b"ALTER TABLE t ADD COLUMN x int;")
+    cnames = [s.name for s in create.symbols if s.kind == "table"]
+    anames = [s.metadata.get("table") for s in alter.symbols if s.kind == "column"]
+    assert cnames == ["t"] and anames == ["t"]
+
+
+def test_sql_policy_lifecycle_create_drop_alter():
+    # DROP/ALTER POLICY are extracted (not just CREATE), each carrying its schema_op so the
+    # fold can net a dropped or renamed policy out of the live surface.
+    src = b"""CREATE POLICY p ON t FOR ALL USING (true);
+DROP POLICY IF EXISTS p ON t;
+CREATE POLICY q ON t FOR SELECT USING (true);
+ALTER POLICY q ON t RENAME TO q2;
+"""
+    res = get_adapter("p.sql").extract("p.sql", src)
+    ops = [(s.metadata.get("schema_op"), s.name) for s in res.symbols if s.kind == "policy"]
+    assert ("create_policy", "t.p") in ops
+    assert ("drop_policy", "t.p") in ops
+    assert ("alter_policy", "t.q") in ops
+
+
+def test_sql_force_rls_is_recovered():
+    res = get_adapter("f.sql").extract("f.sql", b"ALTER TABLE t FORCE ROW LEVEL SECURITY;\n")
+    rls = [s for s in res.symbols if s.kind == "rls"]
+    assert rls and rls[0].metadata.get("schema_op") == "force_rls"
+
+
+def test_sql_policy_in_string_literal_is_not_a_symbol():
+    # A 'CREATE POLICY …' string inside seed data (or an EXECUTE) is masked, never a phantom.
+    src = b"INSERT INTO audit (action) VALUES ('CREATE POLICY hacker ON t FOR ALL USING (true)');\n"
+    res = get_adapter("s.sql").extract("s.sql", src)
+    assert not any(s.kind == "policy" for s in res.symbols)
+
+
+def test_sql_policy_in_dollar_quoted_body_is_not_a_symbol():
+    # A CREATE POLICY inside a function body ($$ … $$ / EXECUTE) is masked, never a phantom —
+    # tree-sitter spans only the $$ delimiters, so the body is blanked textually. The real
+    # CREATE POLICY beside the function is still recovered; the in-body one never is.
+    src = b"""CREATE POLICY real ON t FOR ALL USING (true);
+CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  EXECUTE 'CREATE POLICY sneaky ON t FOR ALL USING (true)';
+END;
+$$;
+"""
+    res = get_adapter("fn.sql").extract("fn.sql", src)
+    policies = {s.name for s in res.symbols if s.kind == "policy"}
+    assert policies == {"t.real"}  # the body's "sneaky" policy is masked, never a phantom
+
+
+def test_sql_policy_line_number_correct_with_multibyte_identifier():
+    # Byte/char-offset parity: a multibyte char before a policy must not desync its line number
+    # or the blank span (which would mis-count errors or eat an adjacent statement).
+    src = "-- café ☕ comment\ncreate policy p on t for all using (true);\n".encode("utf-8")
+    res = get_adapter("u.sql").extract("u.sql", src)
+    pol = next(s for s in res.symbols if s.kind == "policy")
+    assert pol.line == 2  # the policy is on line 2, not line 1
+
+
+def test_sql_fragmented_pgdump_recovers_policies():
+    # A pg_dump-style file the grammar shreds into many ERROR fragments still yields its
+    # policies, because recovery scans masked text rather than a single clean node.
+    src = (b'CREATE POLICY "a" ON "public"."t1" FOR SELECT USING (true);\n'
+           b'CREATE POLICY "b" ON "public"."t2" FOR INSERT WITH CHECK (true);\n'
+           b'@@@ garbage that fragments the parse @@@\n'
+           b'CREATE POLICY "c" ON "public"."t1" FOR UPDATE USING (true);\n')
+    res = get_adapter("dump.sql").extract("dump.sql", src)
+    policies = {s.name for s in res.symbols if s.kind == "policy"}
+    assert policies == {"t1.a", "t2.b", "t1.c"}
+
+
 # ---- TypeScript/JS: CommonJS ----
 CJS_SRC = b"""const fs = require("fs");
 const { readFile, writeFile } = require("./io");

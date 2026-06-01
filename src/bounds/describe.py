@@ -19,21 +19,31 @@ from .extract import scan, supported_extensions
 from .ignore import IgnoreMatcher
 from .models import SubsystemCompact, ValidationReport
 from .validate import engine as validate_engine
-from .validate.schema import hash_schema_catalog, schema_catalog, schema_objects
+from .validate.schema import (
+    _fold_subsystem_objects,
+    hash_schema_catalog,
+    schema_catalog,
+    schema_diagnostics,
+    schema_objects,
+    schema_rls_posture,
+)
 
 
 def extract_owned(
     root: Path, sub: SubsystemCompact
-) -> tuple[dict[str, str], list[str], list[str], list[dict], str, list[dict]]:
+) -> tuple[dict[str, str], list[str], list[str], list[dict], str, list[dict], list[dict], dict]:
     """Tier-1 extraction for one subsystem.
 
     Returns ``(exported_symbol_name -> owning_file, owned_files, unparsed_files, table_catalog,
-    schema_hash, schema_objects)``. Every file the
+    schema_hash, schema_objects, schema_diagnostics, rls_posture)``. Every file the
     subsystem owns is recorded in ``owned_files`` regardless of whether it parses (so ``files``
     reflects the declared surface); only cleanly-extracted exported symbols populate the symbol map
     used to mark ``exposes`` entries ``verified``. A supported owned file that fails to extract
-    (unreadable / oversized / parse error) is recorded in ``unparsed_files`` so describe reports it
-    loudly instead of silently showing a real symbol as ``verified:false`` (fail-loud).
+    (unreadable / oversized / genuine parse error) is recorded in ``unparsed_files`` so describe
+    reports it loudly instead of silently showing a real symbol as ``verified:false`` (fail-loud).
+    A non-schema SQL file (seed/grant/cron with no DDL) extracts cleanly to *empty* symbols, so it
+    is **not** counted here — the catalog-incompleteness signal lives in ``schema_diagnostics``,
+    which reports only files that lost real DDL (``E_SCHEMA_UNPARSED``), never no-DDL files.
 
     File selection is the shared owned-file walk, so describe and validate own the same set.
     """
@@ -49,14 +59,12 @@ def extract_owned(
         if rel not in owned_files:
             owned_files.append(rel)
         result, _ = scan.extract_file(root, rel)
-        if result is not None:
-            extracts[rel] = result
-            file_owner[rel] = sub.name
-            for sym in result.symbols:
-                if sym.exported:
-                    extracted_symbols[sym.name] = rel
-        else:  # supported source file that didn't yield a result → a genuine extraction failure
+        if result is None:  # supported source file that didn't yield a result → genuine failure
             unparsed_files.append(rel)
+            continue
+        extracts[rel] = result
+        file_owner[rel] = sub.name
+        extracted_symbols.update((s.name, rel) for s in result.symbols if s.exported)
 
     catalog = schema_catalog(sub.name, extracts, file_owner)
     for table in catalog:
@@ -64,8 +72,18 @@ def extract_owned(
         if files:
             extracted_symbols[str(table["name"])] = str(files[0])
     schema_hash = hash_schema_catalog(catalog) if catalog else ""  # reuse the fold above; don't re-fold
-    objects = schema_objects(sub.name, extracts, file_owner)
-    return extracted_symbols, owned_files, unparsed_files, catalog, schema_hash, objects
+    # Fold the non-table surface ONCE and feed both readers (objects + posture), instead of
+    # each re-folding (which would also re-run order_migrations).
+    objects_fold = _fold_subsystem_objects(sub.name, extracts, file_owner)
+    objects = schema_objects(sub.name, extracts, file_owner, fold=objects_fold)
+    diagnostics = [
+        {"code": code, "message": message, "file": file}
+        for code, message, file in schema_diagnostics(sub.name, extracts, file_owner)
+    ]
+    posture = (schema_rls_posture(sub.name, extracts, file_owner, catalog, fold=objects_fold)
+               if catalog else {})
+    return (extracted_symbols, owned_files, unparsed_files, catalog, schema_hash,
+            objects, diagnostics, posture)
 
 
 def describe_one(
@@ -93,20 +111,10 @@ def describe_one(
     # gate that roster behind --full, so drop the model's key to avoid a stale empty ``files: []``
     # sitting next to ``file_count``.
     payload.pop("files", None)
-    extracted_symbols, owned_files, unparsed_files, catalog, schema_hash, objects = extract_owned(root, sub)
+    (extracted_symbols, owned_files, unparsed_files, catalog, schema_hash,
+     objects, diagnostics, posture) = extract_owned(root, sub)
     for expose in payload.get("exposes", []):
-        ename = expose.get("name", "")
-        if ename in extracted_symbols:
-            expose["file"] = extracted_symbols[ename]
-            expose["verified"] = True
-            if expose.get("kind") == "table":
-                table = next((t for t in catalog if t["name"] == ename), None)
-                if table is not None:
-                    expose["columns"] = table["columns"]
-            if entry_matcher and entry_matcher.matches(expose["file"]):
-                expose["entry_point"] = True
-        else:
-            expose["verified"] = False
+        _verify_expose(expose, extracted_symbols, catalog, entry_matcher)
     # The verified CONTRACT (exposes/tables/consumes) is always emitted in full — that is what
     # an agent reads instead of source. The two non-contract bulk fields are gated behind
     # ``--full`` so a default describe stays token-lean: the flat file roster (non-actionable —
@@ -125,12 +133,54 @@ def describe_one(
     # agent never mistakes an unreadable/oversized file for "symbol absent from source".
     if unparsed_files:
         payload["unparsed_files"] = sorted(unparsed_files)
+    _attach_schema_payload(payload, catalog, schema_hash, objects, posture, diagnostics,
+                           unparsed_files, full)
+    payload["validation_status"] = subsystem_status(report, sub.name)
+    payload["project_status"] = project_status(report)
+    if deep:
+        payload["semantic"] = {"note": "LLM enrichment (Tier 3) not enabled in this build"}
+    return payload
+
+
+def _verify_expose(
+    expose: dict, extracted_symbols: dict[str, str], catalog: list[dict], entry_matcher: IgnoreMatcher
+) -> None:
+    """Annotate one declared ``exposes`` entry with tree-sitter facts (verified/file/columns), in place."""
+    ename = expose.get("name", "")
+    if ename not in extracted_symbols:
+        expose["verified"] = False
+        return
+    expose["file"] = extracted_symbols[ename]
+    expose["verified"] = True
+    if expose.get("kind") == "table":
+        table = next((t for t in catalog if t["name"] == ename), None)
+        if table is not None:
+            expose["columns"] = table["columns"]
+    if entry_matcher and entry_matcher.matches(expose["file"]):
+        expose["entry_point"] = True
+
+
+def _attach_schema_payload(
+    payload: dict,
+    catalog: list[dict],
+    schema_hash: str,
+    objects: list[dict],
+    posture: dict,
+    diagnostics: list[dict],
+    unparsed_files: list[str],
+    full: bool,
+) -> None:
+    """Add the (token-lean) schema fields to a describe payload, in place.
+
+    Token-first by default: the table contract is always full, but the (often hundreds-long)
+    schema-object list, the RLS posture table-name lists, and the per-file diagnostics collapse
+    to counts unless ``full``. The always-present ``schema_coverage`` flag tells an AI whether
+    absence is authoritative (see :func:`_schema_coverage`).
+    """
     if catalog:
         payload["tables"] = catalog
         payload["schema_hash"] = schema_hash
-    # The non-table schema surface (functions/RPCs, views, indexes, triggers, types, RLS
-    # policies). Counts by kind by default so an agent sees the shape cheaply; the full list
-    # (which can be hundreds of entries) is restored by ``--full``.
+        payload["schema_coverage"] = _schema_coverage(diagnostics, unparsed_files)
     if objects:
         counts: dict[str, int] = {}
         for obj in objects:
@@ -138,11 +188,41 @@ def describe_one(
         payload["schema_object_counts"] = dict(sorted(counts.items()))
         if full:
             payload["schema_objects"] = objects
-    payload["validation_status"] = subsystem_status(report, sub.name)
-    payload["project_status"] = project_status(report)
-    if deep:
-        payload["semantic"] = {"note": "LLM enrichment (Tier 3) not enabled in this build"}
-    return payload
+    if posture:
+        summary = {k: posture[k] for k in
+                   ("tables", "rls_enabled", "protected", "rls_without_policy", "unprotected")}
+        if full:
+            for k in ("unprotected_tables", "rls_without_policy_tables", "protected_tables", "policy_count"):
+                summary[k] = posture[k]
+        payload["rls_posture"] = summary
+    # The actionable per-file detail behind schema_coverage — names files that carried schema yet
+    # could not be fully extracted (E_SCHEMA_UNPARSED / E_SCHEMA_NO_ORDER), never no-DDL files.
+    # Gated behind --full: by default schema_coverage carries the count + the trust note, so the
+    # token-lean default stays small while still telling an AI the catalog may be incomplete.
+    if diagnostics and full:
+        payload["schema_diagnostics"] = diagnostics
+
+
+def _schema_coverage(diagnostics: list[dict], unparsed_files: list[str]) -> dict:
+    """Trust signal: is this schema catalog COMPLETE, or might a table/policy be missing?
+
+    An AI reads the catalog as authoritative ("these are the tables"). When some owned DDL
+    couldn't be parsed, absence is NOT authoritative — so we say so explicitly and compactly,
+    rather than letting a silent gap mislead. ``complete: true`` is the positive case: every
+    owned file extracted, so a table/policy *not* listed genuinely isn't in the schema.
+    """
+    lost = sorted(set(unparsed_files) | {d["file"] for d in diagnostics
+                                         if d.get("code") == errors.E_SCHEMA_UNPARSED and d.get("file")})
+    if not lost:
+        return {"complete": True}
+    return {
+        "complete": False,
+        "unextracted_files": len(lost),
+        "note": ("Some owned files contain DDL Bounds could not fully parse, so this catalog "
+                 "may be incomplete: a table, column, or policy not listed here may still exist. "
+                 "Do not treat absence as authoritative. Re-run with --full for the file list "
+                 "(schema_diagnostics)."),
+    }
 
 
 def status_report(root: Path) -> ValidationReport | None:

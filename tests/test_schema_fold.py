@@ -14,6 +14,7 @@ from bounds.validate.schema import (
     schema_catalog,
     schema_diagnostics,
     schema_objects,
+    schema_rls_posture,
     schema_structure_hash,
 )
 
@@ -106,8 +107,10 @@ def test_explicit_order_header_wins():
 
 
 # ---- fail soft ----
-def test_unparsable_statement_keeps_siblings_and_reports():
-    files = {"001.sql": b"CREATE TABLE a (id int); GARBAGE NONSENSE; CREATE TABLE b (x int);"}
+def test_unparsable_ddl_statement_keeps_siblings_and_reports():
+    # A broken DDL statement between two valid CREATE TABLEs: both tables survive and the
+    # broken statement is reported (E_SCHEMA_UNPARSED) — it carried DDL we couldn't parse.
+    files = {"001.sql": b"CREATE TABLE a (id int); ALTER TABLE a ADD COLUMN; CREATE TABLE b (x int);"}
     extracts, fo = _extracts(files)
     assert extracts["001.sql"].error is None  # not a whole-file failure
     assert set(_tables(files)) == {"a", "b"}  # both valid tables survive
@@ -115,9 +118,53 @@ def test_unparsable_statement_keeps_siblings_and_reports():
     assert "E_SCHEMA_UNPARSED" in codes
 
 
-def test_totally_unparsable_file_is_hard_error():
-    res = get_adapter("x.sql").extract("x.sql", b"@@@ not sql at all @@@")
+def test_non_ddl_parse_error_is_not_reported_as_schema_loss():
+    # A file whose tables parse cleanly but which also contains a non-DDL statement the
+    # grammar trips on (a Postgres cron registration) must NOT be flagged: no DDL was lost.
+    files = {"001.sql": b"CREATE TABLE a (id int);\n"
+                        b"SELECT cron.schedule('job', '0 * * * *', $$ delete from a where id < 0 $$);\n"}
+    extracts, fo = _extracts(files)
+    assert extracts["001.sql"].error is None
+    assert set(_tables(files)) == {"a"}
+    codes = {c for c, _, _ in schema_diagnostics("db", extracts, fo)}
+    assert "E_SCHEMA_UNPARSED" not in codes
+
+
+def test_data_only_file_is_not_a_failure():
+    # A pure seed / grant file has no schema DDL: it extracts to empty symbols and NO error,
+    # so describe/validate never mislabel it as "unparsed" (the cry-wolf bug this fixes).
+    for src in (b"INSERT INTO t (id) VALUES (1) ON CONFLICT DO NOTHING;\n",
+                b"GRANT SELECT ON t TO anon;\nREVOKE ALL ON t FROM public;\n"):
+        res = get_adapter("x.sql").extract("x.sql", src)
+        assert res.error is None
+        assert not [s for s in res.symbols if s.kind not in ("schema_meta",)]
+
+
+def test_unparsable_ddl_file_is_hard_error():
+    # A file that *means* to carry DDL (it mentions CREATE TABLE) but is wholly unparsable is
+    # a hard extraction failure — real schema was lost, surfaced loudly (not a partial result).
+    res = get_adapter("x.sql").extract("x.sql", b"CREATE TABLE @#$%^&*( totally broken !!!")
     assert res.error is not None
+    assert not res.symbols
+
+
+def test_no_ddl_garbage_is_not_a_failure():
+    # A .sql file with no DDL intent and no migration header contributes nothing to the schema:
+    # Bounds (a schema tool) has no opinion on it and never hard-fails it — only DDL-bearing or
+    # revision-headered files can fail. This is the counterpart to the cry-wolf fix.
+    res = get_adapter("x.sql").extract("x.sql", b"@@@ not sql at all @@@")
+    assert res.error is None
+    assert not res.symbols
+
+
+def test_create_schema_only_migration_is_not_a_failure():
+    # A valid migration that only does CREATE SCHEMA / CREATE EXTENSION (real DDL Bounds does
+    # not model into a table surface) must NOT hard-fail — it parsed, it just has no tables.
+    for src in (b"CREATE SCHEMA IF NOT EXISTS private;\n",
+                b"CREATE EXTENSION IF NOT EXISTS pg_trgm;\n"):
+        res = get_adapter("x.sql").extract("x.sql", src)
+        assert res.error is None, src
+        assert not [s for s in res.symbols if s.kind == "schema_error"]
 
 
 # ---- deterministic hash ----
@@ -159,3 +206,81 @@ def test_schema_objects_surface_functions_policies_and_rls():
     assert by_kind["rls"]["name"] == "profiles"
     # deterministic: sorted by (kind, name)
     assert objects == sorted(objects, key=lambda o: (o["kind"], o["name"]))
+
+
+# ---- policy / RLS fold (drops net out, like tables) ----
+def test_policy_dropped_in_a_later_migration_is_not_live():
+    extracts, fo = _extracts({
+        "001.sql": b"create table t (id int);\ncreate policy p on t for all using (true);\n",
+        "002.sql": b"drop policy if exists p on t;\n",
+    })
+    policies = {o["name"] for o in schema_objects("db", extracts, fo) if o["kind"] == "policy"}
+    assert policies == set()  # created then dropped → not in the live surface
+
+
+def test_policy_dropped_then_recreated_in_one_file_is_live():
+    # The idempotent re-run pattern: DROP IF EXISTS then CREATE in the same file → present.
+    extracts, fo = _extracts({
+        "001.sql": b"create table t (id int);\n"
+                   b"drop policy if exists p on t;\ncreate policy p on t for all using (true);\n",
+    })
+    policies = {o["name"] for o in schema_objects("db", extracts, fo) if o["kind"] == "policy"}
+    assert policies == {"t.p"}
+
+
+def test_rls_enabled_then_disabled_nets_out():
+    extracts, fo = _extracts({
+        "001.sql": b"create table t (id int);\nalter table t enable row level security;\n",
+        "002.sql": b"alter table t disable row level security;\n",
+    })
+    rls = {o["name"] for o in schema_objects("db", extracts, fo) if o["kind"] == "rls"}
+    assert rls == set()
+
+
+# ---- RLS security posture ----
+def test_rls_posture_classifies_tables():
+    extracts, fo = _extracts({
+        "001.sql": b"create table protected (id int);\n"
+                   b"create table locked (id int);\n"
+                   b"create table open (id int);\n"
+                   b"alter table protected enable row level security;\n"
+                   b"create policy r on protected for select using (true);\n"
+                   b"alter table locked enable row level security;\n",  # RLS but no policy
+    })
+    catalog = schema_catalog("db", extracts, fo)
+    posture = schema_rls_posture("db", extracts, fo, catalog)
+    assert posture["protected"] == 1 and posture["protected_tables"] == ["protected"]
+    assert posture["rls_without_policy_tables"] == ["locked"]
+    assert posture["unprotected_tables"] == ["open"]
+    assert posture["tables"] == 3 and posture["rls_enabled"] == 2
+
+
+def test_unordered_policy_lifecycle_flags_no_order():
+    # Policies/RLS fold, so an unordered set with a DROP/ALTER POLICY (or DISABLE RLS) and no
+    # deterministic order basis must surface E_SCHEMA_NO_ORDER — the fold result depends on order.
+    extracts, fo = _extracts({
+        "a.sql": b"drop policy p on t;\n",
+        "b.sql": b"create table t (id int);\ncreate policy p on t for all using (true);\n",
+    })
+    codes = {c for c, _, _ in schema_diagnostics("db", extracts, fo)}
+    assert "E_SCHEMA_NO_ORDER" in codes
+
+
+def test_no_force_rls_keeps_rls_enabled():
+    # NO FORCE clears only the owner-bypass exemption; RLS stays enabled.
+    extracts, fo = _extracts({
+        "001.sql": b"create table t (id int);\n"
+                   b"alter table t enable row level security;\n"
+                   b"alter table t no force row level security;\n",
+    })
+    rls = {o["name"] for o in schema_objects("db", extracts, fo) if o["kind"] == "rls"}
+    assert rls == {"t"}  # still enabled, not dropped
+
+
+def test_rls_posture_empty_when_schema_has_no_rls():
+    # A schema that never uses RLS (here: plain tables) has no posture to report — emitting
+    # "all unprotected" would be a false alarm. Same for a Prisma schema.
+    extracts, fo = _extracts({"001.sql": b"create table t (id int);\n"})
+    assert schema_rls_posture("db", extracts, fo, schema_catalog("db", extracts, fo)) == {}
+    pex, pfo = _extracts({"s.prisma": b'model User {\n id Int @id\n @@map("users")\n}\n'})
+    assert schema_rls_posture("db", pex, pfo, schema_catalog("db", pex, pfo)) == {}

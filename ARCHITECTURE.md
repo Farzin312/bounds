@@ -513,20 +513,49 @@ def order_migrations(subsystem, extracts, file_owner) -> tuple[list[str], bool]
 def _fold_subsystem_schema(subsystem, extracts, file_owner) -> dict[str, _TableState]
     # apply create/drop/rename table and add/drop/rename column ops in that order -> current catalog.
 def schema_catalog(subsystem, extracts, file_owner) -> list[dict]
-    # [{name, kind:"table", columns:[...], files:[...]}] for describe.
-def schema_structure_hash(subsystem, extracts, file_owner) -> str   # sha256 over the ordered fold
+    # [{name, kind:"table", columns:[...], files:[...]}] for describe (bare table names).
+def _fold_subsystem_objects(subsystem, extracts, file_owner) -> _ObjectsFold
+    # the non-table fold: functions/views/indexes/triggers/types DEDUP by (kind,name); policies and
+    # RLS toggles are an ORDERED fold (create/alter/drop, enable/disable/force) like tables.
+def schema_objects(subsystem, extracts, file_owner) -> list[dict]
+    # the LIVE non-table surface [{name, kind, table?, files:[...]}] (dropped policies gone).
+def schema_rls_posture(subsystem, extracts, file_owner, catalog=None) -> dict
+    # derived RLS read over the catalog tables: protected / rls_without_policy / unprotected
+    # (+ name lists + per-table policy_count). {} when the schema declares no RLS at all.
+def schema_structure_hash(subsystem, extracts, file_owner) -> str   # sha256 over the table fold
 def schema_diagnostics(subsystem, extracts, file_owner) -> list[(code, message, file)]
-    # E_SCHEMA_UNPARSED (a statement didn't parse; siblings still folded) + E_SCHEMA_NO_ORDER.
+    # E_SCHEMA_UNPARSED (a DDL statement didn't parse; siblings still folded) + E_SCHEMA_NO_ORDER.
 ```
 
 The SQL/Prisma adapters are intentionally per-file and dumb: they emit raw DDL operation symbols
 (`schema_op` metadata, `exported=False`), so cache validity stays content-addressed per migration and
-the **fold is the single authority** on a schema's current surface — a dropped/renamed table can't
-linger via its CREATE symbol. The fold is subsystem-level because the current schema is an ordered
-reduction across migration files; `checks`/`describe` memoize it per subsystem. Per-statement
-fail-soft: one unparsable statement is reported, never dropping the file's other statements.
+the **fold is the single authority** on a schema's current surface — a dropped/renamed table or a
+dropped policy can't linger via its CREATE symbol. The fold is subsystem-level because the current
+schema is an ordered reduction across migration files; `checks`/`describe` memoize it per subsystem.
+Per-statement fail-soft: one unparsable DDL statement is reported (E_SCHEMA_UNPARSED), never dropping
+the file's other statements; a no-DDL file (seed/grant/cron) folds to nothing and is never flagged.
 Query-string references are **not** verified edges, are available only opt-in
 (`impact --include-raw-queries`) as a low-confidence advisory, and never produce `E_BOUNDARY_VIOLATION`.
+
+**Why tables/policies/RLS are derived, never in YAML.** A schema subsystem's manifest declares only
+`paths:` (the migrations) and an empty `exposes: []`. The table catalog, schema objects, and RLS
+posture are *computed* from the migrations on every run — re-declaring them in YAML would drift the
+instant a migration landed. The migrations are the contract; Bounds folds them into the answer.
+
+**The two extraction layers (`extract/sql.py`).** tree-sitter-sql parses tables/columns/functions/
+views/indexes/triggers/types (the walk descends into `BEGIN; … COMMIT;` transactions so wrapped DDL
+isn't dropped, and recovers a table+columns even when an unparsable table-level `CONSTRAINT` clause
+errors the statement). Postgres RLS (`CREATE`/`ALTER`/`DROP POLICY`, `ENABLE`/`DISABLE`/`FORCE ROW
+LEVEL SECURITY`) has **no tree-sitter grammar**, so it is recovered by regex over the source *after
+blanking every comment, string literal, and function body* — making a `CREATE POLICY` in a comment,
+a seed string, or an `EXECUTE '…'` body impossible to mistake for real DDL. Table references are
+canonicalised to the bare name (the `public.` qualifier dropped) so `CREATE TABLE public.t` and
+`ALTER TABLE t` fold to one entry. An error region that still carries DDL keywords counts as
+catalog loss (E_SCHEMA_UNPARSED); a non-DDL parse error (a `cron.schedule` call) does not.
+
+> Because extraction *output* changed in this version for unchanged source, `config.STATE_VERSION`
+> is bumped — every existing binary `cache.db` is treated as version-mismatched and rebuilt rather
+> than serving stale symbols.
 
 ### `locate.py` — `where` + `impact` queries
 ```python
@@ -729,18 +758,35 @@ bounds list [--namespace NS]       → {project, subsystems:[{name, role, critic
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count, entry_points, validation_status,
                                        project_status, unparsed_files?, exposes[*].verified, exposes[*].file?,
-                                       exposes[*].entry_point?, exposes[*].columns?, tables?, schema_object_counts?}
-                                   # token-lean by default: the file roster and the (often huge) schema-object
-                                   # list are gated behind --full, which adds {files, schema_objects}. The
-                                   # contract — exposes + tables(+columns) — is always full.
-                                       # tables?: [{name, kind:"table", columns:[...], files:[...]}]
-                                       # schema_objects?: [{name, kind, table?, files:[...]}]  # functions/views/
-                                       #   indexes/triggers/types/policies/rls — the non-table schema surface
+                                       exposes[*].entry_point?, exposes[*].columns?, tables?, schema_object_counts?,
+                                       rls_posture?, schema_coverage?, schema_diagnostics?}
+                                   # token-lean by default: the file roster, the (often huge) schema-object
+                                   # list, the RLS posture table-name lists, AND the per-file schema_diagnostics
+                                   # are gated behind --full, which adds {files, schema_objects,
+                                   # rls_posture.*_tables, rls_posture.policy_count, schema_diagnostics}.
+                                   # The contract — exposes + tables(+columns) — is always full.
+                                       # tables?: [{name, kind:"table", columns:[...], files:[...]}]  (bare table
+                                       #   names — schema qualifier dropped so every op folds to one entry)
+                                       # schema_object_counts?: {kind: n} for the LIVE non-table surface; --full
+                                       #   restores schema_objects?: [{name, kind, table?, files:[...]}] — functions/
+                                       #   views/indexes/triggers/types/policies/rls. Policies + RLS are an ORDERED
+                                       #   FOLD (a dropped policy / disabled table nets out), like the table fold.
+                                       # rls_posture? (only when the schema uses RLS): derived security read —
+                                       #   {tables, rls_enabled, protected, rls_without_policy, unprotected};
+                                       #   --full adds the table-name lists + per-table policy_count.
+                                       # schema_coverage (always for a schema sub): the AI TRUST signal —
+                                       #   {complete:true} when every owned file extracted (absence IS
+                                       #   authoritative), else {complete:false, unextracted_files:N, note} so an
+                                       #   AI never reads a parse gap as "this table/policy does not exist".
+                                       # schema_diagnostics? (--full only): [{code, message, file}] — the
+                                       #   E_SCHEMA_UNPARSED / E_SCHEMA_NO_ORDER advisories naming the files behind
+                                       #   an incomplete schema_coverage. Gated so the default stays token-lean.
                                        # validation_status is SUBSYSTEM-SCOPED (this subsystem's own issues);
                                        # project_status is the project-wide rollup, kept additively.
-                                       # unparsed_files (present only when non-empty): owned source files
-                                       # Bounds could not extract — so an unreadable/oversized file is reported,
-                                       # never silently shown as a missing symbol.
+                                       # unparsed_files (present only when non-empty): owned source files Bounds
+                                       # could not extract at all (unreadable/oversized/wholly-unparsable DDL) —
+                                       # a genuine failure, reported not silently dropped. A no-DDL .sql file
+                                       # (seed/grant/cron) is NOT listed here: it has no schema to lose.
 bounds describe --namespace NS     → {namespace, subsystems:[<describe payload>...]}
 bounds describe <name> --deep      → same + {semantic: {"note":"LLM enrichment (Tier 3) not enabled in this build"}}
 bounds validate [--quick|--mode M] [--enforce on|off|warn] [--base REF] [scan flags]

@@ -7,12 +7,24 @@ fail-soft: one unparsable statement is recorded as a ``schema_error`` signal sym
 remaining valid statements in the same file still extract — a typo in migration 030 never
 erases the tables created in 001.
 
-Covered statements: tables/columns (``CREATE``/``ALTER``/``DROP``/``RENAME``), plus
-functions/RPCs, views, indexes, triggers, and types (grammar-native). Postgres RLS has no
-tree-sitter grammar yet, so it is recovered without whole-file regex (which would match
-inside comments/strings): ``CREATE POLICY`` from the text of the ERROR node it produces, and
-``ENABLE/DISABLE ROW LEVEL SECURITY`` structurally from the phantom column the grammar
-misparses it into. A genuine parse error beside recovered RLS is never discounted.
+Two extraction layers, by what tree-sitter can and cannot parse:
+
+* **Grammar-native** (tables/columns via ``CREATE``/``ALTER``/``DROP``/``RENAME``, plus
+  functions/RPCs, views, indexes, triggers, types). These are read from the parse tree.
+  The walk **descends into transaction containers** (``BEGIN; … COMMIT;``) so DDL wrapped
+  in a transaction block — the common Supabase migration shape — is not silently dropped.
+* **Postgres RLS dialect** (``CREATE``/``ALTER``/``DROP POLICY`` and
+  ``ENABLE``/``DISABLE``/``FORCE`` ``ROW LEVEL SECURITY``). tree-sitter-sql has no grammar
+  for these, so they are recovered with a regex pass over the source **after blanking every
+  comment span** (comments are their own node type, so a commented-out ``create policy`` is
+  masked out and can never produce a phantom symbol). Working on masked text — rather than
+  scoping to a single ERROR node — recovers policies regardless of nesting (transactions),
+  fragmentation (pg_dump output), or fusion with an adjacent broken statement.
+
+A file with **no schema DDL at all** (a seed-data ``INSERT``, a ``grant``/``revoke``, a
+``select cron.schedule(...)`` registration) is *not* a failure: it returns empty symbols and
+no error, so describe/validate never mislabel it as "unparsed". A genuine parse failure that
+loses real DDL is still reported hard — see :meth:`SqlAdapter.extract`.
 
 A leading comment header (``-- revision: <id>`` / ``-- down_revision: <id>``, or an explicit
 ``-- bounds:order <n>``) is captured as a ``schema_meta`` signal so the fold can order a
@@ -54,15 +66,55 @@ _NAMED_CREATE = {
 }
 _DDL_TYPES = {"create_table", "alter_table", "drop_table"} | set(_NAMED_CREATE)
 
-# tree-sitter-sql (0.3.11) has no grammar for Postgres `CREATE POLICY`, so it surfaces as an
-# ERROR node. We recover the policy's identity by matching ONLY that ERROR node's text (never
-# whole-file text) — comments and string literals are their own node types, never ERRORs, so
-# a commented-out `create policy` can't produce a phantom symbol. `ENABLE/DISABLE ROW LEVEL
-# SECURITY` is recovered structurally instead (see the add_column phantom in
-# _symbols_from_statement), so it needs no regex.
-_POLICY_RE = re.compile(
-    r"\bcreate\s+policy\s+(?P<name>\"[^\"]+\"|`[^`]+`|\[[^\]]+\]|[\w.]+)\s+on\s+"
-    r"(?P<table>\"[^\"]+\"|[\w.]+)",
+# Container node types whose children are themselves top-level-equivalent statements: the
+# walk descends into these so DDL inside `BEGIN; … COMMIT;` is extracted, not dropped.
+_CONTAINER_TYPES = {"transaction"}
+
+# An ``id`` token in a policy/table position: a double/back/bracket-quoted identifier, or a
+# bare word. A table reference may be schema-qualified (``"public"."t"`` / ``public.t``). These
+# run over the comment/string-masked source as BYTES patterns, so a match's ``.start()`` is a
+# byte offset directly usable for line numbers / span blanking (a char index would desync on
+# any multibyte identifier).
+_ID = rb'"[^"]+"|`[^`]+`|\[[^\]]+\]|\w+'
+_QUALIFIED = rb"(?:" + _ID + rb")(?:\s*\.\s*(?:" + _ID + rb"))*"
+# The shared `<name> ON <table>` tail of every policy statement (one home for the fragment).
+_NAME_ON_TABLE = rb"(?P<name>" + _ID + rb")\s+on\s+(?P<table>" + _QUALIFIED + rb")"
+
+# Postgres RLS dialect — recovered from comment-masked source (no grammar). All are anchored
+# on the statement keyword so a substring inside an identifier can't match.
+_POLICY_CREATE_RE = re.compile(
+    rb"\bcreate\s+policy\s+(?:if\s+not\s+exists\s+)?" + _NAME_ON_TABLE,
+    re.IGNORECASE,
+)
+_POLICY_DROP_RE = re.compile(
+    rb"\bdrop\s+policy\s+(?:if\s+exists\s+)?" + _NAME_ON_TABLE,
+    re.IGNORECASE,
+)
+_POLICY_ALTER_RE = re.compile(
+    rb"\balter\s+policy\s+" + _NAME_ON_TABLE + rb"(?:\s+rename\s+to\s+(?P<to>" + _ID + rb"))?",
+    re.IGNORECASE,
+)
+_RLS_RE = re.compile(
+    rb"\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?P<table>" + _QUALIFIED + rb")\s+"
+    rb"(?P<action>enable|disable|force|no\s+force)\s+row\s+level\s+security",
+    re.IGNORECASE,
+)
+
+# Postgres dollar-quoted string / function body: ``$$ … $$`` or ``$tag$ … $tag$``. tree-sitter
+# emits only the bare ``$$`` delimiters (the body is shredded into loose tokens), so the body is
+# masked textually here instead — a ``CREATE POLICY`` inside an ``EXECUTE '…'`` / ``$$ … $$``
+# body must never be mistaken for real DDL. The backreference requires a matching close tag.
+_DOLLAR_QUOTE_RE = re.compile(rb"\$(\w*)\$[\s\S]*?\$\1\$")
+
+# "Does this file intend any DDL *we model*?" — used to tell a non-schema file (seed/cron/grant)
+# from a DDL-bearing parse failure (real loss, reported). Lists exactly the object kinds the
+# fold materializes; a `CREATE SCHEMA` / `CREATE EXTENSION` (real DDL we don't model) parses
+# fine and simply has no table surface, so it must NOT count as intent and hard-fail. Matched on
+# the comment/string/body-masked source.
+_DDL_INTENT_RE = re.compile(
+    rb"\b(?:create|alter|drop)\s+(?:materialized\s+view|table|policy|index|"
+    rb"unique\s+index|trigger|view|function|type)\b"
+    rb"|\brow\s+level\s+security\b",
     re.IGNORECASE,
 )
 
@@ -82,11 +134,38 @@ def _line(node) -> int:
     return node.start_point[0] + 1
 
 
+def _line_at(source: bytes, byte_off: int) -> int:
+    """1-based line number of ``byte_off`` in ``source`` (newline count, deterministic)."""
+    return source.count(b"\n", 0, byte_off) + 1
+
+
 def _strip(name: str) -> str:
-    """Strip SQL identifier quoting (``"x"`` / `` `x` `` / ``[x]``)."""
-    return name.strip("\"`[]")
+    """Strip SQL identifier quoting (``"x"`` / `` `x` `` / ``[x]``) and surrounding space."""
+    return name.strip().strip("\"`[]")
 
 
+def _last_ident(qualified: str) -> str:
+    """Last component of a (possibly schema-qualified, possibly quoted) reference."""
+    return _strip(qualified.split(".")[-1])
+
+
+def _table_ref(name: str | None) -> str | None:
+    """Canonical table key: the bare table name, schema qualifier dropped.
+
+    A table is referenced inconsistently across a migration set — ``CREATE TABLE
+    public.profiles`` here, ``ALTER TABLE profiles`` there, and policies/RLS always name it
+    bare. Folding on the bare name is the single canonical form, so every op on a table lands
+    on the same catalog entry instead of splitting ``public.profiles`` from ``profiles``.
+    (Functions/views/types keep their qualified names — they are objects, not table refs.)
+    """
+    if name is None:
+        return None
+    return name.split(".")[-1]
+
+
+# ---------------------------------------------------------------------------
+# Grammar-native extraction (tables / columns / functions / views / indexes / …)
+# ---------------------------------------------------------------------------
 def _object_name(node, source: bytes) -> str | None:
     """Dotted object name from the first ``object_reference`` under ``node`` (quotes stripped)."""
     obj = next((c for c in node.named_children if c.type == "object_reference"), None)
@@ -156,10 +235,10 @@ def _named_create_symbol(ddl, source: bytes, line: int) -> list[Symbol]:
     meta: dict = {"schema_op": op}
     if ddl.type == "create_index":
         name = _first_name(ddl, source)
-        on_table = _object_after(ddl, source, "keyword_on")
+        on_table = _table_ref(_object_after(ddl, source, "keyword_on"))
     else:
         name = _object_name(ddl, source)
-        on_table = _object_after(ddl, source, "keyword_on") if ddl.type == "create_trigger" else None
+        on_table = _table_ref(_object_after(ddl, source, "keyword_on")) if ddl.type == "create_trigger" else None
     if on_table:
         meta["table"] = on_table
     if not name:
@@ -168,20 +247,13 @@ def _named_create_symbol(ddl, source: bytes, line: int) -> list[Symbol]:
 
 
 def _add_column_symbols(child, table: str, source: bytes, line: int) -> list[Symbol]:
-    """Symbols for an ``add_column`` node — real columns, or an RLS recovery.
+    """Symbols for an ``add_column`` node (real columns only).
 
-    A real ADD COLUMN carries a ``keyword_add``. Without it, the grammar has misparsed
-    ``... ENABLE/DISABLE ROW LEVEL SECURITY`` into a phantom column named "enable"/"disable"
-    (the name sits inside a ``column_definition``, so it's read via ``_columns``). We recover
-    that structurally as an ``rls`` symbol — no regex, so immune to comment/string false
-    positives — instead of leaking a phantom column.
+    RLS toggles (``ENABLE/DISABLE ROW LEVEL SECURITY``) are recovered separately from
+    comment-masked text and their spans blanked before this grammar walk, so the phantom
+    ``column_definition`` the grammar would otherwise misparse them into never reaches here.
     """
     if not any(c.type == "keyword_add" for c in child.named_children):
-        action = next((c.lower() for c in _columns(child, source)
-                       if c.lower() in ("enable", "disable")), None)
-        if action:
-            return [Symbol(table, "rls", line, exported=False,
-                           metadata={"schema_op": f"{action}_rls", "table": table})]
         return []
     return [Symbol(f"{table}.{col}", "column", line, exported=False,
                    metadata={"schema_op": "add_column", "table": table, "column": col})
@@ -189,7 +261,7 @@ def _add_column_symbols(child, table: str, source: bytes, line: int) -> list[Sym
 
 
 def _alter_symbols(ddl, table: str, source: bytes, line: int) -> list[Symbol]:
-    """Symbols for an ``alter_table``: add/drop/rename column or rename/RLS of the table."""
+    """Symbols for an ``alter_table``: add/drop/rename column or rename of the table."""
     out: list[Symbol] = []
     for child in ddl.named_children:
         if child.type == "add_column":
@@ -200,7 +272,7 @@ def _alter_symbols(ddl, table: str, source: bytes, line: int) -> list[Symbol]:
                 out.append(Symbol(f"{table}.{col}", "drop", line, exported=False,
                                   metadata={"schema_op": "drop_column", "table": table, "column": col}))
         elif child.type == "rename_object":
-            target = _object_name(child, source)
+            target = _table_ref(_object_name(child, source))
             if target:
                 out.append(Symbol(table, "rename", line, exported=False,
                                   metadata={"schema_op": "rename_table", "to": target}))
@@ -223,7 +295,7 @@ def _symbols_from_statement(stmt, source: bytes) -> list[Symbol]:
     line = _line(ddl)
     if ddl.type in _NAMED_CREATE:
         return _named_create_symbol(ddl, source, line)
-    table = _object_name(ddl, source)
+    table = _table_ref(_object_name(ddl, source))
     if not table:
         return []
     if ddl.type == "create_table":
@@ -234,32 +306,142 @@ def _symbols_from_statement(stmt, source: bytes) -> list[Symbol]:
     return _alter_symbols(ddl, table, source, line)
 
 
-def _policies_from_error(node, source: bytes) -> tuple[list[Symbol], list[tuple[int, int]]]:
-    """Recover ``CREATE POLICY`` symbols + their source spans from one ERROR node.
+def _iter_statements(node):
+    """Yield ``statement``/``ERROR`` nodes, descending into transaction/block containers.
 
-    Scoped to the ERROR node only (never whole-file text): tree-sitter classifies comments
-    and string literals as their own node types, so a commented-out or string-embedded
-    ``create policy`` is never an ERROR and can't produce a phantom symbol. The returned spans
-    (each statement from its ``create`` to the next ``;``) let the caller blank policies and
-    re-parse, so a genuinely broken statement fused into the same ERROR node still reports.
+    A ``statement`` or ``ERROR`` is yielded as a unit (never descended into, so a nested
+    subquery isn't double-counted). A container node (``transaction`` = ``BEGIN; … COMMIT;``)
+    is descended so the DDL it wraps is reached. Everything else (comments, loose keyword
+    tokens left by a fragmented parse) is skipped.
     """
-    out: list[Symbol] = []
+    for child in node.named_children:
+        if child.type in ("statement", "ERROR"):
+            yield child
+        elif child.type in _CONTAINER_TYPES:
+            yield from _iter_statements(child)
+
+
+def _grammar_symbols(root, source: bytes) -> tuple[list[Symbol], list[tuple[int, int]]]:
+    """Grammar-native DDL symbols + the byte span of every error-bearing node, in one pass.
+
+    Error spans (not just a count) let the caller classify each error as *lost DDL* (reported)
+    vs benign non-schema noise — a ``cron.schedule`` call or ``grant`` the grammar trips on.
+    """
+    symbols: list[Symbol] = []
+    error_spans: list[tuple[int, int]] = []
+    for node in _iter_statements(root):
+        if node.type == "statement":
+            # Best-effort even when the statement has an error: tree-sitter-sql can't parse a
+            # table-level `CONSTRAINT … UNIQUE (…)` / `CHECK (…)` clause, which errors the WHOLE
+            # `CREATE TABLE` — yet the table name and its column_definitions are still parsed.
+            # Recovering them keeps the table (an unmodeled constraint tail is not a catalog
+            # loss). Only a statement that yields no DDL at all counts as a parse error.
+            recovered = _symbols_from_statement(node, source)
+            if recovered:
+                symbols.extend(recovered)
+            elif node.has_error:
+                error_spans.append((node.start_byte, node.end_byte))
+        else:  # ERROR node
+            error_spans.append((node.start_byte, node.end_byte))
+    return symbols, error_spans
+
+
+# ---------------------------------------------------------------------------
+# Postgres RLS dialect recovery (comment-masked, textual order)
+# ---------------------------------------------------------------------------
+def _mask_spans(root, source: bytes) -> list[tuple[int, int]]:
+    """Byte spans to blank before the RLS regex + DDL-intent check, recursively.
+
+    Masks **comments** (a commented-out ``create policy`` is not a policy), **single-quoted
+    string literals**, and **function bodies / dollar-quoted strings** (so a ``CREATE TABLE``
+    inside ``VALUES ('…')`` seed data, or a ``CREATE POLICY`` inside an ``EXECUTE '…'`` /
+    ``$$ … $$`` function body, is never mistaken for real DDL). Double-quoted identifiers
+    (``"public"``) are deliberately *not* masked — they're real table/object names.
+    """
     spans: list[tuple[int, int]] = []
-    for m in _POLICY_RE.finditer(_text(node, source)):
-        name = _strip(m.group("name"))
-        table = _strip(m.group("table"))
-        out.append(Symbol(f"{table}.{name}", "policy", _line(node), exported=False,
-                          metadata={"schema_op": "create_policy", "table": table, "policy": name}))
-        # Span = the policy statement, create → its terminating ';'. The ';' legitimately
-        # sits past this ERROR node (a policy's USING/CHECK tail parses into a sibling node),
-        # so we search the whole source. Assumes the policy is terminated — well-formed SQL
-        # always is; an unterminated policy is invalid input Postgres rejects too.
-        start = node.start_byte + m.start()
-        semi = source.find(b";", start)
-        spans.append((start, semi + 1 if semi != -1 else node.end_byte))
-    return out, spans
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type in ("comment", "marginalia"):
+            spans.append((n.start_byte, n.end_byte))
+            continue
+        if n.type == "literal" and n.start_byte < n.end_byte and source[n.start_byte] == 0x27:
+            spans.append((n.start_byte, n.end_byte))  # single-quoted string, not an identifier
+            continue
+        stack.extend(n.children)
+    # Dollar-quoted bodies are masked textually: tree-sitter spans only the bare `$$` markers,
+    # not the body, so a CREATE POLICY inside a `$$ … $$` / EXECUTE body would otherwise leak.
+    spans.extend((m.start(), m.end()) for m in _DOLLAR_QUOTE_RE.finditer(source))
+    return spans
 
 
+def _blank_spans(source: bytes, spans: list[tuple[int, int]]) -> bytes:
+    """Overwrite each ``[start, end)`` byte range with spaces, preserving newlines so line
+    numbers and byte offsets are unchanged — used to mask comments and recovered RLS."""
+    if not spans:
+        return source
+    buf = bytearray(source)
+    for start, end in spans:
+        for i in range(max(start, 0), min(end, len(buf))):
+            if buf[i] != 0x0A:  # keep '\n' so line numbers stay aligned
+                buf[i] = 0x20
+    return bytes(buf)
+
+
+def _stmt_span(masked: bytes, start: int) -> tuple[int, int]:
+    """``[start, end)`` of the statement beginning at ``start`` — through its terminating
+    ``;`` (a policy's USING/CHECK tail can run past the keyword), else end of source."""
+    semi = masked.find(b";", start)
+    return (start, semi + 1 if semi != -1 else len(masked))
+
+
+def _recover_rls(masked: bytes) -> tuple[list[Symbol], list[tuple[int, int]]]:
+    """Recover policy + RLS symbols from comment-masked source, in textual order.
+
+    Returns ``(symbols, spans)``. ``symbols`` are ordered by source position so an
+    in-file create-then-drop of the same policy folds correctly. ``spans`` are blanked
+    before the grammar walk so a recovered statement can't also be counted as a parse error
+    or misparsed into a phantom column.
+    """
+    found: list[tuple[int, Symbol]] = []
+    spans: list[tuple[int, int]] = []
+
+    def add(m, sym: Symbol) -> None:  # m.start() is a byte offset (bytes pattern over `masked`)
+        found.append((m.start(), sym))
+        spans.append(_stmt_span(masked, m.start()))
+
+    def grp(m, key: str) -> str:
+        return m.group(key).decode("utf-8", "replace")
+
+    for m in _POLICY_CREATE_RE.finditer(masked):
+        table, name = _last_ident(grp(m, "table")), _strip(grp(m, "name"))
+        add(m, Symbol(f"{table}.{name}", "policy", _line_at(masked, m.start()), exported=False,
+                      metadata={"schema_op": "create_policy", "table": table, "policy": name}))
+    for m in _POLICY_DROP_RE.finditer(masked):
+        table, name = _last_ident(grp(m, "table")), _strip(grp(m, "name"))
+        add(m, Symbol(f"{table}.{name}", "policy", _line_at(masked, m.start()), exported=False,
+                      metadata={"schema_op": "drop_policy", "table": table, "policy": name}))
+    for m in _POLICY_ALTER_RE.finditer(masked):
+        table, name = _last_ident(grp(m, "table")), _strip(grp(m, "name"))
+        meta = {"schema_op": "alter_policy", "table": table, "policy": name}
+        if m.group("to"):
+            meta["to"] = _strip(grp(m, "to"))
+        add(m, Symbol(f"{table}.{name}", "policy", _line_at(masked, m.start()), exported=False, metadata=meta))
+    for m in _RLS_RE.finditer(masked):
+        table = _last_ident(grp(m, "table"))
+        action = re.sub(r"\s+", " ", grp(m, "action").strip().lower())
+        op = {"enable": "enable_rls", "disable": "disable_rls",
+              "force": "force_rls", "no force": "no_force_rls"}[action]
+        add(m, Symbol(table, "rls", _line_at(masked, m.start()), exported=False,
+                      metadata={"schema_op": op, "table": table}))
+
+    found.sort(key=lambda t: t[0])
+    return [sym for _, sym in found], spans
+
+
+# ---------------------------------------------------------------------------
+# Header (revision / order) recovery
+# ---------------------------------------------------------------------------
 _HEADER_RULES = ((_REV_RE, "revision"), (_DOWN_RE, "down_revision"), (_ORDER_RE, "order"))
 
 
@@ -280,7 +462,7 @@ def _revision_meta(root, source: bytes) -> Symbol | None:
     """
     meta: dict[str, object] = {"schema_op": "meta"}
     for child in root.named_children:
-        if child.type == "statement":
+        if child.type in ("statement", "transaction"):
             break  # headers live at the top of the file; stop once real DDL starts
         if child.type == "comment":
             _header_hints(_text(child, source).strip(), meta)
@@ -289,74 +471,43 @@ def _revision_meta(root, source: bytes) -> Symbol | None:
     return Symbol("<schema-meta>", "schema_meta", 1, exported=False, metadata=meta)
 
 
-def _residual_unparsed(error_lines: list[int], rls_lines: set[int]) -> int:
-    """Genuine error count after discounting one RLS remnant per recovered-RLS line.
+# ---------------------------------------------------------------------------
+# Per-file scan
+# ---------------------------------------------------------------------------
+def _scan_file(source: bytes) -> tuple[list[Symbol], int, bool]:
+    """Scan one file → ``(symbols, ddl_errors, has_ddl_intent)``.
 
-    `ENABLE/DISABLE ROW LEVEL SECURITY` parses as a valid alter_table (recovered as an
-    `rls` symbol) plus a trailing "level security" ERROR on the SAME line. Drop one error
-    per RLS line — matched by line, so a genuine error elsewhere still reports (no masking).
+    Grammar-native DDL is read after blanking recovered RLS spans (so policy ERROR nodes are
+    un-fused from adjacent statements and the phantom RLS column is suppressed). Each remaining
+    parse error is classified against the comment/string/body-masked text: ``ddl_errors`` are
+    errors that actually carry DDL (lost schema → reported); the rest are benign non-schema
+    noise (a ``cron.schedule`` call the grammar trips on, a complex ``insert``) and are ignored.
+    ``has_ddl_intent`` is whole-file: does the masked source mention any DDL at all?
     """
-    seen: set[int] = set()
-    residual = 0
-    for ln in error_lines:
-        if ln in rls_lines and ln not in seen:
-            seen.add(ln)
-            continue
-        residual += 1
-    return residual
-
-
-def _blank_spans(source: bytes, spans: list[tuple[int, int]]) -> bytes:
-    """Overwrite each ``[start, end)`` byte range with spaces, preserving newlines (so line
-    numbers and offsets are unchanged) — used to erase recovered policies before re-parsing."""
-    buf = bytearray(source)
-    for start, end in spans:
-        for i in range(start, min(end, len(buf))):
-            if buf[i] != 0x0A:  # keep '\n' so line numbers stay aligned
-                buf[i] = 0x20
-    return bytes(buf)
-
-
-def _walk(root, source: bytes) -> tuple[list[Symbol], list[int], list[tuple[int, int]]]:
-    """One pass over top-level nodes → (symbols, error_lines, recovered-policy spans)."""
-    symbols: list[Symbol] = []
-    error_lines: list[int] = []
-    policy_spans: list[tuple[int, int]] = []
+    root = _parser().parse(source).root_node
     meta = _revision_meta(root, source)
+
+    # Two masks, by consumer: the RLS regex + DDL-intent checks work on text with comments,
+    # strings, and function bodies blanked (no false positives — a 'CREATE POLICY' in a seed
+    # string or function body is not DDL); the grammar parse keeps function bodies intact (it
+    # needs them) and only blanks recovered RLS spans.
+    masked = _blank_spans(source, _mask_spans(root, source))
+    rls_symbols, rls_spans = _recover_rls(masked)
+
+    cleaned = _blank_spans(source, rls_spans)
+    grammar, error_spans = _grammar_symbols(_parser().parse(cleaned).root_node, cleaned)
+
+    symbols: list[Symbol] = []
     if meta is not None:
         symbols.append(meta)
-    for node in root.named_children:
-        if node.type == "statement":
-            if node.has_error:  # one bad statement: skip it, keep its siblings
-                error_lines.append(_line(node))
-            else:
-                symbols.extend(_symbols_from_statement(node, source))
-        elif node.type == "ERROR":
-            # A `CREATE POLICY` lands here (no grammar). Recover it and record its span; a
-            # genuinely broken statement doesn't match and still counts as an error.
-            policies, spans = _policies_from_error(node, source)
-            if policies:
-                symbols.extend(policies)
-                policy_spans.extend(spans)
-            else:
-                error_lines.append(_line(node))
-    return symbols, error_lines, policy_spans
+    symbols.extend(grammar)
+    symbols.extend(rls_symbols)
 
-
-def _scan_file(root, source: bytes) -> tuple[list[Symbol], int]:
-    """Walk top-level nodes into (symbols, genuine-unparsed-count). Per-statement fail-soft.
-
-    Policies have no grammar, so they surface as ERROR nodes that tree-sitter may *fuse* with
-    an adjacent broken statement. To avoid masking that real error, when policies were
-    recovered we blank their spans and re-parse: the residual error count then reflects only
-    genuinely-unparsable SQL (RLS remnants still discounted by line).
-    """
-    symbols, error_lines, policy_spans = _walk(root, source)
-    if policy_spans:
-        blanked = _blank_spans(source, policy_spans)
-        _, error_lines, _ = _walk(_parser().parse(blanked).root_node, blanked)
-    rls_lines = {s.line for s in symbols if s.kind == "rls"}
-    return symbols, _residual_unparsed(error_lines, rls_lines)
+    # Classify each parse error on the masked slice (comment/string/body-free), so only a
+    # genuinely-unparsable DDL statement counts as catalog loss.
+    ddl_errors = sum(1 for s, e in error_spans if _DDL_INTENT_RE.search(masked[s:e]))
+    has_intent = bool(_DDL_INTENT_RE.search(masked))
+    return symbols, ddl_errors, has_intent
 
 
 class SqlAdapter(LanguageAdapter):
@@ -400,20 +551,27 @@ class SqlAdapter(LanguageAdapter):
             return make_result(rel_path, self.language_name, [], [], source,
                                error=f"tree-sitter-sql unavailable: {_IMPORT_ERROR}")
         try:
-            tree = _parser().parse(source)
-            symbols, unparsed = _scan_file(tree.root_node, source)
-            if unparsed:
-                # Fail soft, report hard: surfaced as E_SCHEMA_UNPARSED (warning), not a
-                # silent drop and not a whole-file failure - the valid statements still folded.
+            symbols, ddl_errors, has_intent = _scan_file(source)
+            # Report only errors that actually lost DDL (E_SCHEMA_UNPARSED, a warning). A
+            # non-schema parse error (a cron registration, a complex insert) is never a schema
+            # loss — never cry wolf on it, even in a file that also carries real DDL.
+            if ddl_errors:
+                # Fail soft, report hard: the file's parseable statements still folded.
                 symbols.append(Symbol("<unparsed>", "schema_error", 1, exported=False,
-                                      metadata={"schema_op": "unparsed", "count": unparsed}))
-            # A file that is ALL error (no statement parsed at all) is a genuine hard failure.
-            # A leading `schema_meta` header is not a parsed statement, so it must not mask an
-            # otherwise wholly-unparsable migration (e.g. `-- revision: 1` over a broken body).
+                                      metadata={"schema_op": "unparsed", "count": ddl_errors}))
             valid = [s for s in symbols if s.kind not in ("schema_error", "schema_meta")]
-            if not valid and unparsed:
-                return make_result(rel_path, self.language_name, [], [], source,
-                                   error="SQL parse error (no statement could be parsed)")
+            if not valid:
+                # No DDL extracted. Hard-fail ONLY when the file *meant* to carry schema: it
+                # has DDL intent the grammar couldn't parse, or a revision/order header
+                # declaring it a migration. A file with no DDL intent (a seed INSERT, a
+                # grant/revoke, a cron registration — parseable or not) is legitimately
+                # schema-empty: return it clean (empty symbols, no error) so it is never
+                # mislabeled "unparsed". This is the cry-wolf fix.
+                has_header = any(s.kind == "schema_meta" for s in symbols)
+                if has_intent or has_header:
+                    return make_result(rel_path, self.language_name, [], [], source,
+                                       error="SQL parse error (no schema statement could be parsed)")
+                return make_result(rel_path, self.language_name, [], [], source)
         except Exception as exc:
             return make_result(rel_path, self.language_name, [], [], source, error=str(exc))
         return make_result(rel_path, self.language_name, symbols, [], source)

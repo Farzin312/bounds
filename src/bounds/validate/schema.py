@@ -26,8 +26,13 @@ from ..models import ExtractResult
 SCHEMA_LANGUAGES = frozenset({"sql", "prisma"})
 
 # Order-sensitive ops: if a subsystem has several unordered migrations carrying any of
-# these, the fold result depends on order and we should warn (E_SCHEMA_NO_ORDER).
-_ORDER_SENSITIVE = {"add_column", "drop_column", "drop_table", "rename_table", "rename_column"}
+# these, the fold result depends on order and we should warn (E_SCHEMA_NO_ORDER). Includes the
+# non-table lifecycle ops (a DROP/ALTER POLICY or a DISABLE/NO FORCE RLS) now that policies and
+# RLS fold — a lone CREATE/ENABLE is order-independent (like CREATE TABLE) and is excluded.
+_ORDER_SENSITIVE = {
+    "add_column", "drop_column", "drop_table", "rename_table", "rename_column",
+    "drop_policy", "alter_policy", "disable_rls", "no_force_rls",
+}
 
 
 @dataclass
@@ -203,29 +208,105 @@ def schema_catalog(subsystem: str, extracts: dict[str, ExtractResult], file_owne
     return [table.to_dict() for table in _fold_subsystem_schema(subsystem, extracts, file_owner).values()]
 
 
-# Non-table DDL objects surfaced alongside the table catalog: functions/RPCs, views, indexes,
-# triggers, types, RLS policies and row-level-security toggles. They don't fold into the table
-# surface, but an agent still needs to see what a migration set exposes.
-_OBJECT_KINDS = ("function", "view", "index", "trigger", "type", "policy", "rls")
+# Non-table DDL objects surfaced alongside the table catalog. Two classes, by lifecycle:
+#   * "dedup" kinds (functions/RPCs, views, indexes, triggers, types) — present if ever
+#     created; deduped by (kind, name). DROP of these is rare and not tracked.
+#   * "folded" kinds (policies, RLS toggles) — an ordered create/alter/drop fold, exactly like
+#     tables, so a `DROP POLICY` (or `DISABLE ROW LEVEL SECURITY`) nets out and only the
+#     *currently live* surface is reported (the same drift-proof contract the table fold gives).
+_DEDUP_KINDS = ("function", "view", "index", "trigger", "type")
 
 
-def schema_objects(subsystem: str, extracts: dict[str, ExtractResult], file_owner: dict[str, str]) -> list[dict]:
-    """Non-table schema objects owned by ``subsystem``, deduped by (kind, name) and sorted.
+@dataclass
+class _ObjectsFold:
+    """Live non-table schema surface after the ordered fold."""
+    dedup: dict[tuple[str, str], dict]  # (kind, name) -> {name, kind, [table], files:set}
+    policies: dict[tuple[str, str], dict]  # (table, policy) -> {table, policy, present, files:set}
+    rls: dict[str, dict]  # table -> {table, enabled, files:set}
 
-    Deterministic: files are walked in sorted order and the output is sorted by (kind, name),
-    so the list is byte-stable across runs. Each entry carries ``{name, kind, [table], files}``.
+
+def _fold_policy(policies: dict[tuple[str, str], dict], sym, rel: str) -> None:
+    """Apply one policy op (create/alter/drop) to the running policy fold."""
+    meta = sym.metadata or {}
+    table, policy = str(meta.get("table") or ""), str(meta.get("policy") or "")
+    entry = policies.setdefault((table, policy),
+                                {"table": table, "policy": policy, "present": False, "files": set()})
+    entry["files"].add(rel)
+    op = meta.get("schema_op")
+    if op == "drop_policy":
+        entry["present"] = False
+    elif op == "alter_policy":
+        target = str(meta.get("to") or "").strip()
+        if target:  # ALTER POLICY ... RENAME TO: move presence to the new name
+            moved = policies.setdefault((table, target),
+                                        {"table": table, "policy": target, "present": False, "files": set()})
+            moved["files"].update(entry["files"])
+            moved["present"] = entry["present"]
+            entry["present"] = False
+        # a non-rename ALTER POLICY leaves presence unchanged
+    else:  # create_policy
+        entry["present"] = True
+
+
+def _fold_subsystem_objects(
+    subsystem: str, extracts: dict[str, ExtractResult], file_owner: dict[str, str]
+) -> _ObjectsFold:
+    """Fold non-table DDL into the live surface, in deterministic migration + textual order.
+
+    Policies and RLS toggles fold (create/alter/drop, enable/disable/force) so a dropped
+    policy or disabled table can't linger; functions/views/indexes/triggers/types dedup.
+    Reuses :func:`order_migrations` so objects fold in the same order tables do.
     """
-    merged: dict[tuple[str, str], dict] = {}
-    for rel in sorted(_schema_files(subsystem, extracts, file_owner)):
+    dedup: dict[tuple[str, str], dict] = {}
+    policies: dict[tuple[str, str], dict] = {}
+    rls: dict[str, dict] = {}
+    ordered, _ = order_migrations(subsystem, extracts, file_owner)
+    for rel in ordered:
         for sym in extracts[rel].symbols:
-            if sym.kind not in _OBJECT_KINDS:
-                continue
-            entry = merged.setdefault((sym.kind, sym.name),
-                                      {"name": sym.name, "kind": sym.kind, "files": set()})
-            entry["files"].add(rel)
-            table = (sym.metadata or {}).get("table")
-            if table:
-                entry["table"] = table
+            meta = sym.metadata or {}
+            if sym.kind in _DEDUP_KINDS:
+                entry = dedup.setdefault((sym.kind, sym.name),
+                                         {"name": sym.name, "kind": sym.kind, "files": set()})
+                entry["files"].add(rel)
+                if meta.get("table"):
+                    entry["table"] = meta["table"]
+            elif sym.kind == "policy":
+                _fold_policy(policies, sym, rel)
+            elif sym.kind == "rls":
+                entry = rls.setdefault(sym.name, {"table": sym.name, "enabled": False, "files": set()})
+                entry["files"].add(rel)
+                # RLS is enabled by ENABLE/FORCE and stays enabled under NO FORCE (which only
+                # clears the owner-bypass exemption); only DISABLE turns it off.
+                entry["enabled"] = meta.get("schema_op") != "disable_rls"
+    return _ObjectsFold(dedup, policies, rls)
+
+
+def schema_objects(
+    subsystem: str,
+    extracts: dict[str, ExtractResult],
+    file_owner: dict[str, str],
+    fold: _ObjectsFold | None = None,
+) -> list[dict]:
+    """The live non-table schema surface owned by ``subsystem``, sorted by (kind, name).
+
+    Deterministic and byte-stable: the fold walks files in deterministic migration order and
+    the output is sorted. Policies/RLS reflect the *current* surface (dropped/disabled ones
+    are gone); functions/views/indexes/triggers/types are deduped. Each entry carries
+    ``{name, kind, [table], files}``. A caller that already holds the fold (describe) passes it
+    in to avoid re-folding.
+    """
+    if fold is None:
+        fold = _fold_subsystem_objects(subsystem, extracts, file_owner)
+    merged: dict[tuple[str, str], dict] = dict(fold.dedup)
+    for entry in fold.policies.values():
+        if entry["present"]:
+            name = f"{entry['table']}.{entry['policy']}"
+            merged[("policy", name)] = {"name": name, "kind": "policy",
+                                        "table": entry["table"], "files": entry["files"]}
+    for entry in fold.rls.values():
+        if entry["enabled"]:
+            merged[("rls", entry["table"])] = {"name": entry["table"], "kind": "rls",
+                                               "table": entry["table"], "files": entry["files"]}
     out: list[dict] = []
     for key in sorted(merged):
         entry = merged[key]
@@ -235,6 +316,56 @@ def schema_objects(subsystem: str, extracts: dict[str, ExtractResult], file_owne
         record["files"] = sorted(entry["files"])
         out.append(record)
     return out
+
+
+def schema_rls_posture(
+    subsystem: str,
+    extracts: dict[str, ExtractResult],
+    file_owner: dict[str, str],
+    catalog: list[dict] | None = None,
+    fold: _ObjectsFold | None = None,
+) -> dict:
+    """Derived row-level-security posture over a schema's own (catalog) tables.
+
+    Answers the highest-value security question deterministically from the fold: which tables
+    have RLS enabled with at least one live policy (``protected``), which have RLS on but no
+    policy (``rls_without_policy`` — effectively locked, often unintended), and which exposed
+    tables have no RLS at all (``unprotected`` — the open door). The universe is the live table
+    catalog (the schema's own tables); RLS toggles on tables outside it (e.g. ``storage.objects``)
+    are not counted as the schema's exposure. ``catalog`` and ``fold`` are passed in to reuse the
+    already-built table fold + objects fold (describe holds both).
+    """
+    if fold is None:
+        fold = _fold_subsystem_objects(subsystem, extracts, file_owner)
+    # Posture is a Postgres-RLS concept. A schema that declares no RLS and no policies (a
+    # Prisma schema, or plain SQL that never uses row-level security) has no posture to report
+    # — emitting "every table unprotected" there would be a false alarm, so return nothing.
+    if not fold.rls and not fold.policies:
+        return {}
+    if catalog is None:
+        catalog = schema_catalog(subsystem, extracts, file_owner)
+    catalog_tables = {str(t["name"]) for t in catalog}
+    enabled = {t for t, e in fold.rls.items() if e["enabled"]}
+    policy_count: dict[str, int] = {}
+    for entry in fold.policies.values():
+        if entry["present"]:
+            policy_count[entry["table"]] = policy_count.get(entry["table"], 0) + 1
+
+    protected = sorted(t for t in catalog_tables if t in enabled and policy_count.get(t, 0) > 0)
+    rls_without_policy = sorted(t for t in catalog_tables if t in enabled and policy_count.get(t, 0) == 0)
+    unprotected = sorted(t for t in catalog_tables if t not in enabled)
+    return {
+        "tables": len(catalog_tables),
+        "rls_enabled": len(catalog_tables & enabled),
+        "protected": len(protected),
+        "rls_without_policy": len(rls_without_policy),
+        "unprotected": len(unprotected),
+        # name lists + per-table policy counts are gated behind --full by the caller.
+        "protected_tables": protected,
+        "rls_without_policy_tables": rls_without_policy,
+        "unprotected_tables": unprotected,
+        "policy_count": {t: policy_count[t] for t in sorted(policy_count) if t in catalog_tables},
+    }
 
 
 def hash_schema_catalog(catalog: list[dict]) -> str:
