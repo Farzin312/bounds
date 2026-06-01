@@ -120,5 +120,39 @@ the agent. Putting `[skip bounds]` in a commit message is the documented escape 
 
 ---
 
+## 4. "What's the current schema — and is this table protected?"
+
+The database is where subsystems actually connect, and it's the question an agent gets *wrong* by
+reading: a table's current columns aren't in one file — they're a `CREATE` plus a dozen ordered
+`ALTER`s across migrations — and "is it row-level-security protected?" is scattered across separate
+`ENABLE RLS` / `CREATE POLICY` statements. Bounds folds the migrations and answers both deterministically.
+
+```bash
+bounds describe supabase-migrations        # folded tables + columns, RLS posture, coverage
+```
+
+`describe` on a schema subsystem returns the **current** table catalog (columns folded across all
+migrations, dropped columns gone), the live policy/RLS surface as counts, and a derived **RLS
+posture**: how many tables are `protected` (RLS on + a policy), `rls_without_policy`, or `unprotected`
+(no RLS — the open door). Crucially it also returns **`schema_coverage`** — if some migration used
+DDL it couldn't parse, it says so, so the agent never reads a parse gap as "this table doesn't exist."
+
+### Walkthrough
+
+An agent is asked to add an endpoint that reads `marketplace_orders`. Before writing the query:
+
+1. `bounds describe supabase-migrations` returns `marketplace_orders` with its current columns (the
+   fold already applied every `ALTER`), so the agent writes the query against the real shape — not a
+   stale `CREATE` it found in the first migration.
+2. The `rls_posture` shows `marketplace_orders` is `protected`, so the agent knows reads go through a
+   policy and writes its query for the right role — instead of discovering the RLS wall at runtime.
+3. `schema_coverage: {complete: true}` tells the agent the catalog is authoritative. (Had it been
+   `false`, the agent would know to double-check the named files rather than trust absence.)
+
+The agent answered a schema question in one call that would otherwise mean reading — and likely
+mis-folding — a dozen migration files, with no way to know if it missed one.
+
+---
+
 See also: [./cli-reference.md](./cli-reference.md) for every command and flag, and
 [./team-workflow.md](./team-workflow.md) for adopting these across a team.
