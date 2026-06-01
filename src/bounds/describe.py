@@ -19,7 +19,7 @@ from .extract import scan, supported_extensions
 from .ignore import IgnoreMatcher
 from .models import SubsystemCompact, ValidationReport
 from .validate import engine as validate_engine
-from .validate.schema import schema_catalog, schema_objects, schema_structure_hash
+from .validate.schema import hash_schema_catalog, schema_catalog, schema_objects
 
 
 def extract_owned(
@@ -63,7 +63,7 @@ def extract_owned(
         files = table.get("files", [])
         if files:
             extracted_symbols[str(table["name"])] = str(files[0])
-    schema_hash = schema_structure_hash(sub.name, extracts, file_owner) if catalog else ""
+    schema_hash = hash_schema_catalog(catalog) if catalog else ""  # reuse the fold above; don't re-fold
     objects = schema_objects(sub.name, extracts, file_owner)
     return extracted_symbols, owned_files, unparsed_files, catalog, schema_hash, objects
 

@@ -34,7 +34,7 @@ except Exception as exc:  # pragma: no cover - exercised only when the wheel is 
     _IMPORT_ERROR = str(exc)
 
 from ..models import ExtractResult, Issue, Symbol
-from .base import LanguageAdapter, make_result
+from .base import LanguageAdapter, canonical_columns, make_result
 
 _LANG = None
 
@@ -142,7 +142,7 @@ def _columns(node, source: bytes) -> list[str]:
         name = _first_name(coldef, source)
         if name:
             cols.append(name)
-    return sorted(set(cols))
+    return canonical_columns(cols)
 
 
 def _named_create_symbol(ddl, source: bytes, line: int) -> list[Symbol]:

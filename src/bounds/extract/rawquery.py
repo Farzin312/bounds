@@ -21,6 +21,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from .registry import is_language_file
+from .scan import read_source_bytes
+
 try:
     import tree_sitter as ts
     import tree_sitter_python as tspy
@@ -96,12 +99,11 @@ def scan_table_consumers(
         return []
     by_subsystem: dict[str, dict[str, set[str]]] = {}  # subsystem -> {via -> files}
     for rel in sorted(file_owner):
-        lang = "python" if rel.endswith(".py") else ("typescript" if _is_ts(rel) else None)
+        lang = "python" if is_language_file(rel, "python") else ("typescript" if _is_ts(rel) else None)
         if lang is None:
             continue
-        try:
-            source = (project_root / rel).read_bytes()
-        except OSError:
+        source, _ = read_source_bytes(project_root / rel)  # single home for size-guard + read
+        if source is None:  # unreadable or oversized — skip (advisory scan never raises)
             continue
         try:
             refs = table_refs_in_source(source, lang)
@@ -129,4 +131,5 @@ def scan_table_consumers(
 
 
 def _is_ts(rel: str) -> bool:
-    return any(rel.endswith(ext) for ext in (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"))
+    # Derive from the TypeScript adapter's own extension set (single home) — never re-list here.
+    return is_language_file(rel, "typescript")

@@ -100,11 +100,25 @@ The thing Bounds preaches, applied to Bounds. **Do not define the same function/
       - `extract_project` — project-wide `(file_owner, extracts, generated)` (calibrate, `impact
         --verify`, `where`).
       - `extract_file` / `strip_ext` / `in_default_ignores`.
+      - `read_source_bytes` / `is_oversized` — the **size-guard + read + OSError mechanism**.
+        `extract_file` and the validation engine both call these; they differ only in *policy*
+        (silent skip vs. a loud warning `Issue` on owned files). Never re-inline a
+        `stat().st_size > MAX_FILE_BYTES` check or a bare `read_bytes()` try/except.
 - [ ] Import resolution has **one home** — `validate.checks.resolve_import` + `build_suffix_index`
       (O(1), no `O(files × imports × files)` scans). Build the suffix index **once** per call site
       and pass it into the loop.
+- [ ] Schema (SQL/Prisma) has fixed homes: `validate.schema` folds migrations into the table catalog;
+      `hash_schema_catalog(catalog)` hashes an **already-built** catalog (a caller holding a catalog
+      reuses it — never call `schema_structure_hash` after `schema_catalog` and fold twice);
+      `extract.base.canonical_columns` is the one column dedup/sort for every schema adapter's
+      `metadata["columns"]`.
+- [ ] "Does this file belong to language X?" has one home — `extract.registry.is_language_file`
+      (or the adapter's own `extensions`). Never hardcode an extension list at a call site.
+- [ ] Loading feedback (spinners) has one home — `cli._progress(message)`. Wrap **only** the heavy
+      compute, never `output.emit`. No per-command spinner re-implementation.
 - [ ] Before adding a helper, grep for an existing one. A second copy of a walk, an extractor, a
-      resolver, or a severity literal is a blocking review finding.
+      resolver, a hash, a column-dedup, an extension list, or a severity literal is a blocking review
+      finding.
 
 ## 9. New language adapter recipe
 

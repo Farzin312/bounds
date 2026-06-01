@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 
 import json
 
@@ -74,6 +75,15 @@ class LanguageAdapter(ABC):
 def content_hash(source: bytes) -> str:
     """Return the sha256 hex digest of the raw file bytes."""
     return hashlib.sha256(source).hexdigest()
+
+
+def canonical_columns(names: Iterable[str]) -> list[str]:
+    """Deduplicated, sorted column/field names for a schema symbol's ``metadata["columns"]``.
+
+    Single home so every schema-bearing adapter (SQL, Prisma, …) canonicalizes a table's
+    columns identically — same order, same dedup — which keeps the structure hash stable.
+    """
+    return sorted(set(names))
 
 
 def structure_hash(symbols: list[Symbol], imports: list[ImportRef]) -> str:

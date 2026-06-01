@@ -188,6 +188,34 @@ def extract_project(
     return file_owner, extracts, generated
 
 
+def is_oversized(abs_path: Path) -> bool:
+    """True if ``abs_path`` exceeds :data:`config.MAX_FILE_BYTES` (fail-soft on stat error).
+
+    Single home for the size bound shared by :func:`read_source_bytes`, the validation
+    engine's quick-mode cache-trust check, and anywhere else that must skip giant blobs.
+    """
+    try:
+        return abs_path.stat().st_size > config.MAX_FILE_BYTES
+    except OSError:
+        return False
+
+
+def read_source_bytes(abs_path: Path) -> tuple[bytes | None, str | None]:
+    """Read a file's bytes under the :data:`config.MAX_FILE_BYTES` bound.
+
+    Single home for the size-guard + read + ``OSError`` *mechanism*. Returns
+    ``(source, None)`` on success; on failure ``(None, reason)`` where ``reason`` is
+    ``"oversized"`` or a short OSError description. Callers own the *policy*: ``extract_file``
+    drops silently, the validation engine surfaces a warning ``Issue`` on owned files.
+    """
+    if is_oversized(abs_path):
+        return None, "oversized"
+    try:
+        return abs_path.read_bytes(), None
+    except OSError as exc:
+        return None, exc.strerror or type(exc).__name__
+
+
 def extract_file(project_root: Path, rel: str) -> tuple[ExtractResult | None, bool]:
     """Extract one file's surface. Returns ``(result_or_None, is_generated)``.
 
@@ -199,12 +227,8 @@ def extract_file(project_root: Path, rel: str) -> tuple[ExtractResult | None, bo
     adapter = get_adapter(rel)
     if adapter is None:
         return None, False
-    path = project_root / rel
-    try:
-        if path.stat().st_size > config.MAX_FILE_BYTES:
-            return None, False
-        source = path.read_bytes()
-    except OSError:
+    source, _ = read_source_bytes(project_root / rel)  # reason unused here: silent skip
+    if source is None:  # unreadable or oversized — no report to attach to in this context
         return None, False
     generated = has_generated_marker(source)
     result = adapter.extract(rel, source)

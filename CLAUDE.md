@@ -65,15 +65,20 @@ GitHub is the single source of truth. To prevent staleness and ensure `pipx upgr
 ## Where things live
 
 `config.py` constants · `errors.py` codes · `models.py` data model · `manifest/` load+schema ·
-`extract/` tree-sitter adapters (`registry.get_adapter` dispatches by extension; `scan.py` = the
-**single home** for fs→extraction helpers — `walk_supported` (the one recursive source walk) /
-`iter_subsystem_files`/`iter_repo_source`/`extract_file`/`strip_ext`/`in_default_ignores`, shared by
-engine + describe + discover/calibrate; never copy a walk; `rawquery.py` = opt-in, advisory raw-SQL
+`extract/` tree-sitter adapters (`registry.get_adapter` dispatches by extension;
+`registry.is_language_file` = the one "is this file language X?" check, never hardcode an extension
+list; `scan.py` = the **single home** for fs→extraction helpers — `walk_supported` (the one recursive
+source walk) / `iter_subsystem_files`/`iter_repo_source`/`extract_file`/`strip_ext`/`in_default_ignores`
++ `read_source_bytes`/`is_oversized` (the one size-guard+read mechanism; engine vs `extract_file`
+differ only in policy), shared by engine + describe + discover/calibrate; never copy a walk;
+`base.canonical_columns` = the one schema column dedup/sort; `rawquery.py` = opt-in, advisory raw-SQL
 table refs) · `cache/store.py` SQLite `cache.db` (+ migration/partial-read/inspect) ·
 `validate/{engine,propagation,checks,schema}` (`checks.resolve_import`/`build_suffix_index` = the one
-import resolver; `schema.py` folds SQL migrations into a table catalog) · `describe.py` Tier-1+2
+import resolver; `schema.py` folds SQL migrations into a table catalog, `hash_schema_catalog` hashes an
+already-built catalog without re-folding) · `describe.py` Tier-1+2
 describe assembly · `locate.py` backs `where`+`impact` · `cli.py` command wiring (arg-parse + one
-`go()` per command, no business logic) · `discover.py` · `calibrate.py` · `agentsync.py` ·
+`go()` per command, no business logic; `_progress(msg)` = the one loading-spinner seam — wrap compute
+only, never `output.emit`) · `discover.py` · `calibrate.py` · `agentsync.py` ·
 `ciconfig.py` · `gitutil.py` git detection + changed-file diff (backs `--quick`) ·
 `ignore.py` `.boundsignore` + generated-code detection ·
 `update_check.py`/`upgrade.py` GitHub-release check + `pipx` self-upgrade · `output.py` JSON/human emit.
