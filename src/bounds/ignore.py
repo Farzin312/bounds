@@ -13,7 +13,7 @@ Two deterministic, zero-LLM concerns live here:
 
 * **Generated code** — files carrying a ``@generated`` / ``auto-generated`` header
   marker, or matching a subsystem's ``generated`` globs, are flagged ``generated: true``
-  in output. They are still extracted (the vault keeps them visible, just labelled).
+  in output. They are still extracted — kept visible, just labelled.
 
 Everything is pure ``pathlib`` + ``re``; patterns compile to anchored regexes once.
 No timestamps, randomness, or set-ordering leaks into any result.
@@ -77,8 +77,8 @@ def _compile_pattern(pattern: str) -> re.Pattern[str]:
     Supported: ``**`` (any number of path segments, including zero), ``*`` (any run of
     non-``/`` chars), ``?`` (one non-``/`` char). A trailing ``/`` (directory pattern)
     matches the directory and everything beneath it. A leading ``/`` anchors to the root;
-    otherwise the pattern still matches from the root (vault: "wildcards relative to
-    project root"). A pattern with no wildcard also matches everything beneath it, so
+    otherwise the pattern still matches from the root (wildcards are relative to the
+    project root). A pattern with no wildcard also matches everything beneath it, so
     ``vendor`` excludes ``vendor/a/b.py`` just like ``vendor/**`` does.
     """
     pat = pattern.strip()

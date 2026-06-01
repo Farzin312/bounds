@@ -1,4 +1,4 @@
-"""End-to-end CLI smoke tests for the gen-3 commands (via Click's CliRunner)."""
+"""End-to-end CLI smoke tests for the discover/calibrate/impact/where/overview/agent/ci/cache commands (via Click's CliRunner)."""
 
 from __future__ import annotations
 

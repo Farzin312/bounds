@@ -208,8 +208,8 @@ def test_adapter_contract_surfaces_through_validate(sample_project, monkeypatch)
     and stays advisory — warning severity, exit code 0.
 
     The clean extractors never emit the masked state (it's a backstop for a regression), so we
-    monkeypatch ``SqlAdapter.extract`` for one file to reproduce the PR #20 escape: a revision
-    header + all-unparsable statements with ``result.error`` wrongly left empty.
+    monkeypatch ``SqlAdapter.extract`` for one file to reproduce the masked-failure state: a
+    revision header + all-unparsable statements with ``result.error`` wrongly left empty.
     """
     import json
 

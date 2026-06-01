@@ -9,7 +9,7 @@
 
 ### Added
 
-- **Adapter output contracts (s-49, gen8)** — every LanguageAdapter can declare self-consistency invariants via `check_contract()`, validated at `bounds validate` time as a new `check_adapter_contracts` advisory check. Catches relation-field leaks in Prisma and all-error+revision-header masking in SQL deterministically, zero LLM. Wired into `quick`/`full`/`preflight`/`audit` modes as a warning-only guard.
+- **Adapter output contracts** — every LanguageAdapter can declare self-consistency invariants via `check_contract()`, validated at `bounds validate` time as a new `check_adapter_contracts` advisory check. Catches relation-field leaks in Prisma and all-error+revision-header masking in SQL deterministically, zero LLM. Wired into `quick`/`full`/`preflight`/`audit` modes as a warning-only guard.
 
 - **Data-boundary / schema mapping** — a database TABLE is modeled as just another exposed symbol of a schema subsystem, so the existing contract/drift/boundary/impact/propagation machinery works on tables. Spans the full pipeline:
   - **ORM table recognition** (zero new deps) — Python SQLAlchemy (`__tablename__`, imperative `__table__ = Table("…")`), Django (`models.Model`, `Meta.db_table`; abstract models are correctly *not* tables), and TypeScript Drizzle (`pgTable`/`sqliteTable`/`mysqlTable`) and TypeORM (`@Entity("…")` and `@Entity({ name: "…" })`) model classes are tagged `kind: table` with their real table name. Detection is structural (no substring/eval), so a comment mentioning `__tablename__` or an f-string table name never fabricates a phantom table.

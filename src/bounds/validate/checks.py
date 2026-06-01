@@ -522,7 +522,7 @@ def check_adapter_contracts(ctx: CheckContext) -> list[Issue]:
     the owning adapter by extension and asks it to validate its own output. Catches the
     class of bug that adapter logic alone can silently regress on — a Prisma relation
     field leaking in as a column, or an all-unparsable SQL migration whose revision header
-    masked the failure (the two PR #20 escapes). Always advisory (``E_ADAPTER_CONTRACT``
+    masked the failure. Always advisory (``E_ADAPTER_CONTRACT``
     is a warning in ``errors.SEVERITY``), so it never changes exit codes.
     """
     issues: list[Issue] = []
