@@ -759,10 +759,11 @@ bounds list [--namespace NS]       → {project, subsystems:[{name, role, critic
 bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count, entry_points, validation_status,
                                        project_status, unparsed_files?, exposes[*].verified, exposes[*].file?,
                                        exposes[*].entry_point?, exposes[*].columns?, tables?, schema_object_counts?,
-                                       rls_posture?, schema_diagnostics?}
+                                       rls_posture?, schema_coverage?, schema_diagnostics?}
                                    # token-lean by default: the file roster, the (often huge) schema-object
-                                   # list, and the RLS posture table-name lists are gated behind --full, which
-                                   # adds {files, schema_objects, rls_posture.*_tables, rls_posture.policy_count}.
+                                   # list, the RLS posture table-name lists, AND the per-file schema_diagnostics
+                                   # are gated behind --full, which adds {files, schema_objects,
+                                   # rls_posture.*_tables, rls_posture.policy_count, schema_diagnostics}.
                                    # The contract — exposes + tables(+columns) — is always full.
                                        # tables?: [{name, kind:"table", columns:[...], files:[...]}]  (bare table
                                        #   names — schema qualifier dropped so every op folds to one entry)
@@ -773,9 +774,13 @@ bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count,
                                        # rls_posture? (only when the schema uses RLS): derived security read —
                                        #   {tables, rls_enabled, protected, rls_without_policy, unprotected};
                                        #   --full adds the table-name lists + per-table policy_count.
-                                       # schema_diagnostics? (only when non-empty): [{code, message, file}] — the
-                                       #   E_SCHEMA_UNPARSED / E_SCHEMA_NO_ORDER advisories naming files that lost
-                                       #   real DDL; the actionable "why the catalog may be incomplete" signal.
+                                       # schema_coverage (always for a schema sub): the AI TRUST signal —
+                                       #   {complete:true} when every owned file extracted (absence IS
+                                       #   authoritative), else {complete:false, unextracted_files:N, note} so an
+                                       #   AI never reads a parse gap as "this table/policy does not exist".
+                                       # schema_diagnostics? (--full only): [{code, message, file}] — the
+                                       #   E_SCHEMA_UNPARSED / E_SCHEMA_NO_ORDER advisories naming the files behind
+                                       #   an incomplete schema_coverage. Gated so the default stays token-lean.
                                        # validation_status is SUBSYSTEM-SCOPED (this subsystem's own issues);
                                        # project_status is the project-wide rollup, kept additively.
                                        # unparsed_files (present only when non-empty): owned source files Bounds

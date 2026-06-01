@@ -133,7 +133,8 @@ def describe_one(
     # agent never mistakes an unreadable/oversized file for "symbol absent from source".
     if unparsed_files:
         payload["unparsed_files"] = sorted(unparsed_files)
-    _attach_schema_payload(payload, catalog, schema_hash, objects, posture, diagnostics, full)
+    _attach_schema_payload(payload, catalog, schema_hash, objects, posture, diagnostics,
+                           unparsed_files, full)
     payload["validation_status"] = subsystem_status(report, sub.name)
     payload["project_status"] = project_status(report)
     if deep:
@@ -166,16 +167,20 @@ def _attach_schema_payload(
     objects: list[dict],
     posture: dict,
     diagnostics: list[dict],
+    unparsed_files: list[str],
     full: bool,
 ) -> None:
     """Add the (token-lean) schema fields to a describe payload, in place.
 
     Token-first by default: the table contract is always full, but the (often hundreds-long)
-    schema-object list and the RLS posture table-name lists collapse to counts unless ``full``.
+    schema-object list, the RLS posture table-name lists, and the per-file diagnostics collapse
+    to counts unless ``full``. The always-present ``schema_coverage`` flag tells an AI whether
+    absence is authoritative (see :func:`_schema_coverage`).
     """
     if catalog:
         payload["tables"] = catalog
         payload["schema_hash"] = schema_hash
+        payload["schema_coverage"] = _schema_coverage(diagnostics, unparsed_files)
     if objects:
         counts: dict[str, int] = {}
         for obj in objects:
@@ -190,10 +195,34 @@ def _attach_schema_payload(
             for k in ("unprotected_tables", "rls_without_policy_tables", "protected_tables", "policy_count"):
                 summary[k] = posture[k]
         payload["rls_posture"] = summary
-    # The actionable counterpart to unparsed_files — names files that carried schema yet could
-    # not be fully extracted (E_SCHEMA_UNPARSED / E_SCHEMA_NO_ORDER), never no-DDL files.
-    if diagnostics:
+    # The actionable per-file detail behind schema_coverage — names files that carried schema yet
+    # could not be fully extracted (E_SCHEMA_UNPARSED / E_SCHEMA_NO_ORDER), never no-DDL files.
+    # Gated behind --full: by default schema_coverage carries the count + the trust note, so the
+    # token-lean default stays small while still telling an AI the catalog may be incomplete.
+    if diagnostics and full:
         payload["schema_diagnostics"] = diagnostics
+
+
+def _schema_coverage(diagnostics: list[dict], unparsed_files: list[str]) -> dict:
+    """Trust signal: is this schema catalog COMPLETE, or might a table/policy be missing?
+
+    An AI reads the catalog as authoritative ("these are the tables"). When some owned DDL
+    couldn't be parsed, absence is NOT authoritative — so we say so explicitly and compactly,
+    rather than letting a silent gap mislead. ``complete: true`` is the positive case: every
+    owned file extracted, so a table/policy *not* listed genuinely isn't in the schema.
+    """
+    lost = sorted(set(unparsed_files) | {d["file"] for d in diagnostics
+                                         if d.get("code") == errors.E_SCHEMA_UNPARSED and d.get("file")})
+    if not lost:
+        return {"complete": True}
+    return {
+        "complete": False,
+        "unextracted_files": len(lost),
+        "note": ("Some owned files contain DDL Bounds could not fully parse, so this catalog "
+                 "may be incomplete: a table, column, or policy not listed here may still exist. "
+                 "Do not treat absence as authoritative. Re-run with --full for the file list "
+                 "(schema_diagnostics)."),
+    }
 
 
 def status_report(root: Path) -> ValidationReport | None:

@@ -122,6 +122,34 @@ def test_describe_schema_objects_are_counts_by_default_full_lists_them(monkeypat
     assert "files" in full
 
 
+def test_describe_schema_coverage_complete_when_all_dll_parses(monkeypatch, tmp_path):
+    # A cleanly-extracted schema reports schema_coverage.complete=true — the AI trust signal
+    # that absence IS authoritative (a table not listed genuinely isn't in the schema).
+    _write_schema_project(tmp_path)
+    out = json.loads(_invoke(monkeypatch, tmp_path, ["describe", "db"]).output)
+    assert out["schema_coverage"] == {"complete": True}
+    assert "schema_diagnostics" not in out
+
+
+def test_describe_schema_coverage_partial_signals_incompleteness(monkeypatch, tmp_path):
+    # When some owned DDL can't be parsed, schema_coverage warns the AI that the catalog may be
+    # incomplete (absence not authoritative); the per-file detail is gated behind --full.
+    _write_schema_project(tmp_path)
+    # A partial file: a valid CREATE TABLE folds, but the broken ALTER is lost DDL (the table
+    # surface is now incomplete) → E_SCHEMA_UNPARSED, surfaced via schema_coverage.
+    (tmp_path / "migrations" / "002_bad.sql").write_text(
+        "CREATE TABLE extra (id integer);\nALTER TABLE extra ADD COLUMN;\n", encoding="utf-8")
+    lean = json.loads(_invoke(monkeypatch, tmp_path, ["describe", "db"]).output)
+    cov = lean["schema_coverage"]
+    assert cov["complete"] is False
+    assert cov["unextracted_files"] >= 1
+    assert "authoritative" in cov["note"].lower()
+    assert "schema_diagnostics" not in lean  # detail gated by default (token-lean)
+
+    full = json.loads(_invoke(monkeypatch, tmp_path, ["describe", "db", "--full"]).output)
+    assert any(d["code"] == "E_SCHEMA_UNPARSED" for d in full["schema_diagnostics"])
+
+
 def _write_exposes_column_project(root, drop_email=False):
     (root / ".bounds" / "manifests").mkdir(parents=True)
     (root / ".bounds" / "root.yaml").write_text(

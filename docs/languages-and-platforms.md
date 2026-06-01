@@ -72,7 +72,13 @@ survives. `bounds describe <schema-subsystem>` returns:
   `protected` (RLS on + ≥1 policy), `rls_without_policy` (RLS on, no policy — usually unintended),
   and `unprotected` (no RLS — the open door). `--full` lists the at-risk table names. Present only
   for schemas that actually use RLS.
-- `schema_diagnostics` — the actionable "why the catalog may be incomplete" list (see below).
+- `schema_coverage` — **the AI trust signal.** `{complete: true}` means every owned file
+  extracted, so a table/policy *not* in the catalog genuinely isn't in the schema (absence is
+  authoritative). When some DDL couldn't be parsed it becomes `{complete: false,
+  unextracted_files: N, note}` — telling an AI not to read a parse gap as "this doesn't exist."
+  This is how Bounds stays honest about its own blind spots instead of misleading a consumer.
+- `schema_diagnostics` (`--full`) — the per-file detail behind an incomplete `schema_coverage`
+  (which files lost DDL, and why); see the fallback table below.
 
 Two extraction layers, by what the SQL grammar can and cannot do:
 
@@ -91,8 +97,8 @@ run, and the loss is always surfaced, never silent:
 | Situation | What Bounds does |
 |-----------|------------------|
 | A `CREATE TABLE` with a table-level `CONSTRAINT … UNIQUE/CHECK (…)` clause (tree-sitter-sql can't parse the clause) | **Recovers** the table name and all columns best-effort; the unmodeled constraint tail is not a catalog loss |
-| A statement carrying real DDL the grammar genuinely can't parse (e.g. a `DO $$ … $$` block that creates a table dynamically; a pg_dump fragment) | Emits **`E_SCHEMA_UNPARSED`** naming the file (a warning, never blocking); surfaced in `describe.schema_diagnostics` and `validate`. The catalog **self-reports** incompleteness |
-| A whole file of DDL that yields nothing parseable | Listed in `describe.unparsed_files` (a genuine extraction failure) |
+| A statement carrying real DDL the grammar genuinely can't parse (e.g. a `DO $$ … $$` block that creates a table dynamically; a pg_dump fragment) | Emits **`E_SCHEMA_UNPARSED`** naming the file (a warning, never blocking); flips `describe.schema_coverage` to `complete: false` and is listed in `schema_diagnostics` (`--full`) + `validate`. The catalog **self-reports** incompleteness so a consumer is never misled |
+| A whole file of DDL that yields nothing parseable | Listed in `describe.unparsed_files`; also counted in `schema_coverage.unextracted_files` |
 | A non-schema `.sql` file (a seed `INSERT`, a `GRANT`/`REVOKE`, a `SELECT cron.schedule(…)`) | Extracted cleanly to **empty** symbols — **not** flagged. A file with no DDL is not a schema failure |
 
 ### Structured-language capability summary

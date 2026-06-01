@@ -515,14 +515,22 @@ def _render_rls_posture(posture: dict) -> list[str]:
 
 
 def _render_schema_security(payload: dict) -> list[str]:
-    """Human lines for RLS posture + schema diagnostics (re-renders the SAME JSON data)."""
+    """Human lines for RLS posture + schema coverage/diagnostics (re-renders the SAME JSON)."""
     lines: list[str] = []
     posture = payload.get("rls_posture")
     if posture:
         lines.extend(_render_rls_posture(posture))
+    coverage = payload.get("schema_coverage")
+    if coverage and not coverage.get("complete", True):
+        lines.append("")
+        lines.append(f"⚠ schema coverage: PARTIAL — {coverage.get('unextracted_files', 0)} "
+                     "file(s) had DDL that could not be fully parsed; a table/policy not listed "
+                     "may still exist (not authoritative). Use --full to list them.")
+    elif coverage:
+        lines.append("")
+        lines.append("schema coverage: complete")
     diagnostics = payload.get("schema_diagnostics")
     if diagnostics:
-        lines.append("")
         lines.append(f"schema diagnostics ({len(diagnostics)}):")
         for diag in diagnostics:
             where = f" [{diag['file']}]" if diag.get("file") else ""
