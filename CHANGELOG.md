@@ -11,6 +11,8 @@
   - **Tables with a table-level `CONSTRAINT … UNIQUE/CHECK (…)`** (which tree-sitter-sql can't parse) are now recovered best-effort with their columns, instead of losing the whole table.
 - **Prisma adapter** — relation fields (`posts Post[]`, `author User`, `profile Profile?`) are no longer captured as columns. Only scalar types produce column entries, preventing phantom columns in `bounds describe` and false passes in column-granular `check_contract`.
 - **SQL adapter** — `schema_meta` symbols (revision headers) no longer mask all-error SQL files. A migration with a valid `-- revision` header but zero parseable statements now correctly returns a hard parse failure instead of folding partial data.
+- **TypeScript import resolver — dotted filenames.** Imports targeting files whose names contain dots (e.g. `foo.bar.ts`, `index.browser.ts`) now resolve correctly instead of being dropped, fixing undercounted dependency edges in TS projects.
+- **TypeScript import resolver — tsconfig path aliases + `baseUrl`.** `@/…`-style path aliases (and `baseUrl`-relative bare imports) declared in `tsconfig.json` are now resolved to real files, so alias-heavy TS codebases no longer show a badly undercounted subsystem graph.
 
 ### Changed
 
@@ -20,6 +22,8 @@
 
 ### Added
 
+- **`bounds guide`** — a state-aware setup checklist that inspects the current repo (`.bounds/` present? manifests discovered? agent config synced? CI gate installed?) and prints the next concrete steps, so a new user or agent is walked through onboarding instead of guessing the command order.
+- **`agent --sync` now generates per-agent native command/skill files** (in addition to the canonical `AGENTS.md` block): Claude Code and Codex get skill files, Gemini / OpenCode / Cursor get command files, Copilot gets a prompt file, and Windsurf gets a workflow file (aider has no native format, so none is written). Each agent gets Bounds in the format it natively reads.
 - **`bounds describe` RLS security posture (Postgres/Supabase).** A derived `rls_posture` block reports how many tables are `protected` (RLS on + ≥1 policy), `rls_without_policy` (RLS on, no policy), and `unprotected` (no RLS — the open door); `--full` lists the at-risk table names. Present only for schemas that use RLS. Computed deterministically from the fold for both humans (`--human`) and agents (JSON).
 - **`bounds describe` schema coverage — an AI trust signal.** Every schema subsystem now carries `schema_coverage`: `{complete: true}` when all owned DDL extracted (so a table/policy *not* in the catalog genuinely isn't in the schema — absence is authoritative), or `{complete: false, unextracted_files: N, note}` when some DDL couldn't be parsed, telling a consumer **not** to read a parse gap as "this doesn't exist." The per-file `schema_diagnostics` detail behind it is gated to `--full`, so the default output is *leaner* than before while being more honest.
 - **SQL policy/RLS recovery widened** — `CREATE POLICY IF NOT EXISTS`, `ALTER POLICY [RENAME TO]`, `DROP POLICY`, `FORCE`/`NO FORCE ROW LEVEL SECURITY`, and schema-qualified/quoted identifiers are now recovered (via a comment/string/function-body-masked scan), and policies survive even in pg_dump-style files the grammar shreds.
@@ -42,6 +46,7 @@
 - **Schema flexibility** — `root.yaml` now accepts extensible roles and criticality values rather than a fixed enum.
 - **Per-export `internal` flag** — exposes can be marked `internal: true` to exempt them from calibration add/remove and signal a deliberately-private symbol.
 - **Install artifacts** — `install.sh` (pipx-preferred, installs from the git ref by default since the PyPI name is pending; `BOUNDS_REF` pins a tag/branch), a Homebrew `Formula/bounds.rb`, and a `Makefile` (`make install/dev/test/validate/benchmark`).
+- **Cross-repo OSS benchmark harness** (`benchmarks/oss_run.py`) — clones real third-party projects (click, axios) at a cited commit, runs `bounds discover`, and measures Bounds-vs-source token economics, so the headline numbers aren't measured only on Bounds itself. Recorded results + a same-model capability head-to-head live in `benchmarks/results/oss-token-economics.md`.
 
 ### Changed
 

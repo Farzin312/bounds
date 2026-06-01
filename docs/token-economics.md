@@ -41,6 +41,32 @@ For the whole-system map across all 8 subsystems:
 
 These percentages follow from the single-repo measurements above; the same caveat applies.
 
+### Verified across real OSS repos (not just this repo)
+
+To answer the obvious "but you measured your own repo" objection, the same deterministic harness was run on real, third-party projects cloned at a cited commit — [`benchmarks/oss_run.py`](../benchmarks/oss_run.py) shallow-clones each repo, runs `bounds discover`, and measures tokens (Bounds output vs the equivalent source). Full table and methodology: [`benchmarks/results/oss-token-economics.md`](../benchmarks/results/oss-token-economics.md).
+
+| Repo | Commit | `bounds list` | All source | Map reduction | `bounds describe` | Subsystem source | API reduction |
+|------|--------|-------------:|-----------:|--------------:|------------------:|-----------------:|--------------:|
+| click (Python) | `c480210` | 205 | 208,242 | **99.9%** | 5,971 (`click`) | 103,392 | **94.2%** |
+| axios (TypeScript) | `4306df2` | 966 | 558,868 | **99.8%** | 156 (`lib-adapters`) | 18,172 | **99.1%** |
+
+- **Map reduction** is the whole-system `bounds list` figure (orient on the entire repo) vs reading every subsystem's source — that's the 99.9% / 99.8% headline.
+- **API reduction** is one subsystem's `bounds describe` contract vs reading *that* subsystem's source; it tracks subsystem size, so a small subsystem (axios `lib-adapters`, 99.1%) shows a larger % than a big one (click `click`, 94.2%). The whole-map `list` reduction is the stable headline; per-`describe` reductions vary with the exposed surface.
+- The axios (TypeScript) edges only resolve correctly because of the dotted-filename + tsconfig path-alias resolver fixes on this branch.
+
+Same estimate basis as above (~4 chars/token; tiktoken not installed in the recorded run). The numbers are **reproducible**: re-clone each repo at the cited commit and re-run `python benchmarks/oss_run.py`.
+
+### Capability head-to-head (same model, with vs without)
+
+Tokens are only half the story — does the agent actually answer the architecture question *correctly*? On click @ `c480210`, the same model (**Claude Opus 4.8**) was asked: "what is the public API, and what depends on it?"
+
+- **With Bounds** (`bounds describe click` → `bounds impact click`): **~6,149 tokens**, and the public surface is tree-sitter-verified against source (183 exported symbols; consumers identified) rather than inferred.
+- **Without Bounds** (read `src/click/*.py`, infer which symbols are public, grep for importers): **~103,392+ tokens**, and the public-surface inference is the error-prone step Bounds removes.
+
+That's **~17× cheaper** for the "orient + find the contract + find dependents" class of task, *and* more reliable because the surface and dependency edges are extracted deterministically, not inferred from a large, context-rot-prone source dump. **Honest caveat:** this is one model's observation on one task — the token figures are deterministic, the "correct?" judgment is the author's. And as throughout this page, Bounds is a *navigation* layer, not a *comprehension* one: for tasks that need behavior ("*how* does this function work"), you still read the source.
+
+**Contribute your own numbers.** Run `make benchmark` (or `python benchmarks/oss_run.py`) and submit your model's/tokenizer's results per [`benchmarks/TEMPLATE.md`](../benchmarks/TEMPLATE.md) — exact tokenizer counts (cl100k, Claude, Gemini) all show the same order-of-magnitude reduction.
+
 ## How retrieval scales (and why it matters more as you grow)
 
 The token win isn't a flat discount — it *widens* with codebase size, and that is the whole point.
