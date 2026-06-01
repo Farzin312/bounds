@@ -117,8 +117,12 @@ _GITLAB_JOB = {
         "stage": "test",
         "image": "python:3.12-slim",
         "rules": [{"changes": ["src/**/*", ".bounds/**/*"]}],
+        # The python:3.12-slim image has pip but NOT pipx; running as root, `pip install`
+        # puts the `bounds` console script on PATH (/usr/local/bin), so use pip here (the
+        # GitHub Actions job uses pipx, which its runners preinstall). Always `bounds-cli` —
+        # the bare `bounds` name on PyPI is an unrelated package.
         "script": [
-            "pipx install bounds-cli || pip install bounds-cli",
+            "pip install bounds-cli",
             "bounds calibrate --check || true",  # freshness gate; drop `|| true` to enforce
             "bounds preflight --ci",
         ],

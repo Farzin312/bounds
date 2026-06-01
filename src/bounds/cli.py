@@ -419,6 +419,7 @@ consumes: []
 @_human
 def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, human: bool) -> None:
     """Initialize .bounds/ structure, or add a subsystem."""
+    human = _interactive_human(human)  # interactive setup action: announce in a terminal
 
     def go() -> None:
         if not root_flag and not subsystem:
@@ -490,6 +491,7 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
 def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
                  merge_into: tuple[str, ...], human: bool) -> None:
     """Create initial Bounds contracts so agents have a map to query."""
+    human = _interactive_human(human)  # interactive onboarding action: announce in a terminal
 
     def go() -> None:
         if do_apply and dry_run:
@@ -532,6 +534,9 @@ def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
 def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
                   do_check: bool, do_dump: bool, human: bool) -> None:
     """Keep contracts aligned with extracted source after code changes."""
+    # Diff/apply/dump-baseline are interactive actions → announce in a terminal; --check is a
+    # CI gate consumed by automation → keep it JSON-default (it still honors explicit --human).
+    human = human if do_check else _interactive_human(human)
 
     def go() -> None:
         # The four modes are mutually exclusive: diff (default) / apply / check / dump-baseline.
@@ -580,6 +585,9 @@ def _agent_selectors(fn):
 @_human
 def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, human: bool, **selectors: bool) -> None:
     """Teach Claude, Codex, Gemini, Cursor, and other agents to query Bounds first."""
+    # --sync/--detect are interactive actions → announce in a terminal; --check is a CI gate →
+    # keep it JSON-default (still honors explicit --human).
+    human = human if do_check else _interactive_human(human)
 
     def go() -> None:
         modes = [m for m, on in (("sync", do_sync), ("detect", do_detect), ("check", do_check)) if on]
@@ -610,6 +618,7 @@ def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, human: bool, **sel
 def ci_cmd(do_install: bool, want_action: bool, want_precommit: bool, want_gitlab: bool,
            want_all: bool, human: bool) -> None:
     """Install drift/boundary gates so the agent workflow is enforced in CI."""
+    human = _interactive_human(human)  # interactive setup action: announce in a terminal
 
     def go() -> None:
         if not do_install:
@@ -646,6 +655,7 @@ def ci_cmd(do_install: bool, want_action: bool, want_precommit: bool, want_gitla
 @_human
 def cache_cmd(do_migrate: bool, do_prune: bool, do_inspect: bool, human: bool) -> None:
     """Manage the binary extraction cache (.bounds/cache.db)."""
+    human = _interactive_human(human)  # interactive maintenance action: announce in a terminal
 
     def go() -> None:
         selected = [f for f, on in

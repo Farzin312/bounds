@@ -537,3 +537,27 @@ def test_walk_does_not_descend_external_symlink_dir(monkeypatch, py_project, tmp
     os.symlink(external, py_project / "src" / "models" / "ext")
     data = json.loads(_invoke(monkeypatch, py_project, ["where", "Sekret"]).output)
     assert data["count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Human renderers: action/query commands now produce summaries, not raw JSON
+# dumps; and (non-TTY) they still emit the JSON contract by default.
+# ---------------------------------------------------------------------------
+def test_human_renderers_are_clean_summaries(monkeypatch, py_project):
+    lst = _invoke(monkeypatch, py_project, ["list", "--human"]).output
+    assert "subsystem" in lst and not lst.lstrip().startswith("{")  # a summary, not JSON
+    ov = _invoke(monkeypatch, py_project, ["overview", "--human"]).output
+    assert "roles:" in ov and "dependency edges" in ov
+    im = _invoke(monkeypatch, py_project, ["impact", "models", "--human"]).output
+    assert "blast radius" in im and "consumers" in im
+    cal = _invoke(monkeypatch, py_project, ["calibrate", "--human"]).output
+    assert cal.startswith("calibrate:")
+
+
+def test_action_commands_emit_json_when_not_a_tty(monkeypatch, py_project):
+    # CliRunner stdout is not a TTY (like an agent/pipe), so TTY-aware action commands
+    # must still emit the JSON contract by default — agents are never given the prose view.
+    out = _invoke(monkeypatch, py_project, ["cache", "--inspect"]).output
+    assert json.loads(out)["backend"] in ("sqlite", "json", "none")
+    # ...and a query command stays JSON-default regardless.
+    assert json.loads(_invoke(monkeypatch, py_project, ["overview"]).output)["project"]

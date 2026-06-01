@@ -40,25 +40,45 @@ def emit(payload: dict, human: bool, stream=None, ci: bool = False) -> None:
         stream.write("\n")
         return
 
-    if isinstance(payload, dict) and "validation_status" in payload and "mode" in payload:
-        stream.write(_render_report_dict_human(payload))
-    elif isinstance(payload, dict) and {"symbol", "match", "results"} <= payload.keys():
-        stream.write(_render_where_human(payload))
-    elif isinstance(payload, dict) and {"current", "checked", "outdated"} <= payload.keys():
-        stream.write(_render_upgrade_check_human(payload))
-    elif isinstance(payload, dict) and {"command", "dry_run", "source"} <= payload.keys():
-        stream.write(_render_upgrade_human(payload))
-    elif isinstance(payload, dict) and payload.get("mode") == "discover":
-        stream.write(_render_discover_human(payload))
-    elif isinstance(payload, dict) and payload.get("mode") in ("calibrate-check", "calibrate-baseline"):
-        stream.write(_render_drift_human(payload))
-    elif isinstance(payload, dict) and "namespace" in payload and "subsystems" in payload:
-        stream.write(_render_namespace_human(payload))
-    elif isinstance(payload, dict) and "name" in payload and "role" in payload:
-        stream.write(_render_subsystem_human(payload))
-    else:
-        stream.write(_render_generic_human(payload))
+    renderer = _select_human_renderer(payload) if isinstance(payload, dict) else None
+    stream.write((renderer or _render_generic_human)(payload))
     stream.write("\n")
+
+
+# Human-renderer dispatch table: (predicate, renderer), tried in order; first match wins.
+# Table-driven so adding a command's view is one entry, not another branch in emit(). Each
+# predicate is a cheap key/shape check on the payload dict (discriminators are disjoint).
+def _has(*keys):
+    return lambda p: set(keys) <= p.keys()
+
+
+_HUMAN_RENDERERS = (
+    (lambda p: "validation_status" in p and "mode" in p, lambda p: _render_report_dict_human(p)),
+    (_has("symbol", "match", "results"), lambda p: _render_where_human(p)),
+    (_has("current", "checked", "outdated"), lambda p: _render_upgrade_check_human(p)),
+    (_has("command", "dry_run", "source"), lambda p: _render_upgrade_human(p)),
+    (lambda p: p.get("mode") == "discover", lambda p: _render_discover_human(p)),
+    (lambda p: p.get("mode") in ("calibrate-check", "calibrate-baseline"), lambda p: _render_drift_human(p)),
+    (_has("health", "edges"), lambda p: _render_overview_human(p)),
+    (lambda p: "blast_radius" in p, lambda p: _render_impact_human(p)),
+    (lambda p: p.get("mode") == "calibrate", lambda p: _render_calibrate_human(p)),
+    (lambda p: "project" in p and isinstance(p.get("subsystems"), list), lambda p: _render_list_human(p)),
+    (lambda p: "bounds_dir" in p, lambda p: _render_init_human(p)),
+    (_has("created", "targets"), lambda p: _render_ci_human(p)),
+    (lambda p: "detected" in p or "canonical" in p or {"missing", "configured"} <= p.keys(),
+     lambda p: _render_agent_human(p)),
+    (lambda p: "backend" in p or "migrated" in p or "pruned" in p, lambda p: _render_cache_human(p)),
+    (lambda p: "namespace" in p and "subsystems" in p, lambda p: _render_namespace_human(p)),
+    (lambda p: "name" in p and "role" in p, lambda p: _render_subsystem_human(p)),
+)
+
+
+def _select_human_renderer(payload: dict):
+    """Return the first renderer whose predicate matches ``payload``, or None for the generic dump."""
+    for predicate, renderer in _HUMAN_RENDERERS:
+        if predicate(payload):
+            return renderer
+    return None
 
 
 def _render_report_ci(payload: dict) -> str:
@@ -212,6 +232,161 @@ def _render_drift_human(payload: dict) -> str:
     if not payload.get("has_baseline"):
         lines.append("(no baseline committed — run `bounds calibrate --dump-baseline` to set one)")
     return "\n".join(line for line in lines if line)
+
+
+def _render_list_human(payload: dict) -> str:
+    """Render `bounds list`: one aligned row per subsystem (role/criticality + edge degree)."""
+    subs = payload.get("subsystems", []) or []
+    lines = [f"{payload.get('project', '')}: {len(subs)} subsystem{'s' if len(subs) != 1 else ''}"]
+    for s in subs:
+        ns = f" @{s['namespace']}" if s.get("namespace") else ""
+        lines.append(
+            f"  {s.get('name', '?')}{ns}  [{s.get('role', '')}/{s.get('criticality', '')}]  "
+            f"exposes {s.get('exposes', 0)}, consumes {s.get('consumes', 0)}, "
+            f"consumed_by {len(s.get('consumed_by', []))}"
+        )
+    return "\n".join(lines)
+
+
+def _render_overview_human(payload: dict) -> str:
+    """Render `bounds overview`: a health line + counts; the full edge list stays in the JSON."""
+    h = payload.get("health", {}) or {}
+    status = "ok" if h.get("ok") else "needs attention"
+    lines = [
+        f"{payload.get('project', '')}: {payload.get('subsystems', 0)} subsystems — {status}",
+        f"  roles: {_kv_inline(payload.get('roles', {}))}",
+        f"  criticality: {_kv_inline(payload.get('criticality', {}))}",
+        f"  cycles: {h.get('cycles', 0)}   schema errors: {h.get('schema_errors', 0)}"
+        f"   dependency edges: {len(payload.get('edges', []))}",
+    ]
+    for cyc in payload.get("cycles", []) or []:
+        lines.append(f"  cycle: {cyc}")
+    return "\n".join(lines)
+
+
+def _render_impact_human(payload: dict) -> str:
+    """Render `bounds impact`: blast radius + the consumers, for a subsystem or an interface."""
+    target = payload.get("subsystem") or payload.get("interface") or "?"
+    label = "subsystem" if "subsystem" in payload else "interface"
+    lines = [f"impact of {label} '{target}': blast radius {payload.get('blast_radius', 0)}"
+             + (" (lower bound)" if payload.get("blast_radius_is_lower_bound") else "")]
+    if payload.get("providers"):
+        lines.append(f"  provided by: {', '.join(payload['providers'])}")
+    direct = payload.get("direct_consumers", []) or []
+    lines.append(f"  direct consumers: {', '.join(direct) if direct else '(none)'}")
+    transitive = payload.get("transitive_consumers", []) or []
+    if transitive:
+        lines.append(f"  transitive: {', '.join(transitive)}")
+    for c in payload.get("consumers", []) or []:
+        ifaces = ", ".join(c.get("interfaces", []))
+        via = f" via {c['via']}" if c.get("via") else ""
+        lines.append(f"    {c.get('name', '?')}{via}" + (f" [{ifaces}]" if ifaces else ""))
+    undeclared = payload.get("undeclared_consumer_edges")
+    if undeclared:
+        lines.append(f"  undeclared importers (from --verify): {len(undeclared)}")
+        for e in undeclared:
+            lines.append(f"    {e.get('consumer', '?')}: {', '.join(e.get('files', []))}")
+    return "\n".join(lines)
+
+
+def _render_calibrate_human(payload: dict) -> str:
+    """Render `bounds calibrate` (diff/apply): a summary line + per-subsystem add/remove."""
+    s = payload.get("summary", {}) or {}
+    verb = "applied" if payload.get("applied") else "proposed"
+    subs = payload.get("subsystems", {}) or {}
+    lines = [
+        f"calibrate: {verb} {s.get('added', 0)} add / {s.get('removed', 0)} remove / "
+        f"{s.get('needs_review', 0)} needs-review across {len(subs)} subsystem(s) "
+        f"(consumes +{s.get('consumes_added', 0)}/-{s.get('consumes_removed', 0)})"
+    ]
+    if not payload.get("applied") and subs:
+        lines.append("  (diff only — pass --apply to write)")
+    for name in sorted(subs):
+        p = subs[name]
+        bits = []
+        if p.get("add_exposes"):
+            bits.append("+" + ", +".join(e["name"] for e in p["add_exposes"]))
+        if p.get("remove_exposes"):
+            bits.append("-" + ", -".join(p["remove_exposes"]))
+        if p.get("needs_review"):
+            bits.append("review: " + ", ".join(p["needs_review"]))
+        if p.get("add_consumes"):
+            bits.append("consumes+: " + ", ".join(p["add_consumes"]))
+        lines.append(f"  {name}: " + " | ".join(bits) if bits else f"  {name}")
+    return "\n".join(lines)
+
+
+def _render_init_human(payload: dict) -> str:
+    """Render `bounds init`: what scaffolding was created vs already present."""
+    created = payload.get("created", []) or []
+    skipped = payload.get("skipped", []) or []
+    lines = [f"init: {'created ' + ', '.join(created) if created else 'nothing to create'}"]
+    if skipped:
+        lines.append(f"  already present: {', '.join(skipped)}")
+    if payload.get("hint"):
+        lines.append(f"  {payload['hint']}")
+    return "\n".join(lines)
+
+
+def _render_ci_human(payload: dict) -> str:
+    """Render `bounds ci --install`: which CI configs were written."""
+    created = payload.get("created", []) or []
+    skipped = payload.get("skipped", []) or []
+    lines = [f"ci: {'installed ' + ', '.join(created) if created else 'nothing new to install'}"]
+    if skipped:
+        lines.append(f"  already configured: {', '.join(skipped)}")
+    return "\n".join(lines)
+
+
+def _render_agent_human(payload: dict) -> str:
+    """Render `bounds agent` (sync/detect/check) as a one-or-two-line summary."""
+    if "detected" in payload:
+        det = payload.get("detected", []) or []
+        return "agents detected: " + (", ".join(det) if det else "(none)")
+    if {"missing", "configured"} <= payload.keys():  # --check
+        ok = payload.get("ok")
+        lines = [f"agent wiring: {'up to date' if ok else 'needs sync'}"]
+        if payload.get("configured"):
+            lines.append(f"  configured: {', '.join(payload['configured'])}")
+        if payload.get("missing"):
+            lines.append(f"  missing: {', '.join(payload['missing'])}")
+        if payload.get("stale"):
+            lines.append(f"  stale: {', '.join(payload['stale'])}")
+        if payload.get("fix"):
+            lines.append(f"  fix: {payload['fix']}")
+        return "\n".join(lines)
+    # --sync
+    created = payload.get("created", []) or []
+    updated = payload.get("updated", []) or []
+    skipped = payload.get("skipped_custom", []) or []
+    lines = [f"agent sync: wrote {len(created) + len(updated)} config(s)"]
+    if created:
+        lines.append(f"  created: {', '.join(created)}")
+    if updated:
+        lines.append(f"  updated: {', '.join(updated)}")
+    if skipped:
+        lines.append(f"  left alone (hand-edited): {', '.join(skipped)}")
+    return "\n".join(lines)
+
+
+def _render_cache_human(payload: dict) -> str:
+    """Render `bounds cache` (inspect/migrate/prune) as a summary-first line."""
+    if "backend" in payload:  # --inspect
+        by_lang = payload.get("by_language", {}) or {}
+        return (f"cache: {payload.get('files', 0)} files, "
+                f"{len(payload.get('by_subsystem', {}) or {})} subsystems "
+                f"[{payload.get('backend', '?')}]"
+                + (f"  languages: {_kv_inline(by_lang)}" if by_lang else ""))
+    if "migrated" in payload:
+        return payload.get("note") or f"cache: migrated {payload.get('files', 0)} file record(s)"
+    if "pruned" in payload:
+        return f"cache: pruned {payload.get('pruned', 0)}, {payload.get('remaining', 0)} remaining"
+    return _render_generic_human(payload)
+
+
+def _kv_inline(mapping: dict) -> str:
+    """Render a small {key: count} mapping as a compact inline string."""
+    return ", ".join(f"{k} {v}" for k, v in (mapping or {}).items()) or "(none)"
 
 
 def emit_error(err: BoundsError, human: bool, stream=None) -> None:
