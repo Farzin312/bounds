@@ -38,9 +38,10 @@ _TSCONFIG_NAME = "tsconfig.json"
 class TsAliases:
     """Precompiled ``baseUrl`` + ``paths`` for one project, ready to expand bare specifiers.
 
-    ``base_url`` is project-relative POSIX ("" = project root). ``patterns`` is a sorted tuple of
-    ``(pattern, targets)`` where each target is project-relative POSIX (already joined to baseUrl),
-    so expansion is a pure string substitution.
+    ``base_url`` is project-relative POSIX ("" = project root). ``patterns`` is a tuple of
+    ``(pattern, targets)`` ordered most-specific first (TypeScript's longest-prefix rule, see
+    :func:`_pattern_specificity`) where each target is project-relative POSIX (already joined to
+    baseUrl), so expansion is a pure string substitution.
     """
 
     base_url: str
@@ -50,8 +51,9 @@ class TsAliases:
         """Extension-less, project-relative path stems ``module`` could alias to (in order).
 
         Only bare (non-relative) specifiers alias; a ``./x`` relative import is handled by the
-        resolver directly. ``paths`` matches are tried first (in sorted pattern order), then the
-        ``baseUrl``-relative fallback, deduped while preserving order for determinism.
+        resolver directly. ``paths`` matches are tried first (most-specific pattern first, per
+        TypeScript's longest-prefix rule), then the ``baseUrl``-relative fallback, deduped while
+        preserving order for determinism.
         """
         if not module or module.startswith("."):
             return []
@@ -132,8 +134,25 @@ def _compile(project_root: Path, tsconfig_path: Path) -> TsAliases | None:
         return None
     return TsAliases(
         base_url=base_url_rel,
-        patterns=tuple(sorted(patterns.items())),
+        patterns=tuple(sorted(patterns.items(), key=_pattern_specificity)),
     )
+
+
+def _pattern_specificity(item: tuple[str, tuple[str, ...]]) -> tuple[int, int, int, str]:
+    """Sort key ordering tsconfig ``paths`` most-specific first, matching TypeScript's resolver.
+
+    TypeScript resolves an alias against the pattern with the longest literal prefix before ``*``
+    (an exact, wildcard-free pattern being the most specific of all), *not* the
+    lexicographically-first one. Ordering patterns this way makes :meth:`TsAliases.candidate_stems`
+    emit the best match's target first, so a broad ``@/*`` can no longer shadow a more specific
+    ``@/foo/*`` and misattribute the import. The pattern string is the final tiebreaker for a
+    total, deterministic order.
+    """
+    pattern = item[0]
+    prefix, star, suffix = pattern.partition("*")
+    # exact (0) before wildcard (1); then longest prefix, then longest suffix (negated so longer
+    # sorts first under an ascending sort); then the pattern itself.
+    return (1 if star else 0, -len(prefix), -len(suffix), pattern)
 
 
 def _config_chain(tsconfig_path: Path) -> list[tuple[Path, dict]]:

@@ -56,6 +56,40 @@ def test_candidate_stems_ignores_relative_specifiers(tmp_path):
     assert al.candidate_stems("./local") == []  # relative handled by the resolver, not aliases
 
 
+def test_overlapping_aliases_prefer_longest_prefix(tmp_path):
+    """TS resolves to the pattern with the longest literal prefix before `*`, not the
+    lexicographically-first — so a specific `@/foo/*` must win over a broad `@/*`."""
+    _write(tmp_path, "tsconfig.json", '{"compilerOptions": {"baseUrl": ".", "paths": '
+           '{"@/*": ["src/*"], "@/foo/*": ["packages/foo/src/*"]}}}')
+    al = tsconfig.load(tmp_path)
+    stems = al.candidate_stems("@/foo/bar")
+    # The specific alias's target must be emitted before the broad alias's target.
+    assert stems.index("packages/foo/src/bar") < stems.index("src/foo/bar")
+
+
+def test_exact_alias_wins_over_wildcard(tmp_path):
+    """An exact, wildcard-free pattern is the most specific and must outrank an overlapping `@/*`."""
+    _write(tmp_path, "tsconfig.json", '{"compilerOptions": {"baseUrl": ".", "paths": '
+           '{"@/*": ["src/*"], "@/foo": ["vendor/foo/index"]}}}')
+    al = tsconfig.load(tmp_path)
+    stems = al.candidate_stems("@/foo")
+    assert stems.index("vendor/foo/index") < stems.index("src/foo")
+
+
+def test_resolve_prefers_specific_alias_target(tmp_path):
+    """End-to-end: when both the broad and specific alias targets exist as files, the import
+    resolves to the specific one (the bug: broad `@/*` shadowed `@/foo/*`)."""
+    _write(tmp_path, "tsconfig.json", '{"compilerOptions": {"baseUrl": ".", "paths": '
+           '{"@/*": ["src/*"], "@/foo/*": ["packages/foo/src/*"]}}}')
+    al = tsconfig.load(tmp_path)
+    known = {
+        "src/foo/bar": "src/foo/bar.ts",
+        "packages/foo/src/bar": "packages/foo/src/bar.ts",
+    }
+    assert (resolve_import("src/app.ts", "@/foo/bar", known, None, al)
+            == "packages/foo/src/bar.ts")
+
+
 # ---- end-to-end through resolve_import ----
 def test_resolve_follows_wildcard_alias_to_dot_named_file(tmp_path):
     _write(tmp_path, "tsconfig.json", '{"compilerOptions": {"baseUrl": "src", "paths": {"@/*": ["*"]}}}')

@@ -132,9 +132,13 @@ def run_discover(
             cand["namespace"] = namespace
         candidates.append(cand)
 
+    # Languages actually present in the extracted source — so root.yaml reflects the repo instead
+    # of init's hardcoded `[python]` default (a pure-TS/Prisma repo must not claim to be Python).
+    detected_languages = sorted({r.language for r in extracts.values() if getattr(r, "language", None)})
     root_proposal = {
         "version": config.SCHEMA_VERSION,
         "project": project_root.resolve().name,
+        "languages": detected_languages,
         "subsystems": kept,
     }
 
@@ -438,6 +442,11 @@ def _write(project_root: Path, root_proposal: dict, candidates: list[dict]) -> t
             root_doc = dict(raw)
             existing_subs = [str(s) for s in (raw.get("subsystems") or [])]
     root_doc["subsystems"] = sorted(set(existing_subs) | set(root_proposal["subsystems"]))
+    # Detection is authoritative over init's `[python]` placeholder: when discover actually saw
+    # source, overwrite languages with what it found (only when non-empty, so a no-op run can't
+    # blank a hand-set value).
+    if root_proposal.get("languages"):
+        root_doc["languages"] = root_proposal["languages"]
     root_doc.setdefault("version", root_proposal["version"])
     root_doc.setdefault("project", root_proposal["project"])
     root_doc.setdefault("entry_points", [])
