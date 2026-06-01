@@ -235,6 +235,48 @@ ALTER TABLE users RENAME COLUMN name TO full_name;
     assert ("rename", "users.name", "rename_column") in ops
 
 
+def test_sql_adapter_extracts_functions_views_indexes_triggers_types():
+    # Grammar-native statements that were previously dropped: functions (RPCs), views,
+    # indexes, triggers, and types must each surface as a typed symbol.
+    src = b"""create or replace function public.bump() returns trigger language plpgsql as $$ begin return new; end; $$;
+create view active_users as select * from profiles where active;
+create index idx_email on profiles (email);
+create trigger trg_bump before update on profiles execute function bump();
+create type mood as enum ('happy', 'sad');
+"""
+    res = get_adapter("010_objects.sql").extract("010_objects.sql", src)
+    assert res.error is None
+    ops = {(s.kind, s.name) for s in res.symbols}
+    assert ("function", "public.bump") in ops
+    assert ("view", "active_users") in ops
+    assert ("index", "idx_email") in ops
+    assert ("trigger", "trg_bump") in ops
+    assert ("type", "mood") in ops
+    # index/trigger record the table they target
+    by_name = {s.name: s for s in res.symbols}
+    assert by_name["idx_email"].metadata.get("table") == "profiles"
+    assert by_name["trg_bump"].metadata.get("table") == "profiles"
+
+
+def test_sql_adapter_recovers_policies_and_rls():
+    # tree-sitter-sql can't parse Postgres RLS; the adapter recovers it by text scan instead
+    # of dropping it as schema_error, and emits no phantom column for the RLS statement.
+    src = b"""create table profiles (id uuid primary key);
+alter table profiles enable row level security;
+create policy "owner can read" on profiles for select using (auth.uid() = id);
+"""
+    res = get_adapter("011_rls.sql").extract("011_rls.sql", src)
+    assert res.error is None
+    by_kind = {s.kind: s for s in res.symbols}
+    assert by_kind["rls"].name == "profiles"
+    assert by_kind["rls"].metadata.get("schema_op") == "enable_rls"
+    assert by_kind["policy"].name == "profiles.owner can read"
+    assert by_kind["policy"].metadata.get("table") == "profiles"
+    # No phantom column named "enable" from the misparsed RLS statement, and no schema_error.
+    assert not any(s.name.endswith(".enable") for s in res.symbols)
+    assert "schema_error" not in by_kind
+
+
 def test_sql_all_error_with_revision_header_is_hard_failure():
     # A migration whose body is wholly unparsable is a hard extraction failure even when it
     # carries a valid `-- revision` header: the schema_meta header is not a parsed statement,

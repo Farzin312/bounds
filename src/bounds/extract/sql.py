@@ -7,6 +7,11 @@ fail-soft: one unparsable statement is recorded as a ``schema_error`` signal sym
 remaining valid statements in the same file still extract — a typo in migration 030 never
 erases the tables created in 001.
 
+Covered statements: tables/columns (``CREATE``/``ALTER``/``DROP``/``RENAME``), plus
+functions/RPCs, views, indexes, triggers, and types (grammar-native). Postgres RLS
+(``CREATE POLICY``, ``ENABLE/DISABLE ROW LEVEL SECURITY``) has no tree-sitter grammar yet,
+so it is recovered with a deterministic text scan instead of being dropped as a parse error.
+
 A leading comment header (``-- revision: <id>`` / ``-- down_revision: <id>``, or an explicit
 ``-- bounds:order <n>``) is captured as a ``schema_meta`` signal so the fold can order a
 revision-chained migration set deterministically without reading file mtimes.
@@ -35,6 +40,31 @@ _LANG = None
 _REV_RE = re.compile(r"^--\s*revision\s*[:=]\s*([\w.\-]+)", re.IGNORECASE)
 _DOWN_RE = re.compile(r"^--\s*down[_-]?revision\s*[:=]\s*([\w.\-]+)", re.IGNORECASE)
 _ORDER_RE = re.compile(r"^--\s*bounds\s*:\s*order\s*[:=]?\s*(\d+)", re.IGNORECASE)
+
+# `CREATE TABLE` family the grammar resolves to a typed node, mapped to (kind, schema_op).
+# The object name is the first `object_reference`; index names are an `identifier` instead.
+_NAMED_CREATE = {
+    "create_function": ("function", "create_function"),
+    "create_view": ("view", "create_view"),
+    "create_index": ("index", "create_index"),
+    "create_trigger": ("trigger", "create_trigger"),
+    "create_type": ("type", "create_type"),
+}
+_DDL_TYPES = {"create_table", "alter_table", "drop_table"} | set(_NAMED_CREATE)
+
+# tree-sitter-sql (0.3.11) has no grammar for Postgres RLS, so these statements surface as
+# ERROR nodes. We recover their identity with a deterministic text scan and discount them
+# from the unparsed tally so a policy/RLS file isn't perpetually flagged E_SCHEMA_UNPARSED.
+_POLICY_RE = re.compile(
+    r"\bcreate\s+policy\s+(?P<name>\"[^\"]+\"|`[^`]+`|\[[^\]]+\]|[\w.]+)\s+on\s+"
+    r"(?P<table>\"[^\"]+\"|[\w.]+)",
+    re.IGNORECASE,
+)
+_RLS_RE = re.compile(
+    r"\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?P<table>\"[^\"]+\"|[\w.]+)\s+"
+    r"(?P<action>enable|disable)\s+row\s+level\s+security",
+    re.IGNORECASE,
+)
 
 
 def _parser():
@@ -74,6 +104,21 @@ def _first_name(node, source: bytes) -> str | None:
     return _strip(_text(ident, source)) if ident is not None else None
 
 
+def _object_after(node, source: bytes, keyword_type: str) -> str | None:
+    """First ``object_reference`` appearing after a given keyword child (e.g. the table
+    after ``ON`` for ``CREATE INDEX ... ON t`` / ``CREATE TRIGGER ... ON t``)."""
+    seen = False
+    for c in node.named_children:
+        if c.type == keyword_type:
+            seen = True
+        elif seen and c.type == "object_reference":
+            parts = [x for x in c.named_children if x.type in ("identifier", "literal")]
+            if parts:
+                return ".".join(_strip(_text(p, source)) for p in parts)
+            return _strip(_text(c, source))
+    return None
+
+
 def _column_defs(node):
     """Yield every ``column_definition`` for ``node``, ignoring table constraints.
 
@@ -101,18 +146,36 @@ def _columns(node, source: bytes) -> list[str]:
 
 
 def _symbols_from_statement(stmt, source: bytes) -> list[Symbol]:
-    ddl = next(
-        (c for c in stmt.named_children if c.type in {"create_table", "alter_table", "drop_table"}),
-        None,
-    )
+    ddl = next((c for c in stmt.named_children if c.type in _DDL_TYPES), None)
     if ddl is None:
-        return []
-    table = _object_name(ddl, source)
-    if not table:
         return []
     line = _line(ddl)
     # SQL symbols are never "exported": the materialized table surface is the fold's job
     # (validate.schema), so a dropped table can't survive in exported_names via its CREATE.
+    if ddl.type in _NAMED_CREATE:
+        # CREATE FUNCTION/VIEW/TRIGGER/TYPE name the object via the first object_reference;
+        # CREATE INDEX names it via a bare identifier (the object_reference is the table).
+        kind, op = _NAMED_CREATE[ddl.type]
+        if ddl.type == "create_index":
+            name = _first_name(ddl, source)
+            meta = {"schema_op": op}
+            on_table = _object_after(ddl, source, "keyword_on")
+            if on_table:
+                meta["table"] = on_table
+        else:
+            name = _object_name(ddl, source)
+            meta = {"schema_op": op}
+            if ddl.type == "create_trigger":
+                on_table = _object_after(ddl, source, "keyword_on")
+                if on_table:
+                    meta["table"] = on_table
+        if not name:
+            return []
+        return [Symbol(name, kind, line, exported=False, metadata=meta)]
+
+    table = _object_name(ddl, source)
+    if not table:
+        return []
     if ddl.type == "create_table":
         return [
             Symbol(table, "table", line, exported=False,
@@ -124,6 +187,11 @@ def _symbols_from_statement(stmt, source: bytes) -> list[Symbol]:
     out: list[Symbol] = []
     for child in ddl.named_children:
         if child.type == "add_column":
+            # A real ADD COLUMN carries a `keyword_add`; without it this is the grammar
+            # misparsing `... ENABLE ROW LEVEL SECURITY` into a phantom column "enable".
+            # The regex pass owns RLS, so drop the phantom here.
+            if not any(c.type == "keyword_add" for c in child.named_children):
+                continue
             for col in _columns(child, source):  # paren-grouped multi-add yields several
                 out.append(Symbol(f"{table}.{col}", "column", line, exported=False,
                                   metadata={"schema_op": "add_column", "table": table, "column": col}))
@@ -145,6 +213,30 @@ def _symbols_from_statement(stmt, source: bytes) -> list[Symbol]:
                 out.append(Symbol(f"{table}.{old}", "rename", line, exported=False,
                                   metadata={"schema_op": "rename_column", "table": table,
                                             "column": old, "to": new}))
+    return out
+
+
+def _policy_rls_symbols(source: bytes) -> list[Symbol]:
+    """Recover ``CREATE POLICY`` and ``ENABLE/DISABLE ROW LEVEL SECURITY`` via a text scan.
+
+    The grammar errors on these Postgres-specific statements, so they would otherwise be
+    swallowed as ``schema_error``. Deterministic: ``finditer`` yields in source order and
+    line numbers come from a byte count, never wall-clock or set ordering.
+    """
+    text = source.decode("utf-8", "replace")
+    out: list[Symbol] = []
+    for m in _POLICY_RE.finditer(text):
+        line = text.count("\n", 0, m.start()) + 1
+        name = _strip(m.group("name"))
+        table = _strip(m.group("table"))
+        out.append(Symbol(f"{table}.{name}", "policy", line, exported=False,
+                          metadata={"schema_op": "create_policy", "table": table, "policy": name}))
+    for m in _RLS_RE.finditer(text):
+        line = text.count("\n", 0, m.start()) + 1
+        table = _strip(m.group("table"))
+        action = m.group("action").lower()
+        out.append(Symbol(table, "rls", line, exported=False,
+                          metadata={"schema_op": f"{action}_rls", "table": table}))
     return out
 
 
@@ -227,6 +319,11 @@ class SqlAdapter(LanguageAdapter):
                     symbols.extend(_symbols_from_statement(node, source))
                 elif node.type == "ERROR":
                     unparsed += 1
+            # Recover grammar-unsupported RLS statements (each leaves ~one ERROR node, so
+            # discount them from the tally rather than double-reporting as schema_error).
+            recovered = _policy_rls_symbols(source)
+            symbols.extend(recovered)
+            unparsed = max(0, unparsed - len(recovered))
             if unparsed:
                 # Fail soft, report hard: surfaced as E_SCHEMA_UNPARSED (warning), not a
                 # silent drop and not a whole-file failure - the valid statements still folded.

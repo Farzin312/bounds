@@ -60,7 +60,7 @@ bounds/
 │       │   ├── registry.py        # extension/lang → adapter resolution
 │       │   ├── scan.py            # shared filesystem→extraction helpers (discover/calibrate)
 │       │   ├── python.py          # PythonAdapter (+ SQLAlchemy/Django ORM table recognition)
-│       │   ├── sql.py             # SqlAdapter (.sql DDL statements, per-statement fail-soft)
+│       │   ├── sql.py             # SqlAdapter (.sql DDL: tables/cols/functions/views/indexes/triggers/types + RLS, per-statement fail-soft)
 │       │   ├── prisma.py          # PrismaAdapter (.prisma model blocks → tables)
 │       │   ├── rawquery.py        # opt-in advisory raw-SQL string table refs (never blocking)
 │       │   └── typescript.py      # TypeScriptAdapter (.ts/.tsx/.js/.jsx; + Drizzle/TypeORM tables)
@@ -205,7 +205,7 @@ class RootManifest:
 @dataclass
 class Symbol:
     name: str
-    kind: str                      # function|class|const|type|interface|variable|table|column|drop|rename
+    kind: str                      # function|class|const|type|interface|variable|table|column|view|index|trigger|policy|rls|drop|rename
     line: int
     exported: bool = True
     metadata: dict = {}            # additive adapter facts (e.g. SQL op/table/column, ORM model)
