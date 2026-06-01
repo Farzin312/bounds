@@ -66,7 +66,13 @@ so a clone stays lean. Run `bounds agent --sync` after cloning to (re)create the
 bounds agent --detect          # list which agents are present in this project
 bounds agent --check           # verify each detected agent has a Bounds config
 bounds agent --sync --claude   # scope --sync/--check to one agent (--codex, --cursor, …)
+bounds agent --sync --all      # wire every supported agent, no prompt
 ```
+
+Run interactively (`bounds agent --sync` in a terminal, no tool flags) and Bounds asks which
+tools to wire — pre-selecting the ones it detected — so you pick yours instead of getting all
+eight. A piped/CI run, an explicit `--<tool>` flag, or `--all` skips the prompt; `AGENTS.md`
+(the canonical contract) is written either way.
 
 ---
 

@@ -228,6 +228,33 @@ def test_discover_large_schema_dir_not_dropped(tmp_path):
     assert schema["tables"] == 60
 
 
+def test_schema_classification_falls_back_to_extension_when_extraction_fails(tmp_path):
+    # A .sql/.prisma file missing from `extracts` (e.g. oversized/unreadable/unparsable, which
+    # yields no extract) must still count as schema via its extension — otherwise a real
+    # migration dir could be misclassified and dropped, breaking the always-keep guarantee.
+    from bounds.discover import _is_schema_candidate
+
+    # No extracts at all: extension fallback recognizes the migration set as schema.
+    assert _is_schema_candidate(["db/migrations/001.sql", "db/migrations/002.sql"], {}) is True
+    # Non-schema files with no extracts are NOT misread as schema.
+    assert _is_schema_candidate(["src/a.py", "src/b.py"], {}) is False
+    # Mixed: schema-dominant (2 of 3) still counts as schema even with empty extracts.
+    assert _is_schema_candidate(["m/1.sql", "m/2.sql", "m/util.py"], {}) is True
+
+
+def test_discover_maps_migration_dir_with_oversized_unextracted_file(tmp_path):
+    # End-to-end: a migrations dir whose files don't all extract is still kept as schema.
+    mig = tmp_path / "supa" / "migrations"
+    mig.mkdir(parents=True)
+    (mig / "001_init.sql").write_text("CREATE TABLE t (id int);\n")
+    # An oversized .sql is skipped by extraction (returns no extract) — extension keeps it schema.
+    (mig / "002_huge.sql").write_text("-- big\n" + ("SELECT 1;\n" * 200_000))
+    result = run_discover(tmp_path)
+    schema = next((c for c in result["candidates"] if c["name"] == "migrations"), None)
+    assert schema is not None and schema["dropped"] is False
+    assert schema["score"] == "schema"
+
+
 def test_discover_large_code_dir_kept_not_silently_dropped(tmp_path):
     # A legitimately large code directory (>50 files) is mapped, never silently dropped —
     # hiding a repo's biggest surfaces is the opposite of discovery's job.

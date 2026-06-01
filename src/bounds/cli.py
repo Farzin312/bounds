@@ -99,13 +99,21 @@ def _run(human: bool, fn, ci: bool = False):
         sys.exit(config.EXIT_FATAL)
 
 
+def _interactive_human(explicit_human: bool) -> bool:
+    """Whether an interactive maintenance command should render the human announcement.
+
+    `upgrade`/`upgrade-check` are run by a person, not consumed by an agent, so they default
+    to the human view in a terminal while still honoring the JSON-first contract when piped
+    or redirected (an agent/script captures non-TTY output). `--human` always forces human.
+    """
+    return explicit_human or sys.stdout.isatty()
+
+
 def _version_display(raw: str) -> str:
-    """A coherent ``--version`` string: a clean release reads as-is; an untagged build is
-    labelled so ``0.1.dev21`` doesn't look like a broken release number to a user."""
+    """The ``--version`` string. Versions are dynamic CalVer (``YYYY.M.<build>``, e.g.
+    ``2026.6.24``) — already clean numbers — so this only annotates the not-installed case."""
     if raw == "unknown":
         return "unknown (not installed as a package)"
-    if "dev" in raw or "+" in raw:
-        return f"{raw} (development build — install a tagged release for a stable version)"
     return raw
 
 
@@ -166,8 +174,10 @@ def list_cmd(namespace: str | None, human: bool) -> None:
 @click.option("--namespace", default=None,
               help="Describe every subsystem in this namespace instead of one by name.")
 @click.option("--deep", is_flag=True, default=False, help="Include Tier-3 LLM enrichment (roadmap).")
+@click.option("--full", "full", is_flag=True, default=False,
+              help="Include the full file roster and schema-object list (default shows counts).")
 @_human
-def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: bool) -> None:
+def describe_cmd(name: str | None, namespace: str | None, deep: bool, full: bool, human: bool) -> None:
     """Return one verified subsystem API/table contract as JSON."""
 
     def go() -> None:
@@ -193,7 +203,7 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: boo
             report = describe_mod.status_report(root) if matched else None
             payload = {
                 "namespace": namespace,
-                "subsystems": [describe_mod.describe_one(root, s, deep, report, entry_matcher) for s in matched],
+                "subsystems": [describe_mod.describe_one(root, s, deep, report, entry_matcher, full) for s in matched],
             }
             output.emit(payload, human)
             return
@@ -205,7 +215,7 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: boo
                 fix=f"known subsystems: {sorted(subs)}; or run 'bounds init --subsystem {name}'",
             )
         output.emit(
-            describe_mod.describe_one(root, subs[name], deep, describe_mod.status_report(root), entry_matcher),
+            describe_mod.describe_one(root, subs[name], deep, describe_mod.status_report(root), entry_matcher, full),
             human,
         )
 
@@ -409,6 +419,7 @@ consumes: []
 @_human
 def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, human: bool) -> None:
     """Initialize .bounds/ structure, or add a subsystem."""
+    human = _interactive_human(human)  # interactive setup action: announce in a terminal
 
     def go() -> None:
         if not root_flag and not subsystem:
@@ -480,6 +491,7 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
 def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
                  merge_into: tuple[str, ...], human: bool) -> None:
     """Create initial Bounds contracts so agents have a map to query."""
+    human = _interactive_human(human)  # interactive onboarding action: announce in a terminal
 
     def go() -> None:
         if do_apply and dry_run:
@@ -522,6 +534,9 @@ def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
 def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
                   do_check: bool, do_dump: bool, human: bool) -> None:
     """Keep contracts aligned with extracted source after code changes."""
+    # Diff/apply/dump-baseline are interactive actions → announce in a terminal; --check is a
+    # CI gate consumed by automation → keep it JSON-default (it still honors explicit --human).
+    human = human if do_check else _interactive_human(human)
 
     def go() -> None:
         # The four modes are mutually exclusive: diff (default) / apply / check / dump-baseline.
@@ -566,10 +581,16 @@ def _agent_selectors(fn):
               help="List which coding agents are present in this project.")
 @click.option("--check", "do_check", is_flag=True, default=False,
               help="Verify detected agents have a Bounds config.")
+@click.option("--all", "want_all", is_flag=True, default=False,
+              help="Wire every supported agent without prompting (skips the interactive picker).")
 @_agent_selectors
 @_human
-def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, human: bool, **selectors: bool) -> None:
+def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, want_all: bool,
+              human: bool, **selectors: bool) -> None:
     """Teach Claude, Codex, Gemini, Cursor, and other agents to query Bounds first."""
+    # --sync/--detect are interactive actions → announce in a terminal; --check is a CI gate →
+    # keep it JSON-default (still honors explicit --human).
+    human = human if do_check else _interactive_human(human)
 
     def go() -> None:
         modes = [m for m, on in (("sync", do_sync), ("detect", do_detect), ("check", do_check)) if on]
@@ -578,12 +599,48 @@ def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, human: bool, **sel
                 errors.E_USAGE, "pass exactly one of --sync, --detect, --check",
                 fix="e.g. 'bounds agent --sync' to generate configs, '--detect' to list agents",
             )
-        only = {k for k in _AGENT_FLAGS if selectors.get(k)} or None
+        only = None if want_all else ({k for k in _AGENT_FLAGS if selectors.get(k)} or None)
         root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
+        # Interactive --sync with no tools chosen up front: ask which to wire (pre-checked =
+        # detected) instead of writing the whole kitchen sink. Piped/CI runs (non-TTY), an
+        # explicit selector, or --all skip the prompt — the canonical AGENTS.md is always written.
+        if modes[0] == "sync" and only is None and not want_all and sys.stdout.isatty():
+            detected = set(agentsync.run_agent(root, mode="detect").get("detected", []))
+            only = _prompt_agent_selection(_AGENT_FLAGS, detected)
         payload = agentsync.run_agent(root, mode=modes[0], only=only)
         output.emit(payload, human)
 
     _run(human, go)
+
+
+def _prompt_agent_selection(available: list[str], detected: set[str]) -> set[str] | None:
+    """Interactive checklist for `agent --sync`: which tools to wire.
+
+    Returns the chosen agent set, or ``None`` to mean "all" (run_agent's no-filter sentinel).
+    Pressing Enter accepts the detected tools (or all, when none were detected) so the common
+    case is one keystroke; a typo'd/empty selection falls back to "all" rather than writing
+    nothing. The canonical ``AGENTS.md`` is written regardless of the choice.
+    """
+    click.echo("Which AI tools should Bounds wire? (AGENTS.md is always written.)")
+    for i, key in enumerate(available, 1):
+        mark = "  [detected]" if key in detected else ""
+        click.echo(f"  {i}. {key}{mark}")
+    default_hint = ", ".join(sorted(detected)) if detected else "all"
+    raw = click.prompt(
+        f"Enter names/numbers (comma-separated), 'all', or Enter for [{default_hint}]",
+        default="", show_default=False,
+    ).strip()
+    if not raw:
+        return set(detected) if detected else None
+    if raw.lower() == "all":
+        return None
+    chosen: set[str] = set()
+    for tok in raw.replace(",", " ").split():
+        if tok.isdigit() and 1 <= int(tok) <= len(available):
+            chosen.add(available[int(tok) - 1])
+        elif tok in available:
+            chosen.add(tok)
+    return chosen or None  # bad input → fall back to all rather than writing nothing
 
 
 # ===========================================================================
@@ -600,6 +657,7 @@ def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, human: bool, **sel
 def ci_cmd(do_install: bool, want_action: bool, want_precommit: bool, want_gitlab: bool,
            want_all: bool, human: bool) -> None:
     """Install drift/boundary gates so the agent workflow is enforced in CI."""
+    human = _interactive_human(human)  # interactive setup action: announce in a terminal
 
     def go() -> None:
         if not do_install:
@@ -636,6 +694,7 @@ def ci_cmd(do_install: bool, want_action: bool, want_precommit: bool, want_gitla
 @_human
 def cache_cmd(do_migrate: bool, do_prune: bool, do_inspect: bool, human: bool) -> None:
     """Manage the binary extraction cache (.bounds/cache.db)."""
+    human = _interactive_human(human)  # interactive maintenance action: announce in a terminal
 
     def go() -> None:
         selected = [f for f, on in
@@ -670,15 +729,19 @@ def cache_cmd(do_migrate: bool, do_prune: bool, do_inspect: bool, human: bool) -
 @_human
 def upgrade_cmd(ref: str, local: Path | None, dry_run: bool, human: bool) -> None:
     """Upgrade a stale Bounds CLI through pipx."""
+    # `upgrade` is an interactive maintenance action a person runs, not data an agent
+    # consumes — so default to the human announcement in a terminal, and only fall back to
+    # the JSON contract when piped/redirected (an agent or script captures non-TTY output).
+    show_human = _interactive_human(human)
 
     def go() -> None:
         msg = "upgrading bounds..." if not dry_run else ""
-        with _Spinner(msg) if (human and not dry_run) else nullcontext():
+        with _Spinner(msg) if (show_human and not dry_run) else nullcontext():
             payload = upgrade_mod.run_upgrade(ref=ref, local=local, dry_run=dry_run)
-        output.emit(payload, human)
+        output.emit(payload, show_human)
         sys.exit(config.EXIT_OK if payload.get("ok") else config.EXIT_BLOCKED)
 
-    _run(human, go)
+    _run(show_human, go)
 
 
 # ===========================================================================
@@ -689,12 +752,15 @@ def upgrade_cmd(ref: str, local: Path | None, dry_run: bool, human: bool) -> Non
 def upgrade_check_cmd(human: bool) -> None:
     """Check whether a newer Bounds release is available (opt-in; makes a network call)."""
 
+    # Interactive check: human announcement in a terminal, JSON when piped (see `upgrade`).
+    show_human = _interactive_human(human)
+
     def go() -> None:
         # Informational only: being outdated is never an error, and the check fails
         # soft when offline, so this command always exits 0.
-        output.emit(update_check.check(), human)
+        output.emit(update_check.check(), show_human)
 
-    _run(human, go)
+    _run(show_human, go)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -188,6 +188,17 @@ def test_check_flags_only_new_drift_above_baseline(tmp_path):
     assert item["subsystem"] == "db" and item["change"] == "add_expose" and item["target"] == "brand_new"
 
 
+def test_malformed_baseline_is_treated_as_absent(tmp_path):
+    # A corrupt/hand-broken baseline must not be reported as a real baseline (which would
+    # imply "no new drift above it"); it fails soft to has_baseline=False, never raising.
+    _build(tmp_path)
+    (tmp_path / config.BOUNDS_DIR / config.DRIFT_BASELINE_FILE).write_text("{ not valid json")
+    result = check_drift(tmp_path)
+    assert result["has_baseline"] is False
+    assert result["ok"] is False          # existing drift counts as new (no usable baseline)
+    assert result["new_count"] > 0
+
+
 def test_resolving_drift_does_not_fail_check(tmp_path):
     _build(tmp_path)
     dump_baseline(tmp_path)

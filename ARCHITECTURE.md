@@ -727,9 +727,12 @@ The scan-bearing commands (`validate`, `preflight`) also accept `--include-ignor
 ```
 bounds list [--namespace NS]       → {project, subsystems:[{name, role, criticality, namespace?,
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
-bounds describe <name>             → SubsystemCompact.to_dict() + {files, entry_points, validation_status,
+bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count, entry_points, validation_status,
                                        project_status, unparsed_files?, exposes[*].verified, exposes[*].file?,
-                                       exposes[*].entry_point?, exposes[*].columns?, tables?, schema_objects?}
+                                       exposes[*].entry_point?, exposes[*].columns?, tables?, schema_object_counts?}
+                                   # token-lean by default: the file roster and the (often huge) schema-object
+                                   # list are gated behind --full, which adds {files, schema_objects}. The
+                                   # contract — exposes + tables(+columns) — is always full.
                                        # tables?: [{name, kind:"table", columns:[...], files:[...]}]
                                        # schema_objects?: [{name, kind, table?, files:[...]}]  # functions/views/
                                        #   indexes/triggers/types/policies/rls — the non-table schema surface

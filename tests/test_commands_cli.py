@@ -100,6 +100,28 @@ def test_schema_describe_impact_and_column_contract(monkeypatch, tmp_path):
     )
 
 
+def test_describe_schema_objects_are_counts_by_default_full_lists_them(monkeypatch, tmp_path):
+    # A schema with non-table objects (index + function) must summarize them by kind by
+    # default (token-lean) and only emit the full list under --full. Tables (the contract)
+    # stay full in both.
+    _write_schema_project(tmp_path)
+    (tmp_path / "migrations" / "002_objects.sql").write_text(
+        "CREATE INDEX idx_users_email ON users (email);\n"
+        "CREATE FUNCTION bump() RETURNS integer AS $$ SELECT 1 $$ LANGUAGE sql;\n",
+        encoding="utf-8",
+    )
+    lean = json.loads(_invoke(monkeypatch, tmp_path, ["describe", "db"]).output)
+    assert lean["schema_object_counts"] == {"function": 1, "index": 1}
+    assert "schema_objects" not in lean          # the full list is gated
+    assert lean["tables"]                          # the table contract is still full
+    assert "file_count" in lean and "files" not in lean
+
+    full = json.loads(_invoke(monkeypatch, tmp_path, ["describe", "db", "--full"]).output)
+    kinds = sorted({o["kind"] for o in full["schema_objects"]})
+    assert kinds == ["function", "index"]
+    assert "files" in full
+
+
 def _write_exposes_column_project(root, drop_email=False):
     (root / ".bounds" / "manifests").mkdir(parents=True)
     (root / ".bounds" / "root.yaml").write_text(
@@ -391,10 +413,17 @@ def test_describe_is_byte_stable_and_merges_tiers(monkeypatch, py_project):
 
     data = json.loads(r1.output)
     assert data["name"] == "models"
-    assert data["files"] == ["src/models/thing.py"]
+    # Lean default: a file COUNT, not the roster (the roster is behind --full).
+    assert data["file_count"] == 1
+    assert "files" not in data
     assert "validation_status" in data
     thing = next(e for e in data["exposes"] if e["name"] == "Thing")
     assert thing["verified"] is True
+
+    # --full restores the file roster (the contract — exposes — is unchanged).
+    full = json.loads(_invoke(monkeypatch, py_project, ["describe", "models", "--full"]).output)
+    assert full["files"] == ["src/models/thing.py"]
+    assert full["file_count"] == 1
     assert thing["file"] == "src/models/thing.py"
 
 
@@ -508,3 +537,27 @@ def test_walk_does_not_descend_external_symlink_dir(monkeypatch, py_project, tmp
     os.symlink(external, py_project / "src" / "models" / "ext")
     data = json.loads(_invoke(monkeypatch, py_project, ["where", "Sekret"]).output)
     assert data["count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Human renderers: action/query commands now produce summaries, not raw JSON
+# dumps; and (non-TTY) they still emit the JSON contract by default.
+# ---------------------------------------------------------------------------
+def test_human_renderers_are_clean_summaries(monkeypatch, py_project):
+    lst = _invoke(monkeypatch, py_project, ["list", "--human"]).output
+    assert "subsystem" in lst and not lst.lstrip().startswith("{")  # a summary, not JSON
+    ov = _invoke(monkeypatch, py_project, ["overview", "--human"]).output
+    assert "roles:" in ov and "dependency edges" in ov
+    im = _invoke(monkeypatch, py_project, ["impact", "models", "--human"]).output
+    assert "blast radius" in im and "consumers" in im
+    cal = _invoke(monkeypatch, py_project, ["calibrate", "--human"]).output
+    assert cal.startswith("calibrate:")
+
+
+def test_action_commands_emit_json_when_not_a_tty(monkeypatch, py_project):
+    # CliRunner stdout is not a TTY (like an agent/pipe), so TTY-aware action commands
+    # must still emit the JSON contract by default — agents are never given the prose view.
+    out = _invoke(monkeypatch, py_project, ["cache", "--inspect"]).output
+    assert json.loads(out)["backend"] in ("sqlite", "json", "none")
+    # ...and a query command stays JSON-default regardless.
+    assert json.loads(_invoke(monkeypatch, py_project, ["overview"]).output)["project"]

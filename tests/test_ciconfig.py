@@ -36,8 +36,13 @@ def test_action_cache_key_and_preflight(tmp_path):
     # Cache key is hashed over manifests/root, not the branch.
     assert "hashFiles('.bounds/root.yaml', '.bounds/manifests/**')" in text
     assert "path: .bounds/cache.db" in text
-    # Remote CI runs the strict gate.
+    # Remote CI runs the freshness gate then the strict gate.
+    assert "bounds calibrate --check" in text
     assert "bounds preflight --ci" in text
+    # Installs the correctly-named package via pipx (GitHub runners ship pipx); never the
+    # squatted bare `bounds` PyPI name.
+    assert "pipx install bounds-cli" in text
+    assert "pipx install bounds\n" not in text and "pipx install bounds " not in text
     # Skip convention is documented.
     assert "[skip bounds]" in text
 
@@ -61,6 +66,12 @@ def test_gitlab_job_uses_preflight(tmp_path):
     assert data["bounds"]["image"] == "python:3.12-slim"
     assert "bounds preflight --ci" in data["bounds"]["script"]
     assert data["bounds"]["rules"] == [{"changes": ["src/**/*", ".bounds/**/*"]}]
+    # The slim image has pip but NOT pipx; use pip with the correct package name so the
+    # `bounds` console script lands on PATH before the gate steps run.
+    assert "pip install bounds-cli" in data["bounds"]["script"]
+    assert not any("pipx" in step for step in data["bounds"]["script"])
+    # Never the bare squatted `bounds` package as its own step (only `bounds-cli`).
+    assert not any(step == "pip install bounds" for step in data["bounds"]["script"])
 
 
 def test_idempotent_rerun_reports_skipped(tmp_path):

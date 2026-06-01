@@ -13,6 +13,7 @@ import pytest
 from click.testing import CliRunner
 
 from bounds import config, update_check, upgrade
+from bounds import cli as cli_mod
 from bounds.cli import main
 
 # The exact, stable JSON keys every `check()` result must carry (additive contract).
@@ -204,6 +205,23 @@ def test_fetch_missing_tag_reports_no_release(monkeypatch):
 # ---------------------------------------------------------------------------
 # CLI wiring: JSON + human, always exit 0
 # ---------------------------------------------------------------------------
+class _FakeStream:
+    def __init__(self, tty: bool):
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+def test_interactive_human_defaults_to_tty(monkeypatch):
+    # Piped/redirected (agent or script) → JSON contract; a real terminal → human announcement.
+    monkeypatch.setattr(cli_mod.sys, "stdout", _FakeStream(tty=False))
+    assert cli_mod._interactive_human(False) is False     # non-TTY → JSON
+    assert cli_mod._interactive_human(True) is True        # --human always wins
+    monkeypatch.setattr(cli_mod.sys, "stdout", _FakeStream(tty=True))
+    assert cli_mod._interactive_human(False) is True       # interactive terminal → human
+
+
 def test_cli_json_outdated(monkeypatch):
     _stub_version(monkeypatch, "0.1.0")
     monkeypatch.setattr(update_check, "_fetch_latest_tag", lambda: "0.2.0")

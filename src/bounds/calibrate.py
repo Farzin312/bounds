@@ -193,17 +193,24 @@ def _baseline_path(project_root: Path) -> Path:
     return config.config_dir(project_root) / config.DRIFT_BASELINE_FILE
 
 
-def _load_baseline(project_root: Path) -> set[str]:
-    """The committed baseline drift keys, or an empty set when no baseline exists yet."""
+def _load_baseline(project_root: Path) -> tuple[set[str], bool]:
+    """Return ``(drift_keys, valid)`` for the committed baseline.
+
+    ``valid`` is True only when the file exists AND parses to the expected shape. A missing,
+    unreadable, or malformed baseline yields ``(set(), False)`` so the caller treats it as
+    absent rather than as an empty (everything-is-new) baseline that exists — fail-soft, no raise.
+    """
     path = _baseline_path(project_root)
     if not path.is_file():
-        return set()
+        return set(), False
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return set()
+        return set(), False
     drift = data.get("drift") if isinstance(data, dict) else None
-    return {str(k) for k in drift} if isinstance(drift, list) else set()
+    if not isinstance(drift, list):
+        return set(), False
+    return {str(k) for k in drift}, True
 
 
 def _current_proposals(project_root: Path, subsystem: str | None) -> dict[str, dict]:
@@ -241,8 +248,7 @@ def check_drift(project_root: Path, *, subsystem: str | None = None) -> dict:
     resolving pre-existing drift never fails the check.
     """
     current = drift_keys(_current_proposals(project_root, subsystem))
-    baseline = _load_baseline(project_root)
-    has_baseline = _baseline_path(project_root).is_file()
+    baseline, has_baseline = _load_baseline(project_root)  # has_baseline ⇒ present AND valid
     new_drift = sorted(set(current) - baseline)
     resolved = sorted(baseline - set(current))
     ok = not new_drift

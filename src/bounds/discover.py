@@ -31,6 +31,7 @@ from pathlib import Path
 import yaml
 
 from . import config, errors, gitutil
+from .extract import adapter_for_language
 from .extract.scan import extract_file, iter_repo_source
 from .ignore import load_matcher
 from .validate.checks import index_extracts, resolve_import
@@ -289,18 +290,39 @@ def _score(n: int) -> str:
     return "low"
 
 
+def _schema_extensions() -> set[str]:
+    """File extensions whose adapter is a schema (SQL/Prisma) language, from the registry."""
+    exts: set[str] = set()
+    for lang in SCHEMA_LANGUAGES:
+        adapter = adapter_for_language(lang)
+        if adapter is not None:
+            exts.update(adapter.extensions)
+    return exts
+
+
 def _is_schema_candidate(files: list[str], extracts: dict) -> bool:
-    """True when a candidate's extracted files are predominantly SQL/Prisma schema DDL.
+    """True when a candidate's files are predominantly SQL/Prisma schema DDL.
 
     Such a directory (a migration set, or a ``schema.sql`` snapshot) is always kept: the
     subsystem-level schema fold collapses any number of migrations into a single table
     surface, so the per-file count that scores ordinary code dirs carries no signal here.
+
+    Classification falls back to file EXTENSION when a file isn't in ``extracts`` — a
+    wholly-unparsable migration extracts to ``None`` and would otherwise vanish from the
+    language tally, mislabeling a real migration dir as non-schema and dropping it. Counting
+    such a ``.sql``/``.prisma`` file as schema preserves the "always keep schema dirs" guarantee
+    even when some migrations don't parse.
     """
-    langs = [extracts[rel].language for rel in files if rel in extracts]
-    if not langs:
-        return False
-    schema_n = sum(1 for lang in langs if lang in SCHEMA_LANGUAGES)
-    return schema_n >= 1 and schema_n * 2 >= len(langs)  # schema-dominant (≥ half)
+    schema_exts = _schema_extensions()
+    schema_n = 0
+    for rel in files:
+        result = extracts.get(rel)
+        if result is not None:
+            is_schema = result.language in SCHEMA_LANGUAGES
+        else:  # extraction failed (e.g. unparsable SQL) — fall back to the extension
+            is_schema = Path(rel).suffix.lower() in schema_exts
+        schema_n += is_schema
+    return schema_n >= 1 and schema_n * 2 >= len(files)  # schema-dominant (≥ half)
 
 
 def _infer_role(consumed_by: int, consumes_count: int) -> str:

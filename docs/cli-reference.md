@@ -22,14 +22,14 @@ list and severity/exit-code mapping.
 |---------|-----------------|
 | `bounds init` | Scaffolds `.bounds/`. `--root` (flag — writes `root.yaml`), `--subsystem <name>`, `--namespace <ns>` |
 | `bounds list` | Agent starting map: all subsystems with role, criticality, exposes, consumes, consumed_by. `--namespace <ns>` filters |
-| `bounds describe <name>` | Agent context slice: one subsystem's merged Tier-1+2 surface as JSON. Per-expose `name`/`kind`/`file`/`verified`; table exposes include `columns`; subsystem-level `tables`/`consumes`/`consumed_by`/`entry_points`/`validation_status`. `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
+| `bounds describe <name>` | Agent context slice: one subsystem's merged Tier-1+2 surface as JSON. Per-expose `name`/`kind`/`file`/`verified`; table exposes include `columns`; subsystem-level `tables`/`consumes`/`consumed_by`/`entry_points`/`validation_status`. Token-lean by default — the file roster shows as `file_count` and schema objects as `schema_object_counts` (by kind); `--full` adds the complete `files` + `schema_objects` lists. `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
 | `bounds impact <name>` | Pre-edit blast radius for a subsystem, interface, or table + which interfaces each direct consumer relies on. Zero LLM |
 | `bounds validate` | Post-edit drift check — all 7 checks. `--quick`, `--mode quick\|full\|preflight\|hotfix\|audit`, `--enforce on\|off\|warn`, `--base <ref>` |
 | `bounds preflight` | Blocking CI gate: 7 pre-PR checks |
 | `bounds overview` | Project dashboard: `project`, subsystem count, `roles`/`criticality` breakdown, dependency `edges` (from/to/interfaces), `cycles`, `schema_issues`, and a `health` summary (`ok`/`schema_errors`/`cycles`) |
 | `bounds discover` | Auto-generate candidate manifests from un-bounded source. `--apply`, `--namespace <ns>`, `--merge-into 'name=p1,p2'` |
 | `bounds calibrate` | Reconcile manifests vs tree-sitter reality (ADD / REMOVE / NEEDS_REVIEW / `consumes` fixes). `--apply`, `--subsystem <n>`, `--check` (CI freshness gate: exits non-zero on NEW drift above the committed baseline, never writes), `--dump-baseline` (record current drift as accepted in `.bounds/drift-baseline.json`) |
-| `bounds agent` | Wire Bounds into eight coding agents so they query `list`/`describe`/`impact` before broad source search. `--sync`, `--detect`, `--check`, per-agent flags |
+| `bounds agent` | Wire Bounds into eight coding agents so they query `list`/`describe`/`impact` before broad source search. `--sync`, `--detect`, `--check`, per-agent flags. Interactive `--sync` (in a terminal, no tool flags) prompts which tools to wire (pre-checked = detected) instead of writing all eight; `--all` wires every agent without prompting; piped/CI runs wire all. The canonical `AGENTS.md` is always written |
 | `bounds ci` | Generate CI gate config to enforce the agent workflow. `--install`, `--action`, `--precommit`, `--gitlab`, `--all` |
 | `bounds cache` | Manage the binary `.bounds/cache.db`. `--inspect`, `--prune`, `--migrate` |
 | `bounds upgrade` | Opt-in self-upgrade through pipx. Defaults to GitHub `main`; `--ref <tag-or-branch>`, `--local <path>`, and `--dry-run` are available |
