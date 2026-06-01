@@ -234,23 +234,26 @@ def _symbols_from_statement(stmt, source: bytes) -> list[Symbol]:
     return _alter_symbols(ddl, table, source, line)
 
 
-def _policies_from_error(node, source: bytes) -> list[Symbol]:
-    """Recover ``CREATE POLICY`` symbols from a single ERROR node's text.
+def _policies_from_error(node, source: bytes) -> tuple[list[Symbol], list[tuple[int, int]]]:
+    """Recover ``CREATE POLICY`` symbols + their source spans from one ERROR node.
 
     Scoped to the ERROR node only (never whole-file text): tree-sitter classifies comments
     and string literals as their own node types, so a commented-out or string-embedded
-    ``create policy`` is never an ERROR and can't produce a phantom symbol. Returns [] when
-    the node isn't a policy (e.g. a genuinely broken statement), so the caller still counts
-    it as unparsed.
+    ``create policy`` is never an ERROR and can't produce a phantom symbol. The returned spans
+    (each statement from its ``create`` to the next ``;``) let the caller blank policies and
+    re-parse, so a genuinely broken statement fused into the same ERROR node still reports.
     """
-    text = _text(node, source)
     out: list[Symbol] = []
-    for m in _POLICY_RE.finditer(text):
+    spans: list[tuple[int, int]] = []
+    for m in _POLICY_RE.finditer(_text(node, source)):
         name = _strip(m.group("name"))
         table = _strip(m.group("table"))
         out.append(Symbol(f"{table}.{name}", "policy", _line(node), exported=False,
                           metadata={"schema_op": "create_policy", "table": table, "policy": name}))
-    return out
+        start = node.start_byte + m.start()
+        semi = source.find(b";", start)
+        spans.append((start, semi + 1 if semi != -1 else node.end_byte))
+    return out, spans
 
 
 _HEADER_RULES = ((_REV_RE, "revision"), (_DOWN_RE, "down_revision"), (_ORDER_RE, "order"))
@@ -299,13 +302,25 @@ def _residual_unparsed(error_lines: list[int], rls_lines: set[int]) -> int:
     return residual
 
 
-def _scan_file(root, source: bytes) -> tuple[list[Symbol], int]:
-    """Walk top-level nodes into (symbols, genuine-unparsed-count). Per-statement fail-soft."""
+def _blank_spans(source: bytes, spans: list[tuple[int, int]]) -> bytes:
+    """Overwrite each ``[start, end)`` byte range with spaces, preserving newlines (so line
+    numbers and offsets are unchanged) — used to erase recovered policies before re-parsing."""
+    buf = bytearray(source)
+    for start, end in spans:
+        for i in range(start, min(end, len(buf))):
+            if buf[i] != 0x0A:  # keep '\n' so line numbers stay aligned
+                buf[i] = 0x20
+    return bytes(buf)
+
+
+def _walk(root, source: bytes) -> tuple[list[Symbol], list[int], list[tuple[int, int]]]:
+    """One pass over top-level nodes → (symbols, error_lines, recovered-policy spans)."""
     symbols: list[Symbol] = []
+    error_lines: list[int] = []
+    policy_spans: list[tuple[int, int]] = []
     meta = _revision_meta(root, source)
     if meta is not None:
         symbols.append(meta)
-    error_lines: list[int] = []
     for node in root.named_children:
         if node.type == "statement":
             if node.has_error:  # one bad statement: skip it, keep its siblings
@@ -313,14 +328,29 @@ def _scan_file(root, source: bytes) -> tuple[list[Symbol], int]:
             else:
                 symbols.extend(_symbols_from_statement(node, source))
         elif node.type == "ERROR":
-            # A `CREATE POLICY` lands here (no grammar): recover it from THIS node's text and
-            # treat the node as explained. A genuinely broken statement doesn't match, so it
-            # still counts — no masking.
-            policies = _policies_from_error(node, source)
+            # A `CREATE POLICY` lands here (no grammar). Recover it and record its span; a
+            # genuinely broken statement doesn't match and still counts as an error.
+            policies, spans = _policies_from_error(node, source)
             if policies:
                 symbols.extend(policies)
+                policy_spans.extend(spans)
             else:
                 error_lines.append(_line(node))
+    return symbols, error_lines, policy_spans
+
+
+def _scan_file(root, source: bytes) -> tuple[list[Symbol], int]:
+    """Walk top-level nodes into (symbols, genuine-unparsed-count). Per-statement fail-soft.
+
+    Policies have no grammar, so they surface as ERROR nodes that tree-sitter may *fuse* with
+    an adjacent broken statement. To avoid masking that real error, when policies were
+    recovered we blank their spans and re-parse: the residual error count then reflects only
+    genuinely-unparsable SQL (RLS remnants still discounted by line).
+    """
+    symbols, error_lines, policy_spans = _walk(root, source)
+    if policy_spans:
+        blanked = _blank_spans(source, policy_spans)
+        _, error_lines, _ = _walk(_parser().parse(blanked).root_node, blanked)
     rls_lines = {s.line for s in symbols if s.kind == "rls"}
     return symbols, _residual_unparsed(error_lines, rls_lines)
 

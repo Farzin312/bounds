@@ -306,6 +306,17 @@ def test_sql_genuine_error_beside_policy_is_not_masked():
     assert any(s.kind == "table" for s in res.symbols)  # the valid statement still folds
 
 
+def test_sql_broken_statement_fused_into_policy_error_is_not_masked():
+    # tree-sitter fuses a CREATE POLICY and an adjacent broken statement into ONE ERROR node.
+    # Recovering the policy must NOT mark the whole node "explained" and swallow the real
+    # error: the adapter blanks recovered policies and re-parses to recount genuine errors.
+    src = b"create policy p on t for all using (true);\nalter table t add column;\n"
+    res = get_adapter("f.sql").extract("f.sql", src)
+    kinds = {s.kind for s in res.symbols}
+    assert "policy" in kinds          # policy still recovered
+    assert "schema_error" in kinds    # the fused broken statement still reports
+
+
 def test_sql_all_error_with_revision_header_is_hard_failure():
     # A migration whose body is wholly unparsable is a hard extraction failure even when it
     # carries a valid `-- revision` header: the schema_meta header is not a parsed statement,
