@@ -99,6 +99,16 @@ def _run(human: bool, fn, ci: bool = False):
         sys.exit(config.EXIT_FATAL)
 
 
+def _interactive_human(explicit_human: bool) -> bool:
+    """Whether an interactive maintenance command should render the human announcement.
+
+    `upgrade`/`upgrade-check` are run by a person, not consumed by an agent, so they default
+    to the human view in a terminal while still honoring the JSON-first contract when piped
+    or redirected (an agent/script captures non-TTY output). `--human` always forces human.
+    """
+    return explicit_human or sys.stdout.isatty()
+
+
 def _version_display(raw: str) -> str:
     """A coherent ``--version`` string: a clean release reads as-is; an untagged build is
     labelled so ``0.1.dev21`` doesn't look like a broken release number to a user."""
@@ -670,15 +680,19 @@ def cache_cmd(do_migrate: bool, do_prune: bool, do_inspect: bool, human: bool) -
 @_human
 def upgrade_cmd(ref: str, local: Path | None, dry_run: bool, human: bool) -> None:
     """Upgrade a stale Bounds CLI through pipx."""
+    # `upgrade` is an interactive maintenance action a person runs, not data an agent
+    # consumes — so default to the human announcement in a terminal, and only fall back to
+    # the JSON contract when piped/redirected (an agent or script captures non-TTY output).
+    show_human = _interactive_human(human)
 
     def go() -> None:
         msg = "upgrading bounds..." if not dry_run else ""
-        with _Spinner(msg) if (human and not dry_run) else nullcontext():
+        with _Spinner(msg) if (show_human and not dry_run) else nullcontext():
             payload = upgrade_mod.run_upgrade(ref=ref, local=local, dry_run=dry_run)
-        output.emit(payload, human)
+        output.emit(payload, show_human)
         sys.exit(config.EXIT_OK if payload.get("ok") else config.EXIT_BLOCKED)
 
-    _run(human, go)
+    _run(show_human, go)
 
 
 # ===========================================================================
@@ -689,12 +703,15 @@ def upgrade_cmd(ref: str, local: Path | None, dry_run: bool, human: bool) -> Non
 def upgrade_check_cmd(human: bool) -> None:
     """Check whether a newer Bounds release is available (opt-in; makes a network call)."""
 
+    # Interactive check: human announcement in a terminal, JSON when piped (see `upgrade`).
+    show_human = _interactive_human(human)
+
     def go() -> None:
         # Informational only: being outdated is never an error, and the check fails
         # soft when offline, so this command always exits 0.
-        output.emit(update_check.check(), human)
+        output.emit(update_check.check(), show_human)
 
-    _run(human, go)
+    _run(show_human, go)
 
 
 if __name__ == "__main__":  # pragma: no cover
