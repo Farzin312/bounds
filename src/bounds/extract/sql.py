@@ -77,20 +77,21 @@ _CONTAINER_TYPES = {"transaction"}
 # any multibyte identifier).
 _ID = rb'"[^"]+"|`[^`]+`|\[[^\]]+\]|\w+'
 _QUALIFIED = rb"(?:" + _ID + rb")(?:\s*\.\s*(?:" + _ID + rb"))*"
+# The shared `<name> ON <table>` tail of every policy statement (one home for the fragment).
+_NAME_ON_TABLE = rb"(?P<name>" + _ID + rb")\s+on\s+(?P<table>" + _QUALIFIED + rb")"
 
 # Postgres RLS dialect — recovered from comment-masked source (no grammar). All are anchored
 # on the statement keyword so a substring inside an identifier can't match.
 _POLICY_CREATE_RE = re.compile(
-    rb"\bcreate\s+policy\s+(?:if\s+not\s+exists\s+)?(?P<name>" + _ID + rb")\s+on\s+(?P<table>" + _QUALIFIED + rb")",
+    rb"\bcreate\s+policy\s+(?:if\s+not\s+exists\s+)?" + _NAME_ON_TABLE,
     re.IGNORECASE,
 )
 _POLICY_DROP_RE = re.compile(
-    rb"\bdrop\s+policy\s+(?:if\s+exists\s+)?(?P<name>" + _ID + rb")\s+on\s+(?P<table>" + _QUALIFIED + rb")",
+    rb"\bdrop\s+policy\s+(?:if\s+exists\s+)?" + _NAME_ON_TABLE,
     re.IGNORECASE,
 )
 _POLICY_ALTER_RE = re.compile(
-    rb"\balter\s+policy\s+(?P<name>" + _ID + rb")\s+on\s+(?P<table>" + _QUALIFIED + rb")"
-    rb"(?:\s+rename\s+to\s+(?P<to>" + _ID + rb"))?",
+    rb"\balter\s+policy\s+" + _NAME_ON_TABLE + rb"(?:\s+rename\s+to\s+(?P<to>" + _ID + rb"))?",
     re.IGNORECASE,
 )
 _RLS_RE = re.compile(
@@ -105,11 +106,14 @@ _RLS_RE = re.compile(
 # body must never be mistaken for real DDL. The backreference requires a matching close tag.
 _DOLLAR_QUOTE_RE = re.compile(rb"\$(\w*)\$[\s\S]*?\$\1\$")
 
-# "Does this file intend any DDL?" — used to tell a non-schema file (seed/cron/grant: not a
-# failure) from a DDL-bearing parse failure (real loss, reported). Matched on masked source.
+# "Does this file intend any DDL *we model*?" — used to tell a non-schema file (seed/cron/grant)
+# from a DDL-bearing parse failure (real loss, reported). Lists exactly the object kinds the
+# fold materializes; a `CREATE SCHEMA` / `CREATE EXTENSION` (real DDL we don't model) parses
+# fine and simply has no table surface, so it must NOT count as intent and hard-fail. Matched on
+# the comment/string/body-masked source.
 _DDL_INTENT_RE = re.compile(
     rb"\b(?:create|alter|drop)\s+(?:materialized\s+view|table|policy|index|"
-    rb"unique\s+index|trigger|view|function|type|schema)\b"
+    rb"unique\s+index|trigger|view|function|type)\b"
     rb"|\brow\s+level\s+security\b",
     re.IGNORECASE,
 )

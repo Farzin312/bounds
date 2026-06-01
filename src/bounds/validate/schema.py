@@ -26,8 +26,13 @@ from ..models import ExtractResult
 SCHEMA_LANGUAGES = frozenset({"sql", "prisma"})
 
 # Order-sensitive ops: if a subsystem has several unordered migrations carrying any of
-# these, the fold result depends on order and we should warn (E_SCHEMA_NO_ORDER).
-_ORDER_SENSITIVE = {"add_column", "drop_column", "drop_table", "rename_table", "rename_column"}
+# these, the fold result depends on order and we should warn (E_SCHEMA_NO_ORDER). Includes the
+# non-table lifecycle ops (a DROP/ALTER POLICY or a DISABLE/NO FORCE RLS) now that policies and
+# RLS fold — a lone CREATE/ENABLE is order-independent (like CREATE TABLE) and is excluded.
+_ORDER_SENSITIVE = {
+    "add_column", "drop_column", "drop_table", "rename_table", "rename_column",
+    "drop_policy", "alter_policy", "disable_rls", "no_force_rls",
+}
 
 
 @dataclass
@@ -270,7 +275,9 @@ def _fold_subsystem_objects(
             elif sym.kind == "rls":
                 entry = rls.setdefault(sym.name, {"table": sym.name, "enabled": False, "files": set()})
                 entry["files"].add(rel)
-                entry["enabled"] = meta.get("schema_op") in ("enable_rls", "force_rls")
+                # RLS is enabled by ENABLE/FORCE and stays enabled under NO FORCE (which only
+                # clears the owner-bypass exemption); only DISABLE turns it off.
+                entry["enabled"] = meta.get("schema_op") != "disable_rls"
     return _ObjectsFold(dedup, policies, rls)
 
 

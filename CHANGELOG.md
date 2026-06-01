@@ -6,7 +6,7 @@
 
 - **SQL schema extraction — major coverage + reporting fixes.** Verified on a real 289-migration Supabase schema:
   - **Transaction-wrapped DDL was silently dropped.** The walk now descends into `BEGIN; … COMMIT;` blocks, recovering tables, columns, functions, policies, and RLS that were lost in ~⅓ of migrations. On the test corpus: tables 103→114, functions 2→72, indexes 304→357, triggers 26→52.
-  - **`describe.unparsed_files` cried wolf.** A no-DDL `.sql` file (a seed `INSERT`, a `GRANT`/`REVOKE`, a `SELECT cron.schedule(…)`) was reported as "unparsed". It now extracts cleanly to empty symbols and is never flagged; only files that genuinely lost DDL are reported (`unparsed_files` 72→30). A parse error in a non-DDL statement no longer raises `E_SCHEMA_UNPARSED`.
+  - **`describe.unparsed_files` cried wolf.** A no-DDL `.sql` file (a seed `INSERT`, a `GRANT`/`REVOKE`, a `SELECT cron.schedule(…)`, or a `CREATE SCHEMA`/`CREATE EXTENSION`-only migration) was reported as "unparsed". It now extracts cleanly to empty symbols and is never flagged; only files that genuinely lost DDL are reported (`unparsed_files` 72→25). A parse error in a non-DDL statement no longer raises `E_SCHEMA_UNPARSED`.
   - **Tables created `public.x` but altered bare were split.** Every table reference now canonicalises to its bare name, so all ops fold to one catalog entry.
   - **Tables with a table-level `CONSTRAINT … UNIQUE/CHECK (…)`** (which tree-sitter-sql can't parse) are now recovered best-effort with their columns, instead of losing the whole table.
 - **Prisma adapter** — relation fields (`posts Post[]`, `author User`, `profile Profile?`) are no longer captured as columns. Only scalar types produce column entries, preventing phantom columns in `bounds describe` and false passes in column-granular `check_contract`.
@@ -14,7 +14,7 @@
 
 ### Changed
 
-- **Policies and RLS now fold like tables.** `schema_objects` applies `CREATE`/`ALTER`/`DROP POLICY` and `ENABLE`/`DISABLE`/`FORCE ROW LEVEL SECURITY` in migration order, so a dropped policy or disabled table nets out of the reported surface (was a flat dedup that ignored drops). Live policy/RLS coverage on the test corpus: policies 175→275, RLS 98→122.
+- **Policies and RLS now fold like tables.** `schema_objects` applies `CREATE`/`ALTER`/`DROP POLICY` and `ENABLE`/`DISABLE`/`FORCE`/`NO FORCE ROW LEVEL SECURITY` in migration order, so a dropped policy or disabled table nets out of the reported surface (was a flat dedup that ignored drops). Live policy/RLS coverage on the test corpus: policies 175→275, RLS 98→122. Because the result now depends on order, an unordered migration set carrying policy/RLS lifecycle ops (e.g. a `DROP POLICY` with no filename prefix / revision chain) now correctly surfaces `E_SCHEMA_NO_ORDER`.
 - **`config.STATE_VERSION` 1→2.** SQL extraction output changed for unchanged source, so every existing binary `cache.db` is treated as version-mismatched and rebuilt on the next run (no stale symbols). `schema_hash` for a Postgres schema changes accordingly (the folded surface is now more complete) — it remains deterministic and byte-stable across runs.
 
 ### Added

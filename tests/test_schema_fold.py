@@ -157,6 +157,16 @@ def test_no_ddl_garbage_is_not_a_failure():
     assert not res.symbols
 
 
+def test_create_schema_only_migration_is_not_a_failure():
+    # A valid migration that only does CREATE SCHEMA / CREATE EXTENSION (real DDL Bounds does
+    # not model into a table surface) must NOT hard-fail — it parsed, it just has no tables.
+    for src in (b"CREATE SCHEMA IF NOT EXISTS private;\n",
+                b"CREATE EXTENSION IF NOT EXISTS pg_trgm;\n"):
+        res = get_adapter("x.sql").extract("x.sql", src)
+        assert res.error is None, src
+        assert not [s for s in res.symbols if s.kind == "schema_error"]
+
+
 # ---- deterministic hash ----
 def test_schema_structure_hash_is_stable_and_order_insensitive():
     a = _extracts({"001.sql": b"CREATE TABLE t (id int, a int);"})
@@ -243,6 +253,28 @@ def test_rls_posture_classifies_tables():
     assert posture["rls_without_policy_tables"] == ["locked"]
     assert posture["unprotected_tables"] == ["open"]
     assert posture["tables"] == 3 and posture["rls_enabled"] == 2
+
+
+def test_unordered_policy_lifecycle_flags_no_order():
+    # Policies/RLS fold, so an unordered set with a DROP/ALTER POLICY (or DISABLE RLS) and no
+    # deterministic order basis must surface E_SCHEMA_NO_ORDER — the fold result depends on order.
+    extracts, fo = _extracts({
+        "a.sql": b"drop policy p on t;\n",
+        "b.sql": b"create table t (id int);\ncreate policy p on t for all using (true);\n",
+    })
+    codes = {c for c, _, _ in schema_diagnostics("db", extracts, fo)}
+    assert "E_SCHEMA_NO_ORDER" in codes
+
+
+def test_no_force_rls_keeps_rls_enabled():
+    # NO FORCE clears only the owner-bypass exemption; RLS stays enabled.
+    extracts, fo = _extracts({
+        "001.sql": b"create table t (id int);\n"
+                   b"alter table t enable row level security;\n"
+                   b"alter table t no force row level security;\n",
+    })
+    rls = {o["name"] for o in schema_objects("db", extracts, fo) if o["kind"] == "rls"}
+    assert rls == {"t"}  # still enabled, not dropped
 
 
 def test_rls_posture_empty_when_schema_has_no_rls():
