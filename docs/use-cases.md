@@ -42,7 +42,7 @@ You're asked to rename `auth.verify` to `auth.verify_token`. Before touching any
 2. `bounds describe frontend` confirms how `frontend` declares its dependency on that interface — a
    compact contract (a few hundred tokens for a small subsystem) instead of opening the `frontend/` source tree.
 3. You make the rename and update the three consumer manifests.
-4. `bounds preflight` runs the 6 checks; if you missed a consumer, it fails with the orphaned import
+4. `bounds preflight` runs the 7 checks; if you missed a consumer, it fails with the orphaned import
    named and a fix suggested.
 
 The agent never had to read `billing/`, `api/`, and `frontend/` to learn it was about to break them.

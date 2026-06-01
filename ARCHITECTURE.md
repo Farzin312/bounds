@@ -72,7 +72,7 @@ bounds/
 │           ├── engine.py          # mode dispatch + orchestration
 │           ├── propagation.py     # reference propagation (consumers of changed providers) + transitive_consumers
 │           ├── schema.py          # deterministic per-subsystem SQL/Prisma schema fold
-│           └── checks.py          # the 6 structural checks + schema-health advisory + import resolution
+│           └── checks.py          # the 7 checks + schema-health advisory + import resolution
 └── tests/                         # the full suite (CI reports the live count)
     ├── conftest.py
     ├── test_extract.py
@@ -649,17 +649,17 @@ consumes:
 
 | Mode | When | Files | Checks | Blocking |
 |------|------|-------|--------|----------|
-| `quick` | every commit/PR | git-diff ∩ subsystems | drift, cross-impact | warning only |
-| `full` | structure changes | all subsystem files | all 6 | iff `enforce=on` |
-| `preflight` | pre-push | all | all 6 | always |
+| `quick` | every commit/PR | git-diff ∩ subsystems | drift, cross-impact, schema, adapter-contracts | warning only |
+| `full` | structure changes | all subsystem files | all 7 | iff `enforce=on` |
+| `preflight` | pre-push | all | all 7 | always |
 | `hotfix` | emergency | — | none | never (always ok) |
-| `audit` | weekly | all | all 6 | never (report) |
+| `audit` | weekly | all | all 7 | never (report) |
 
 `bounds validate` defaults to `full`. `--quick` → quick. `--mode M` explicit. `bounds preflight` → preflight mode. In `quick` mode every issue is downgraded to a `warning` (advisory, never blocks) — except `--fail-on-unowned`, which stays a hard gate in any mode.
 
 ---
 
-## 7. The 6 checks (logic)
+## 7. The 7 checks (logic)
 
 1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files plus any surviving tables from the subsystem's SQL/Prisma schema fold. Declared-but-missing → drift (`error`); a column-granular expose (`users.email`) is resolved against the fold (table exposed **and** column still present), so a dropped column drifts in both the exposes and consumes directions. Undeclared-but-exported (a symbol/table in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (bidirectional drift; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). The `info` severity never blocks, so exit codes are unchanged. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
 2. **Boundary compliance** (`E_BOUNDARY_VIOLATION`, error): for each import in subsystem A resolving to a file owned by subsystem B, the imported names must all be in B's `exposes`. Importing a non-exposed (internal) symbol → violation. Resolution: match import `module` against B's file paths (suffix/relative resolution). Fix: "import only B's exposed interfaces, or add `<name>` to B.exposes".
@@ -667,6 +667,8 @@ consumes:
 4. **Cross-subsystem impact** (`E_STALE_INTERFACE`, error/stale): a provider's `structure_hash` changed (it's in `dirty`) and it has consumers (`consumed_by`) → those consumer interfaces may be stale. Emits one issue per affected consumer. Fix: "re-validate consumer `<C>`; provider `<B>` interface surface changed".
 5. **Cycle detection** (`E_CYCLE_DETECTED`, error): build the directed graph from `consumes`; DFS for back-edges; report each cycle as a chain `A → B → C → A`. Fix: "break the dependency cycle; introduce an interface/inversion".
 6. **Orphan detection** (`E_ORPHAN_EXPORT`, warning): an exposed interface that appears in no subsystem's `consumes`, where the owning subsystem's role does **not** carry `orphan_exposes` (the `service` base, and any custom role extending it, legitimately expose unconsumed surface — resolved via `RootManifest.role_registry()`). Fix: "interface `<x>` of `<A>` is consumed by no one; consider removing or marking entrypoint".
+
+7. **Adapter output contracts** (`E_ADAPTER_CONTRACT`, warning): for every extracted file, the owning adapter's `check_contract()` inspects the output against its declared self-consistency invariants. Pure regression guard (zero LLM, no tree-sitter re-parse, no filesystem read — operates only on the already-built `ExtractResult`). Catches adapter logic regressions that extraction alone would silently pass — e.g., a Prisma relation field leaking as a column, or an all-unparsable SQL migration whose revision header masked the failure. Always advisory (warning only, never blocks). Runs in `quick`/`full`/`preflight`/`audit`.
 
 Plus one **schema-health advisory** (`check_schema`, warnings only — never blocks): a migration statement that didn't parse → `E_SCHEMA_UNPARSED` (the file's other statements still folded); order-dependent migrations with no deterministic order → `E_SCHEMA_NO_ORDER`. Runs in `quick`/`full`/`preflight`/`audit`.
 
@@ -696,6 +698,7 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do) |
 | `E_UNSUPPORTED_LANGUAGE` | warning | file extension has no adapter (skipped) |
 | `E_EXTRACTION_FAILED` | warning | could not extract a file — tree-sitter parse error, unreadable, or over `MAX_FILE_BYTES`. An OWNED file is never silently dropped; it always emits this. |
+| `E_ADAPTER_CONTRACT` | warning | adapter output violated its declared self-consistency contract — a Prisma relation field leaked as a column, or an all-unparsable SQL migration with a revision header that masked the failure. Advisory only (never blocks). |
 
 Codes are a public contract — never renumber, rename, or repurpose; only add. The full registry, with the advisory `SEVERITY` map, lives in `errors.py`.
 

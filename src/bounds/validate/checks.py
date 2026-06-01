@@ -1,4 +1,4 @@
-"""The 6 structural checks (+ a schema-health advisory) + the CheckContext they run against + the per-mode dispatch table.
+"""The 7 checks (six structural + the adapter-output-contract advisory) + a schema-health advisory + the CheckContext they run against + the per-mode dispatch table.
 
 Every check is a pure function ``(CheckContext) -> list[Issue]``. None of them read the filesystem or
 call tree-sitter — they operate on the already-extracted results and the loaded manifests. All produced
@@ -13,6 +13,7 @@ from pathlib import Path
 from posixpath import normpath
 
 from .. import errors
+from ..extract import get_adapter
 from ..extract.scan import strip_ext
 from ..models import ExtractResult, Issue, RootManifest, SubsystemCompact
 from .schema import SCHEMA_LANGUAGES, _fold_subsystem_schema, schema_diagnostics
@@ -511,6 +512,32 @@ def check_schema(ctx: CheckContext) -> list[Issue]:
 
 
 # ===========================================================================
+# Check 8 — adapter output contracts (advisory; warnings only, never blocks)
+# ===========================================================================
+def check_adapter_contracts(ctx: CheckContext) -> list[Issue]:
+    """Run each adapter's self-consistency contract against its own extracted output.
+
+    A pure regression guard (zero LLM; no tree-sitter parse, no filesystem read — it
+    only inspects already-built ``ExtractResult``s): for every extracted file it resolves
+    the owning adapter by extension and asks it to validate its own output. Catches the
+    class of bug that adapter logic alone can silently regress on — a Prisma relation
+    field leaking in as a column, or an all-unparsable SQL migration whose revision header
+    masked the failure (the two PR #20 escapes). Always advisory (``E_ADAPTER_CONTRACT``
+    is a warning in ``errors.SEVERITY``), so it never changes exit codes.
+    """
+    issues: list[Issue] = []
+    for rel in sorted(ctx.extracts):
+        adapter = get_adapter(rel)
+        if adapter is None:
+            continue
+        for issue in adapter.check_contract(ctx.extracts[rel]):
+            if issue.subsystem is None:
+                issue.subsystem = ctx.file_owner.get(rel)
+            issues.append(issue)
+    return issues
+
+
+# ===========================================================================
 # Mode dispatch
 # ===========================================================================
 _ALL = [
@@ -521,10 +548,11 @@ _ALL = [
     check_cycles,
     check_orphans,
     check_schema,
+    check_adapter_contracts,
 ]
 
 CHECKS_BY_MODE = {
-    "quick": [check_structural_drift, check_cross_impact, check_schema],
+    "quick": [check_structural_drift, check_cross_impact, check_schema, check_adapter_contracts],
     "full": list(_ALL),
     "preflight": list(_ALL),
     "audit": list(_ALL),

@@ -26,7 +26,7 @@ except Exception as exc:  # pragma: no cover - exercised only when the wheel is 
     tssql = None  # type: ignore[assignment]
     _IMPORT_ERROR = str(exc)
 
-from ..models import ExtractResult, Symbol
+from ..models import ExtractResult, Issue, Symbol
 from .base import LanguageAdapter, make_result
 
 _LANG = None
@@ -175,6 +175,38 @@ def _revision_meta(root, source: bytes) -> Symbol | None:
 class SqlAdapter(LanguageAdapter):
     language_name = "sql"
     extensions = (".sql",)
+    contract_description = (
+        "A file whose every statement is unparsable is a hard parse failure "
+        "(empty symbols + result.error), even when a leading '-- revision:' header "
+        "is present — the header is a signal, not a parsed statement, so it must not "
+        "mask an all-error migration into a partial result."
+    )
+
+    def check_contract(self, result: ExtractResult) -> list[Issue]:
+        """Catch an all-unparsable migration whose revision header masked the failure.
+
+        A leading ``-- revision:`` / ``-- bounds:order N`` header is captured as a
+        ``schema_meta`` signal, not a parsed statement; it must not let an otherwise
+        wholly-unparsable file fold to a partial (empty) result. :meth:`extract` already
+        converts that case to a hard ``result.error`` (clearing symbols); this *output*
+        check fires only if that guard regresses — a result that still carries the header
+        (``schema_meta``) and the unparsed marker (``schema_error``) with no real DDL
+        symbol and no ``error`` set.
+        """
+        kinds = {s.kind for s in result.symbols}
+        has_meta = "schema_meta" in kinds
+        has_error = "schema_error" in kinds
+        has_ddl = any(s.kind not in ("schema_meta", "schema_error") for s in result.symbols)
+        if has_meta and has_error and not has_ddl and not result.error:
+            return [self._contract_issue(
+                "SqlAdapter: every statement is unparsable but a revision header is "
+                "present and result.error is empty — the header masked an all-error file "
+                "that should be a hard parse failure",
+                file=result.path,
+                fix="an all-unparsable migration must hard-fail (empty symbols + error); "
+                    "a schema_meta header must not count as a parsed statement",
+            )]
+        return []
 
     def extract(self, rel_path: str, source: bytes) -> ExtractResult:
         if ts is None:  # grammar wheel absent: report soft, never crash the whole run

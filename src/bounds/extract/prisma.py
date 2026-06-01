@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 
-from ..models import ExtractResult, Symbol
+from ..models import ExtractResult, Issue, Symbol
 from .base import LanguageAdapter, make_result
 
 _MODEL_RE = re.compile(r"^\s*model\s+([A-Za-z_]\w*)\s*\{")
@@ -105,6 +105,48 @@ def _parse_model_body(lines: list[str], start: int) -> tuple[str | None, list[st
 class PrismaAdapter(LanguageAdapter):
     language_name = "prisma"
     extensions = (".prisma",)
+    contract_description = (
+        "Every column in a 'table' symbol is a scalar field name — never a "
+        "relation/model name. A column equal to a declared model name, or a "
+        "PascalCase column name (models/enums are PascalCase; scalar field "
+        "names are not), signals a relation field leaking into the column surface."
+    )
+
+    def check_contract(self, result: ExtractResult) -> list[Issue]:
+        """Catch relation/model fields that leaked into a model's scalar columns.
+
+        Prisma materialises only scalar fields as columns; a relation field
+        (``author User``, ``posts Post[]``) names another model/enum and is a join,
+        never a column. ``extract`` already filters these via :func:`_is_column_field`;
+        this is a belt-and-suspenders *output* check that fires if that filtering
+        regresses. Two deterministic signals: a column equal to a model name declared
+        in the same file is a definite relation leak; a PascalCase column name is a
+        model/enum reference by Prisma's own naming convention. (A relation field whose
+        leaked *name* is a plain lowercase identifier is indistinguishable from a real
+        scalar column at the output level — that deeper guard stays in the unit tests of
+        :func:`_is_column_field`.)
+        """
+        model_names = {
+            s.metadata["model"]
+            for s in result.symbols
+            if s.kind == "table" and s.metadata and s.metadata.get("model")
+        }
+        issues: list[Issue] = []
+        for sym in result.symbols:
+            if sym.kind != "table" or not sym.metadata:
+                continue
+            columns = sym.metadata.get("columns") or []
+            leaked = sorted(c for c in columns if c in model_names or c[:1].isupper())
+            if leaked:
+                issues.append(self._contract_issue(
+                    f"PrismaAdapter: table '{sym.name}' lists relation/model field(s) "
+                    f"as columns: {leaked} (scalar columns only — relations are joins, "
+                    f"not columns)",
+                    file=result.path,
+                    fix="a relation field leaked into the column surface; ensure "
+                        "_is_column_field() excludes PascalCase model/enum types",
+                ))
+        return issues
 
     def extract(self, rel_path: str, source: bytes) -> ExtractResult:
         try:
