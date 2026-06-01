@@ -56,7 +56,7 @@ tree-sitter to validate them against your real source, in both directions.
 - **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`; schema subsystems include the current table catalog folded from migrations.
 - **`bounds validate`** — catch drift the moment your code's exports stop matching the manifest. Seven checks, zero LLM.
 - **`bounds validate --quick`** — git-diff incremental validation, safe for every commit.
-- **`bounds preflight`** — run all the pre-PR checks at once: drift, boundary violations, broken contracts, dependency cycles, orphaned subsystems, and impact.
+- **`bounds preflight`** — run all the pre-PR checks at once: drift, boundary violations, broken contracts, dependency cycles, orphaned subsystems, and cross-subsystem impact.
 - **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface or a table changes.
 - **`bounds discover` / `bounds calibrate`** — set up manifests for a repo that has none in one command, then keep them honest against what tree-sitter actually finds in your source.
 - **`bounds agent --sync`** — wire Bounds into eight coding agents (Claude Code, Codex, Cursor, …) with one command.

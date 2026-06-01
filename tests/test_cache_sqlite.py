@@ -121,3 +121,27 @@ def test_corrupt_cache_yields_empty_state(tmp_path):
     _init_bounds(tmp_path)
     (tmp_path / config.BOUNDS_DIR / config.CACHE_FILE).write_bytes(b"not a database")
     assert store.load_state(tmp_path).files == {}
+
+
+def test_partial_read_rejects_stale_schema_version(tmp_path):
+    # The per-subsystem partial read must apply the same schema-version gate as the full
+    # read, so the two paths never disagree on whether a stale cache is valid.
+    import sqlite3
+
+    _init_bounds(tmp_path)
+    state = store.State()
+    state.put(_result("src/auth/a.py"), subsystem="auth")
+    store.save_state(tmp_path, state)
+
+    # Sanity: a current-schema cache reads back.
+    assert [r.path for r in store.load_subsystem_records(tmp_path, "auth")] == ["src/auth/a.py"]
+
+    # Bump the on-disk schema version past what this build accepts.
+    db = tmp_path / config.BOUNDS_DIR / config.CACHE_FILE
+    conn = sqlite3.connect(db)
+    conn.execute(f"PRAGMA user_version = {store._schema_version() + 1}")
+    conn.commit()
+    conn.close()
+
+    assert store.load_subsystem_records(tmp_path, "auth") == []
+    assert store.load_state(tmp_path).files == {}  # full read agrees

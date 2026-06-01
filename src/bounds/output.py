@@ -115,12 +115,27 @@ def _render_upgrade_check_human(payload: dict) -> str:
 
 def _render_upgrade_human(payload: dict) -> str:
     """Render a ``bounds upgrade`` result from the same JSON fields."""
-    command = " ".join(str(p) for p in payload.get("command", []))
-    lines = [payload.get("note") or "upgrade complete", f"command: {command}"]
-    if not payload.get("ok", True):
-        stderr = payload.get("stderr", "")
-        if stderr:
-            lines.append(f"stderr: {stderr}")
+    ok = payload.get("ok", True)
+    dry_run = payload.get("dry_run", False)
+
+    if dry_run:
+        command = " ".join(str(p) for p in payload.get("command", []))
+        return f"dry run — would run: {command}"
+
+    if ok:
+        version = payload.get("version")
+        source = payload.get("source", "github")
+        if source == "local":
+            where = f"local clone ({payload.get('local')})"
+        else:
+            where = f"GitHub ({payload.get('ref') or 'main'})"
+        ver_str = f" → {version}" if version else ""
+        return f"bounds upgraded from {where}{ver_str}"
+
+    stderr = (payload.get("stderr") or "").strip()
+    lines = ["upgrade failed"]
+    if stderr:
+        lines.append(stderr)
     return "\n".join(lines)
 
 
@@ -292,6 +307,14 @@ def _render_subsystem_human(payload: dict) -> str:
             columns = table.get("columns", [])
             detail = f" [{', '.join(columns)}]" if columns else ""
             lines.append(f"  - {table.get('name', '?')}{detail}")
+
+    objects = payload.get("schema_objects", [])
+    if objects:
+        lines.append("")
+        lines.append(f"schema objects ({len(objects)}):")
+        for obj in objects:
+            on = f" on {obj['table']}" if obj.get("table") else ""
+            lines.append(f"  - {obj.get('kind', '?')} {obj.get('name', '?')}{on}")
 
     consumes = payload.get("consumes", [])
     if consumes:

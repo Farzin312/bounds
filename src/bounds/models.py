@@ -211,7 +211,7 @@ class RootManifest:
 @dataclass
 class Symbol:
     name: str
-    kind: str  # function|class|const|type|interface|variable|table|column|drop|rename|schema_meta|schema_error
+    kind: str  # function|class|const|type|interface|variable|table|column|view|index|trigger|policy|rls|drop|rename|schema_meta|schema_error
     line: int
     exported: bool = True
     metadata: dict = field(default_factory=dict)

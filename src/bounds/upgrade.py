@@ -6,12 +6,16 @@ only when the user explicitly runs ``bounds upgrade``.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
 from . import config
 
 _PACKAGE_NAME = "bounds-cli"
+# A pipx install builds from git (clone + wheel build); minutes, not seconds. Generous
+# ceiling so a genuinely stuck install fails soft instead of hanging the spinner forever.
+_UPGRADE_TIMEOUT_SECONDS = 600
 
 
 def command_for(ref: str = "main", local: Path | None = None, pipx: str = "pipx") -> list[str]:
@@ -48,9 +52,8 @@ def run_upgrade(
         "local": local.as_posix() if local is not None else None,
         "dry_run": dry_run,
         "command": primary,
-        "fallback_commands": fallback_commands(ref=ref, local=local, pipx=pipx),
         "returncode": None,
-        "stdout": "",
+        "version": None,
         "stderr": "",
         "note": "",
     }
@@ -60,9 +63,8 @@ def run_upgrade(
 
     first = _run(primary)
     payload["returncode"] = first.returncode
-    payload["stdout"] = _tail(first.stdout)
-    payload["stderr"] = _tail(first.stderr)
     if first.returncode == 0:
+        payload["version"] = _extract_version(first.stdout)
         payload["note"] = "upgrade completed"
         return payload
 
@@ -72,10 +74,14 @@ def run_upgrade(
     uninstall = _run(fallback[0])
     install = _run(fallback[1])
     payload["returncode"] = install.returncode
-    payload["stdout"] = _tail("\n".join([first.stdout, uninstall.stdout, install.stdout]))
-    payload["stderr"] = _tail("\n".join([first.stderr, uninstall.stderr, install.stderr]))
     payload["ok"] = install.returncode == 0
-    payload["note"] = "upgrade completed via reinstall fallback" if payload["ok"] else "upgrade failed"
+    if payload["ok"]:
+        payload["version"] = _extract_version(install.stdout)
+        payload["note"] = "upgrade completed"
+    else:
+        all_stderr = "\n".join(filter(None, [first.stderr, uninstall.stderr, install.stderr]))
+        payload["stderr"] = _tail(all_stderr)
+        payload["note"] = "upgrade failed"
     return payload
 
 
@@ -86,9 +92,22 @@ def refresh_command() -> str:
 
 def _run(command: list[str]) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(command, capture_output=True, text=True, check=False)
+        return subprocess.run(
+            command, capture_output=True, text=True, check=False,
+            timeout=_UPGRADE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        msg = f"timed out after {_UPGRADE_TIMEOUT_SECONDS}s"
+        return subprocess.CompletedProcess(command, 124, "", msg)
     except OSError as exc:
         return subprocess.CompletedProcess(command, 127, "", str(exc))
+
+
+def _extract_version(stdout: str) -> str | None:
+    # Anchor to the known package name so an unexpected first line (multi-package or
+    # reworded pipx output) can't yield the wrong version; fall back to None.
+    m = re.search(rf"{re.escape(_PACKAGE_NAME)} ([^\s,]+)", stdout or "")
+    return m.group(1) if m else None
 
 
 def _tail(text: str, limit: int = 4000) -> str:

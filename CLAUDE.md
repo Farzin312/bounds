@@ -68,15 +68,18 @@ GitHub is the single source of truth. To prevent staleness and ensure `pipx upgr
 `extract/` tree-sitter adapters (`registry.get_adapter` dispatches by extension; `scan.py` = the
 **single home** for fs→extraction helpers — `walk_supported` (the one recursive source walk) /
 `iter_subsystem_files`/`iter_repo_source`/`extract_file`/`strip_ext`/`in_default_ignores`, shared by
-engine + describe + discover/calibrate; never copy a walk) ·
-`cache/store.py` SQLite `cache.db` (+ migration/partial-read/inspect) ·
-`validate/{engine,propagation,checks}` (`checks.resolve_import`/`build_suffix_index` = the one import
-resolver) · `describe.py` Tier-1+2 describe assembly · `cli.py` command wiring (arg-parse + one
-`go()` per command, no business logic) · `discover.py` ·
-`calibrate.py` · `agentsync.py` · `ciconfig.py` · `output.py` JSON/human emit.
+engine + describe + discover/calibrate; never copy a walk; `rawquery.py` = opt-in, advisory raw-SQL
+table refs) · `cache/store.py` SQLite `cache.db` (+ migration/partial-read/inspect) ·
+`validate/{engine,propagation,checks,schema}` (`checks.resolve_import`/`build_suffix_index` = the one
+import resolver; `schema.py` folds SQL migrations into a table catalog) · `describe.py` Tier-1+2
+describe assembly · `locate.py` backs `where`+`impact` · `cli.py` command wiring (arg-parse + one
+`go()` per command, no business logic) · `discover.py` · `calibrate.py` · `agentsync.py` ·
+`ciconfig.py` · `gitutil.py` git detection + changed-file diff (backs `--quick`) ·
+`ignore.py` `.boundsignore` + generated-code detection ·
+`update_check.py`/`upgrade.py` GitHub-release check + `pipx` self-upgrade · `output.py` JSON/human emit.
 
 Commands: `list` · `describe` · `validate` · `preflight` · `overview` · `init` · `impact` ·
-`where` · `discover` · `calibrate` · `agent` · `ci` · `cache`.
+`where` · `discover` · `calibrate` · `agent` · `ci` · `cache` · `upgrade` · `upgrade-check`.
 
 **Adding a language adapter:** subclass `extract.base.LanguageAdapter` (set `language_name`,
 `extensions`, implement `extract`), then register it in `extract/registry.py`. Use

@@ -20,7 +20,7 @@ Only the top tier ever costs a token. The core validation loop runs Tiers 1 + 2 
 
 **Tier 3 is opt-in and STUBBED in the MVP.** `bounds describe <name> --deep` is the only entry point to the semantic tier, and in this build it returns a placeholder note rather than calling an LLM (`{"semantic": {"note": "LLM enrichment (Tier 3) not enabled in this build"}}`). No structural path ever touches an LLM — that is a non-negotiable design rule, not a current limitation that might quietly change.
 
-Today, Tier 1 extraction is fully implemented for **Python and TypeScript/JavaScript**. Go and Rust adapters are on the v0.2 roadmap, Java on v0.3; until then those languages fall back to YAML-only declared files (no tree-sitter verification) or are skipped if only auto-discovered.
+Today, Tier 1 extraction is fully implemented for **Python, TypeScript/JavaScript, SQL migrations, and Prisma schemas**. Go and Rust adapters are on the v0.2 roadmap, Java on v0.3; until then those languages fall back to YAML-only declared files (no tree-sitter verification) or are skipped if only auto-discovered.
 
 ## How `describe` merges Tiers 1 + 2
 
@@ -61,7 +61,7 @@ flowchart LR
     class LLM stub;
 ```
 
-> The structural path (solid arrows) never touches an LLM. Tier 3 (dotted) — `describe --deep` — is opt-in enrichment and stubbed in the MVP; it is not part of validation. Zero LLM in the structural path: deterministic, sub-200ms, no network, no API keys.
+> The structural path (solid arrows) never touches an LLM. Tier 3 (dotted) — `describe --deep` — is opt-in enrichment and stubbed in the MVP; it is not part of validation. Zero LLM in the structural path: deterministic, no network, no API keys.
 
 The two-directional diff distinguishes three failure modes:
 
@@ -84,7 +84,7 @@ The cache is subsystem-indexed (so a caller can do partial per-subsystem reads i
 
 ## Quick mode (incremental)
 
-`bounds validate --quick` targets sub-200ms by never walking the full tree:
+`bounds validate --quick` keeps validation work sub-200ms by never walking the full tree:
 
 1. `git diff` against the base ref — find changed files.
 2. Re-extract with tree-sitter **only** for changed files; reuse the content-hash cache for the rest.

@@ -103,7 +103,13 @@ def scan_table_consumers(
             source = (project_root / rel).read_bytes()
         except OSError:
             continue
-        refs = table_refs_in_source(source, lang)
+        try:
+            refs = table_refs_in_source(source, lang)
+        except Exception:
+            # Honour the "never raises" contract and the fail-soft invariant: a
+            # tree-sitter parse failure on one advisory file is skipped, never
+            # propagated. This block is an additive heuristic, not a validation check.
+            continue
         vias = refs.get(table)
         if not vias:
             continue

@@ -60,7 +60,7 @@ bounds/
 │       │   ├── registry.py        # extension/lang → adapter resolution
 │       │   ├── scan.py            # shared filesystem→extraction helpers (discover/calibrate)
 │       │   ├── python.py          # PythonAdapter (+ SQLAlchemy/Django ORM table recognition)
-│       │   ├── sql.py             # SqlAdapter (.sql DDL statements, per-statement fail-soft)
+│       │   ├── sql.py             # SqlAdapter (.sql DDL: tables/cols/functions/views/indexes/triggers/types + RLS, per-statement fail-soft)
 │       │   ├── prisma.py          # PrismaAdapter (.prisma model blocks → tables)
 │       │   ├── rawquery.py        # opt-in advisory raw-SQL string table refs (never blocking)
 │       │   └── typescript.py      # TypeScriptAdapter (.ts/.tsx/.js/.jsx; + Drizzle/TypeORM tables)
@@ -205,7 +205,7 @@ class RootManifest:
 @dataclass
 class Symbol:
     name: str
-    kind: str                      # function|class|const|type|interface|variable|table|column|drop|rename
+    kind: str                      # function|class|const|type|interface|variable|table|column|view|index|trigger|policy|rls|drop|rename
     line: int
     exported: bool = True
     metadata: dict = {}            # additive adapter facts (e.g. SQL op/table/column, ORM model)
@@ -717,8 +717,10 @@ bounds list [--namespace NS]       → {project, subsystems:[{name, role, critic
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name>             → SubsystemCompact.to_dict() + {files, entry_points, validation_status,
                                        project_status, unparsed_files?, exposes[*].verified, exposes[*].file?,
-                                       exposes[*].entry_point?, exposes[*].columns?, tables?}
+                                       exposes[*].entry_point?, exposes[*].columns?, tables?, schema_objects?}
                                        # tables?: [{name, kind:"table", columns:[...], files:[...]}]
+                                       # schema_objects?: [{name, kind, table?, files:[...]}]  # functions/views/
+                                       #   indexes/triggers/types/policies/rls — the non-table schema surface
                                        # validation_status is SUBSYSTEM-SCOPED (this subsystem's own issues);
                                        # project_status is the project-wide rollup, kept additively.
                                        # unparsed_files (present only when non-empty): owned source files

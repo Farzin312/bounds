@@ -8,8 +8,12 @@ exit 1; everything else exits 0.
 
 from __future__ import annotations
 
+import itertools
 import sys
+import threading
+import time
 from collections import Counter
+from contextlib import nullcontext
 from pathlib import Path
 
 import click
@@ -48,6 +52,38 @@ def _require_root() -> Path:
             fix="run 'bounds init --root' to initialize Bounds in this project",
         )
     return root
+
+
+class _Spinner:
+    """Minimal stderr spinner for long-running commands; no-op when stderr is not a TTY."""
+
+    _FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, message: str) -> None:
+        self._msg = message
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+
+    def _spin(self) -> None:
+        for frame in itertools.cycle(self._FRAMES):
+            if self._stop.is_set():
+                break
+            sys.stderr.write(f"\r{frame} {self._msg}")
+            sys.stderr.flush()
+            time.sleep(0.08)
+
+    def __enter__(self):
+        if sys.stderr.isatty():
+            self._thread.start()
+        return self
+
+    def __exit__(self, *_):
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join()
+        if sys.stderr.isatty():
+            sys.stderr.write("\r\033[K")
+            sys.stderr.flush()
 
 
 def _run(human: bool, fn, ci: bool = False):
@@ -610,7 +646,9 @@ def upgrade_cmd(ref: str, local: Path | None, dry_run: bool, human: bool) -> Non
     """Upgrade a stale Bounds CLI through pipx."""
 
     def go() -> None:
-        payload = upgrade_mod.run_upgrade(ref=ref, local=local, dry_run=dry_run)
+        msg = "upgrading bounds..." if not dry_run else ""
+        with _Spinner(msg) if (human and not dry_run) else nullcontext():
+            payload = upgrade_mod.run_upgrade(ref=ref, local=local, dry_run=dry_run)
         output.emit(payload, human)
         sys.exit(config.EXIT_OK if payload.get("ok") else config.EXIT_BLOCKED)
 

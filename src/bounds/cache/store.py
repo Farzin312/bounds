@@ -310,6 +310,10 @@ def load_subsystem_records(project_root: Path, subsystem: str) -> list[FileRecor
         return []
     try:
         conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
+        # Same schema-version gate as the full read (_load_sqlite): a stale-schema cache is
+        # discarded, not partially served, so both read paths agree on what's valid.
+        if conn.execute("PRAGMA user_version").fetchone()[0] != _schema_version():
+            return []
         rows = conn.execute(
             "SELECT path, subsystem, content_hash, structure_hash, language, symbols, imports "
             "FROM cache WHERE subsystem = ? ORDER BY path",

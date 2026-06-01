@@ -13,6 +13,7 @@ from bounds.validate.schema import (
     order_migrations,
     schema_catalog,
     schema_diagnostics,
+    schema_objects,
     schema_structure_hash,
 )
 
@@ -135,3 +136,26 @@ def test_prisma_models_fold_like_tables():
                          b'model Post {\n  id Int @id\n  title String @map("post_title")\n}\n'
     })
     assert tables == {"Post": ["id", "post_title"], "users": ["email", "id"]}
+
+
+# ---- non-table schema objects (functions/views/indexes/triggers/types/policies/rls) ----
+def test_schema_objects_surface_functions_policies_and_rls():
+    extracts, file_owner = _extracts({
+        "001.sql": b"create table profiles (id uuid);\n"
+                   b"alter table profiles enable row level security;\n"
+                   b'create policy "owner read" on profiles for select using (true);\n'
+                   b"create function bump() returns trigger language plpgsql as $$ begin return new; end; $$;\n"
+                   b"create view active as select * from profiles;\n"
+                   b"create index idx_id on profiles (id);\n"
+    })
+    objects = schema_objects("db", extracts, file_owner)
+    by_kind = {o["kind"]: o for o in objects}
+    # tables are NOT in schema_objects (they have their own catalog)
+    assert "table" not in by_kind
+    assert by_kind["function"]["name"] == "bump"
+    assert by_kind["view"]["name"] == "active"
+    assert by_kind["index"]["table"] == "profiles"
+    assert by_kind["policy"]["name"] == "profiles.owner read"
+    assert by_kind["rls"]["name"] == "profiles"
+    # deterministic: sorted by (kind, name)
+    assert objects == sorted(objects, key=lambda o: (o["kind"], o["name"]))
