@@ -581,9 +581,12 @@ def _agent_selectors(fn):
               help="List which coding agents are present in this project.")
 @click.option("--check", "do_check", is_flag=True, default=False,
               help="Verify detected agents have a Bounds config.")
+@click.option("--all", "want_all", is_flag=True, default=False,
+              help="Wire every supported agent without prompting (skips the interactive picker).")
 @_agent_selectors
 @_human
-def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, human: bool, **selectors: bool) -> None:
+def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, want_all: bool,
+              human: bool, **selectors: bool) -> None:
     """Teach Claude, Codex, Gemini, Cursor, and other agents to query Bounds first."""
     # --sync/--detect are interactive actions → announce in a terminal; --check is a CI gate →
     # keep it JSON-default (still honors explicit --human).
@@ -596,12 +599,48 @@ def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, human: bool, **sel
                 errors.E_USAGE, "pass exactly one of --sync, --detect, --check",
                 fix="e.g. 'bounds agent --sync' to generate configs, '--detect' to list agents",
             )
-        only = {k for k in _AGENT_FLAGS if selectors.get(k)} or None
+        only = None if want_all else ({k for k in _AGENT_FLAGS if selectors.get(k)} or None)
         root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
+        # Interactive --sync with no tools chosen up front: ask which to wire (pre-checked =
+        # detected) instead of writing the whole kitchen sink. Piped/CI runs (non-TTY), an
+        # explicit selector, or --all skip the prompt — the canonical AGENTS.md is always written.
+        if modes[0] == "sync" and only is None and not want_all and sys.stdout.isatty():
+            detected = set(agentsync.run_agent(root, mode="detect").get("detected", []))
+            only = _prompt_agent_selection(_AGENT_FLAGS, detected)
         payload = agentsync.run_agent(root, mode=modes[0], only=only)
         output.emit(payload, human)
 
     _run(human, go)
+
+
+def _prompt_agent_selection(available: list[str], detected: set[str]) -> set[str] | None:
+    """Interactive checklist for `agent --sync`: which tools to wire.
+
+    Returns the chosen agent set, or ``None`` to mean "all" (run_agent's no-filter sentinel).
+    Pressing Enter accepts the detected tools (or all, when none were detected) so the common
+    case is one keystroke; a typo'd/empty selection falls back to "all" rather than writing
+    nothing. The canonical ``AGENTS.md`` is written regardless of the choice.
+    """
+    click.echo("Which AI tools should Bounds wire? (AGENTS.md is always written.)")
+    for i, key in enumerate(available, 1):
+        mark = "  [detected]" if key in detected else ""
+        click.echo(f"  {i}. {key}{mark}")
+    default_hint = ", ".join(sorted(detected)) if detected else "all"
+    raw = click.prompt(
+        f"Enter names/numbers (comma-separated), 'all', or Enter for [{default_hint}]",
+        default="", show_default=False,
+    ).strip()
+    if not raw:
+        return set(detected) if detected else None
+    if raw.lower() == "all":
+        return None
+    chosen: set[str] = set()
+    for tok in raw.replace(",", " ").split():
+        if tok.isdigit() and 1 <= int(tok) <= len(available):
+            chosen.add(available[int(tok) - 1])
+        elif tok in available:
+            chosen.add(tok)
+    return chosen or None  # bad input → fall back to all rather than writing nothing
 
 
 # ===========================================================================

@@ -29,7 +29,7 @@ list and severity/exit-code mapping.
 | `bounds overview` | Project dashboard: `project`, subsystem count, `roles`/`criticality` breakdown, dependency `edges` (from/to/interfaces), `cycles`, `schema_issues`, and a `health` summary (`ok`/`schema_errors`/`cycles`) |
 | `bounds discover` | Auto-generate candidate manifests from un-bounded source. `--apply`, `--namespace <ns>`, `--merge-into 'name=p1,p2'` |
 | `bounds calibrate` | Reconcile manifests vs tree-sitter reality (ADD / REMOVE / NEEDS_REVIEW / `consumes` fixes). `--apply`, `--subsystem <n>`, `--check` (CI freshness gate: exits non-zero on NEW drift above the committed baseline, never writes), `--dump-baseline` (record current drift as accepted in `.bounds/drift-baseline.json`) |
-| `bounds agent` | Wire Bounds into eight coding agents so they query `list`/`describe`/`impact` before broad source search. `--sync`, `--detect`, `--check`, per-agent flags |
+| `bounds agent` | Wire Bounds into eight coding agents so they query `list`/`describe`/`impact` before broad source search. `--sync`, `--detect`, `--check`, per-agent flags. Interactive `--sync` (in a terminal, no tool flags) prompts which tools to wire (pre-checked = detected) instead of writing all eight; `--all` wires every agent without prompting; piped/CI runs wire all. The canonical `AGENTS.md` is always written |
 | `bounds ci` | Generate CI gate config to enforce the agent workflow. `--install`, `--action`, `--precommit`, `--gitlab`, `--all` |
 | `bounds cache` | Manage the binary `.bounds/cache.db`. `--inspect`, `--prune`, `--migrate` |
 | `bounds upgrade` | Opt-in self-upgrade through pipx. Defaults to GitHub `main`; `--ref <tag-or-branch>`, `--local <path>`, and `--dry-run` are available |

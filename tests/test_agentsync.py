@@ -8,6 +8,7 @@ shared files), and `only` filtering.
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -464,3 +465,48 @@ def test_sync_restores_deleted_front_matter_on_dedicated_file(tmp_path):
     assert target.read_text("utf-8").startswith("---")
     result = agentsync.run_agent(root, mode="check", only={"claude"})
     assert result["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Interactive "pick your AI" picker for `bounds agent --sync`
+# ---------------------------------------------------------------------------
+def test_prompt_agent_selection_parses_choices(monkeypatch):
+    from bounds import cli
+
+    available = cli._AGENT_FLAGS
+
+    def with_reply(reply):
+        monkeypatch.setattr(cli.click, "prompt", lambda *a, **k: reply)
+
+    with_reply("all")
+    assert cli._prompt_agent_selection(available, set()) is None      # 'all' → all (no filter)
+
+    with_reply("1, cursor")
+    assert cli._prompt_agent_selection(available, set()) == {"claude", "cursor"}  # number + name
+
+    with_reply("")
+    assert cli._prompt_agent_selection(available, {"cursor"}) == {"cursor"}  # Enter → detected
+    assert cli._prompt_agent_selection(available, set()) is None      # Enter, none detected → all
+
+    with_reply("nonsense")
+    assert cli._prompt_agent_selection(available, set()) is None      # bad input → all, never nothing
+
+
+def test_sync_non_tty_skips_prompt_and_wires_all(monkeypatch, tmp_path):
+    # A piped/CI run (CliRunner stdout is not a TTY) must NOT prompt — it wires every agent
+    # (the prior kitchen-sink behavior) so automation never blocks on input.
+    from click.testing import CliRunner
+
+    from bounds.cli import main
+
+    (tmp_path / ".bounds").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    def explode(*a, **k):  # the picker must never be reached in non-TTY
+        raise AssertionError("prompt was shown in a non-interactive run")
+
+    monkeypatch.setattr("bounds.cli._prompt_agent_selection", explode)
+    res = CliRunner().invoke(main, ["agent", "--sync"])
+    assert res.exit_code == 0
+    report = json.loads(res.output)
+    assert "AGENTS.md" in (report.get("created", []) + report.get("updated", []))
