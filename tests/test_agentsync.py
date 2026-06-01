@@ -510,3 +510,16 @@ def test_sync_non_tty_skips_prompt_and_wires_all(monkeypatch, tmp_path):
     assert res.exit_code == 0
     report = json.loads(res.output)
     assert "AGENTS.md" in (report.get("created", []) + report.get("updated", []))
+
+
+def test_agent_check_stays_json_when_not_a_tty(monkeypatch, tmp_path):
+    # --check is a CI gate: even though sync/detect are TTY-aware, --check must stay
+    # JSON-default in non-TTY so an automated gate always parses a machine result.
+    from click.testing import CliRunner
+
+    from bounds.cli import main
+
+    (tmp_path / ".bounds").mkdir()
+    monkeypatch.chdir(tmp_path)
+    out = CliRunner().invoke(main, ["agent", "--check"]).output
+    assert "configured" in json.loads(out)  # valid JSON gate result, not prose

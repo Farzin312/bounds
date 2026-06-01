@@ -70,7 +70,8 @@ def test_gitlab_job_uses_preflight(tmp_path):
     # `bounds` console script lands on PATH before the gate steps run.
     assert "pip install bounds-cli" in data["bounds"]["script"]
     assert not any("pipx" in step for step in data["bounds"]["script"])
-    assert "pip install bounds" not in data["bounds"]["script"]  # exact squatted name, not bounds-cli
+    # Never the bare squatted `bounds` package as its own step (only `bounds-cli`).
+    assert not any(step == "pip install bounds" for step in data["bounds"]["script"])
 
 
 def test_idempotent_rerun_reports_skipped(tmp_path):
