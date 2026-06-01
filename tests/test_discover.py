@@ -195,3 +195,47 @@ def test_discover_dry_run_has_no_notice(tmp_path):
     _project(tmp_path)
     result = run_discover(tmp_path)  # dry-run never claims to have written anything
     assert "notice" not in result
+
+
+# ---- SQL/schema directory mapping (FIX) ----
+def test_discover_maps_sql_schema_dir_regardless_of_count(tmp_path):
+    # A migration set folds to one table surface, so it must be kept even when its file
+    # count would otherwise score 'low' (here a single migration) AND when it is large.
+    mig = tmp_path / "supabase" / "migrations"
+    mig.mkdir(parents=True)
+    (mig / "001_init.sql").write_text(
+        "CREATE TABLE profiles (id uuid PRIMARY KEY, email text);\n"
+    )
+    result = run_discover(tmp_path)
+    # Basename is unique here, so the candidate is named for the dir ('migrations').
+    schema = next((c for c in result["candidates"] if c["name"] == "migrations"), None)
+    assert schema is not None, "supabase/migrations must become a candidate"
+    assert schema["dropped"] is False  # never count-dropped despite a single file
+    assert schema["score"] == "schema"
+    assert schema.get("schema") is True
+    assert schema["tables"] == 1  # the fold materialized the table surface
+
+
+def test_discover_large_schema_dir_not_dropped(tmp_path):
+    mig = tmp_path / "db" / "migrations"
+    mig.mkdir(parents=True)
+    for i in range(60):  # well over the old >50 'low' cap
+        (mig / f"{i:03d}_add.sql").write_text(f"CREATE TABLE t{i} (id int);\n")
+    result = run_discover(tmp_path)
+    schema = next((c for c in result["candidates"] if c["name"] == "migrations"), None)
+    assert schema is not None and schema["dropped"] is False
+    assert schema["score"] == "schema"
+    assert schema["tables"] == 60
+
+
+def test_discover_large_code_dir_kept_not_silently_dropped(tmp_path):
+    # A legitimately large code directory (>50 files) is mapped, never silently dropped —
+    # hiding a repo's biggest surfaces is the opposite of discovery's job.
+    big = tmp_path / "src" / "components"
+    big.mkdir(parents=True)
+    for i in range(60):
+        (big / f"c{i}.py").write_text(f"def comp{i}():\n    pass\n")
+    result = run_discover(tmp_path)
+    comp = next((c for c in result["candidates"] if c["name"] == "components"), None)
+    assert comp is not None and comp["dropped"] is False
+    assert comp["score"] == "high"

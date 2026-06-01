@@ -185,7 +185,7 @@ class RootManifest:
     version: str = "1"             # schema version
     project: str = ""
     languages: list[str] = []      # ["typescript","python"]
-    enforce: str = "off"           # on|off  (whether full-mode issues are blocking)
+    enforce: str = "off"           # on|off|warn  (on blocks; off advisory; warn reports, never blocks)
     subsystems: list[str] = []     # subsystem names (each has its own bounds.yaml)
     entry_points: list[str] = []   # root-level bootstrap globs exempt from --fail-on-unowned
     roles: dict = {}               # optional custom-role defs; resolved via role_registry()
@@ -562,6 +562,18 @@ def run_calibrate(project_root, *, subsystem: str | None = None, apply=False) ->
     # rewrites the manifest YAML. Raises E_SUBSYSTEM_NOT_FOUND for an unknown --subsystem.
     # → {mode, applied, subsystems:{<name>:{add_exposes,remove_exposes,needs_review,
     #    add_consumes,remove_consumes}}, summary:{added,removed,needs_review,consumes_added,consumes_removed}}
+
+# The freshness gate: detect-only, never writes a manifest. A "drift key" is a stable
+# identifier for one proposed reconciliation; the committed baseline records keys that already
+# exist on main, so the check flags only NEW drift a branch introduces.
+def dump_baseline(project_root, *, subsystem=None) -> dict
+    # Write current drift keys to .bounds/drift-baseline.json (commit it).
+    # → {mode:"calibrate-baseline", baseline, drift_count, note}
+def check_drift(project_root, *, subsystem=None) -> dict
+    # Compare current drift against the baseline; ok=False on NEW drift (CLI then exits 1).
+    # Resolving pre-existing drift never fails. Fails soft on a missing/corrupt baseline.
+    # → {mode:"calibrate-check", ok, has_baseline, new_drift:[{subsystem,change,target}],
+    #    new_count, resolved_count, baseline_count, current_count, note}
 ```
 
 ### `agentsync.py` — cross-agent config generation
@@ -728,7 +740,7 @@ bounds describe <name>             → SubsystemCompact.to_dict() + {files, entr
                                        # never silently shown as a missing symbol.
 bounds describe --namespace NS     → {namespace, subsystems:[<describe payload>...]}
 bounds describe <name> --deep      → same + {semantic: {"note":"LLM enrichment (Tier 3) not enabled in this build"}}
-bounds validate [--quick|--mode M] [--enforce on|off] [--base REF] [scan flags]
+bounds validate [--quick|--mode M] [--enforce on|off|warn] [--base REF] [scan flags]
                                    → ValidationReport.to_dict()
 bounds preflight [scan flags]      → ValidationReport (mode=preflight) + {checks: per-check counts}
 bounds overview                    → {project, subsystems, roles:{...}, criticality:{...}, edges, cycles,
@@ -753,8 +765,9 @@ bounds init --subsystem <name> [--namespace NS]
                                    → scaffolds .bounds/manifests/<name>.yaml; → {created, skipped, hint, bounds_dir}
 bounds discover [--apply|--dry-run] [--namespace NS] [--merge-into 'name=p1,p2' ...]
                                    → discover.run_discover payload (see §4)
-bounds calibrate [--subsystem S] [--apply|--dry-run]
-                                   → calibrate.run_calibrate payload (see §4)
+bounds calibrate [--subsystem S] [--apply|--dry-run|--check|--dump-baseline]
+                                   → run_calibrate payload, or calibrate-check / calibrate-baseline payload (see §4)
+                                   → --check exits 1 on NEW drift above the committed baseline
 bounds agent (--sync|--detect|--check) [--<agent> ...]
                                    → agentsync.run_agent payload (see §4)
 bounds ci --install [--action|--precommit|--gitlab|--all]

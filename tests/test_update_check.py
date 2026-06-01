@@ -16,7 +16,10 @@ from bounds import config, update_check, upgrade
 from bounds.cli import main
 
 # The exact, stable JSON keys every `check()` result must carry (additive contract).
-_EXPECTED_KEYS = {"current", "latest", "outdated", "is_dev_build", "fix", "checked", "note"}
+_EXPECTED_KEYS = {
+    "current", "latest", "status", "needs_upgrade", "outdated",
+    "is_dev_build", "fix", "checked", "note",
+}
 
 # Single-sourced from config (the same constant the command surfaces), so the test can't drift.
 _FIX = config.UPGRADE_INSTALL_CMD
@@ -43,6 +46,8 @@ def test_outdated_when_current_behind_latest(monkeypatch):
     assert result["current"] == "0.1.0"
     assert result["latest"] == "0.2.0"
     assert result["outdated"] is True
+    assert result["status"] == "outdated"
+    assert result["needs_upgrade"] is True
     assert result["is_dev_build"] is False
     assert result["checked"] is True
     assert _FIX in result["note"]
@@ -53,6 +58,8 @@ def test_up_to_date_when_equal(monkeypatch):
     result = update_check.check(fetch=lambda: "0.2.0")
     assert result["latest"] == "0.2.0"
     assert result["outdated"] is False
+    assert result["status"] == "up_to_date"
+    assert result["needs_upgrade"] is False
     assert result["is_dev_build"] is False
     assert result["checked"] is True
     assert "up to date" in result["note"]
@@ -72,6 +79,8 @@ def test_dev_build_leaves_outdated_null(monkeypatch):
     result = update_check.check(fetch=lambda: "0.2.0")
     assert result["is_dev_build"] is True
     assert result["outdated"] is None
+    assert result["status"] == "dev_build"
+    assert result["needs_upgrade"] is False
     assert result["latest"] == "0.2.0"
     assert result["checked"] is True
     assert _FIX in result["note"]
@@ -83,6 +92,8 @@ def test_no_release_published(monkeypatch):
     result = update_check.check(fetch=lambda: update_check.NO_RELEASE)
     assert result["latest"] is None
     assert result["outdated"] is None
+    assert result["status"] == "no_release"
+    assert result["needs_upgrade"] is False
     assert result["checked"] is True
     assert "no published release" in result["note"]
 
@@ -93,6 +104,8 @@ def test_offline_or_timeout_fails_soft(monkeypatch):
     result = update_check.check(fetch=lambda: None)
     assert result["latest"] is None
     assert result["outdated"] is None
+    assert result["status"] == "unreachable"
+    assert result["needs_upgrade"] is False
     assert result["checked"] is False
     assert "couldn't reach" in result["note"].lower() or "offline" in result["note"].lower()
 
@@ -310,6 +323,29 @@ def test_upgrade_failure_surfaces_stderr_only(monkeypatch):
     assert result["version"] is None
     assert "boom" in result["stderr"]
     assert result["note"] == "upgrade failed"
+    assert result["error"] == "install_failed"  # semantic class, not a raw return code
+
+
+def test_upgrade_error_class_maps_pipx_not_found(monkeypatch):
+    # _run maps a missing pipx (OSError) to returncode 127; the JSON must carry the
+    # stable semantic class so a consumer never interprets the raw number.
+    def fake_run(command, capture_output=True, text=True, check=False, timeout=None):
+        raise OSError("pipx: command not found")
+
+    monkeypatch.setattr(upgrade.subprocess, "run", fake_run)
+    result = upgrade.run_upgrade()
+    assert result["ok"] is False
+    assert result["error"] == "pipx_not_found"
+    assert result["fallback_used"] is True
+
+
+def test_upgrade_timeout_error_class(monkeypatch):
+    def fake_run(command, capture_output=True, text=True, check=False, timeout=None):
+        raise upgrade.subprocess.TimeoutExpired(command, timeout)
+
+    monkeypatch.setattr(upgrade.subprocess, "run", fake_run)
+    result = upgrade.run_upgrade()
+    assert result["error"] == "timeout"
 
 
 def test_upgrade_cli_dry_run(monkeypatch):

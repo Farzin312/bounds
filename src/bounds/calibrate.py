@@ -24,11 +24,12 @@ Zero LLM. Deterministic: sorted output, POSIX paths, no timestamps.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
 
-from . import errors
+from . import config, errors
 from .extract.scan import extract_project
 from .ignore import load_matcher
 from .manifest import loader as manifest_loader
@@ -158,6 +159,122 @@ def _calibrate_one(
 
 def _has_changes(p: dict) -> bool:
     return any(p[k] for k in ("add_exposes", "remove_exposes", "add_consumes", "remove_consumes"))
+
+
+# ---------------------------------------------------------------------------
+# Drift baseline + check (the freshness gate)
+# ---------------------------------------------------------------------------
+# A "drift key" is a stable, content-addressed identifier for one proposed reconciliation —
+# an undeclared export, a vanished declared export, a missing/stale consumes edge. The set of
+# keys is the schema-vs-source drift; the baseline records the keys that already exist on main
+# so the check flags only NEW keys a branch introduces. ``needs_review`` is deliberately
+# excluded: it is a real contract a human must resolve, never auto-drift the gate blocks on.
+_KEY_SEP = "\t"  # tab: never appears in a symbol/subsystem name, so keys never collide
+
+
+def drift_keys(proposals: dict[str, dict]) -> list[str]:
+    """Canonical, sorted drift keys for a calibrate proposals dict (deterministic)."""
+    keys: set[str] = set()
+    for sub in sorted(proposals):
+        p = proposals[sub]
+        for add in p.get("add_exposes", []):
+            keys.add(_KEY_SEP.join((sub, "add_expose", str(add["name"]))))
+        for name in p.get("remove_exposes", []):
+            keys.add(_KEY_SEP.join((sub, "remove_expose", str(name))))
+        for prov in p.get("add_consumes", []):
+            keys.add(_KEY_SEP.join((sub, "add_consume", str(prov))))
+        for rc in p.get("remove_consumes", []):
+            for iface in rc.get("interfaces", []):
+                keys.add(_KEY_SEP.join((sub, "remove_consume", f"{rc['subsystem']}:{iface}")))
+    return sorted(keys)
+
+
+def _baseline_path(project_root: Path) -> Path:
+    return config.config_dir(project_root) / config.DRIFT_BASELINE_FILE
+
+
+def _load_baseline(project_root: Path) -> set[str]:
+    """The committed baseline drift keys, or an empty set when no baseline exists yet."""
+    path = _baseline_path(project_root)
+    if not path.is_file():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    drift = data.get("drift") if isinstance(data, dict) else None
+    return {str(k) for k in drift} if isinstance(drift, list) else set()
+
+
+def _current_proposals(project_root: Path, subsystem: str | None) -> dict[str, dict]:
+    """The current calibrate proposals (no writes) — the live schema-vs-source drift."""
+    return run_calibrate(project_root, subsystem=subsystem, apply=False)["subsystems"]
+
+
+def dump_baseline(project_root: Path, *, subsystem: str | None = None) -> dict:
+    """Write the current drift keys to ``.bounds/drift-baseline.json`` and report the count.
+
+    Run once on a clean main branch and commit the result; ``calibrate --check`` then flags
+    only drift introduced ABOVE this baseline. Writing nothing else keeps the file a stable,
+    reviewable record of accepted-existing drift.
+    """
+    keys = drift_keys(_current_proposals(project_root, subsystem))
+    path = _baseline_path(project_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"version": 1, "drift": keys}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "mode": "calibrate-baseline",
+        "baseline": path.relative_to(project_root).as_posix(),
+        "drift_count": len(keys),
+        "note": f"wrote drift baseline with {len(keys)} existing item(s) — commit it so CI compares against this",
+    }
+
+
+def check_drift(project_root: Path, *, subsystem: str | None = None) -> dict:
+    """Compare current drift against the committed baseline; report only NEW drift.
+
+    Pure detection — never writes a manifest. ``ok`` is False when the branch introduces
+    drift keys absent from the baseline (the CLI then exits non-zero so CI can gate on it);
+    resolving pre-existing drift never fails the check.
+    """
+    current = drift_keys(_current_proposals(project_root, subsystem))
+    baseline = _load_baseline(project_root)
+    has_baseline = _baseline_path(project_root).is_file()
+    new_drift = sorted(set(current) - baseline)
+    resolved = sorted(baseline - set(current))
+    ok = not new_drift
+    if ok and has_baseline:
+        note = "no new structural drift above the committed baseline"
+    elif ok:
+        note = "no structural drift (manifests match source)"
+    else:
+        note = (
+            f"{len(new_drift)} new structural drift item(s) since the baseline — "
+            "run `bounds calibrate` to review, then `--apply` or `--dump-baseline`"
+        )
+    return {
+        "mode": "calibrate-check",
+        "ok": ok,
+        "has_baseline": has_baseline,
+        "new_drift": [_drift_key_to_dict(k) for k in new_drift],
+        "new_count": len(new_drift),
+        "resolved_count": len(resolved),
+        "baseline_count": len(baseline),
+        "current_count": len(current),
+        "note": note,
+    }
+
+
+def _drift_key_to_dict(key: str) -> dict:
+    """Expand a tab-joined drift key back into a structured ``{subsystem, change, target}``."""
+    parts = key.split(_KEY_SEP)
+    sub = parts[0] if parts else ""
+    change = parts[1] if len(parts) > 1 else ""
+    target = parts[2] if len(parts) > 2 else ""
+    return {"subsystem": sub, "change": change, "target": target}
 
 
 def _summarize(proposals: dict[str, dict]) -> dict:

@@ -48,6 +48,10 @@ def emit(payload: dict, human: bool, stream=None, ci: bool = False) -> None:
         stream.write(_render_upgrade_check_human(payload))
     elif isinstance(payload, dict) and {"command", "dry_run", "source"} <= payload.keys():
         stream.write(_render_upgrade_human(payload))
+    elif isinstance(payload, dict) and payload.get("mode") == "discover":
+        stream.write(_render_discover_human(payload))
+    elif isinstance(payload, dict) and payload.get("mode") in ("calibrate-check", "calibrate-baseline"):
+        stream.write(_render_drift_human(payload))
     elif isinstance(payload, dict) and "namespace" in payload and "subsystems" in payload:
         stream.write(_render_namespace_human(payload))
     elif isinstance(payload, dict) and "name" in payload and "role" in payload:
@@ -132,8 +136,16 @@ def _render_upgrade_human(payload: dict) -> str:
         ver_str = f" → {version}" if version else ""
         return f"bounds upgraded from {where}{ver_str}"
 
+    reason = {
+        "pipx_not_found": "pipx is not installed or not on PATH",
+        "timeout": "the install timed out",
+        "install_failed": "pipx could not install the package",
+    }.get(payload.get("error"), "the upgrade command failed")
+    lines = [f"upgrade failed — {reason}"]
+    command = " ".join(str(p) for p in payload.get("command", []))
+    if command:
+        lines.append(f"try manually: {command}")
     stderr = (payload.get("stderr") or "").strip()
-    lines = ["upgrade failed"]
     if stderr:
         lines.append(stderr)
     return "\n".join(lines)
@@ -148,6 +160,58 @@ def _render_namespace_human(payload: dict) -> str:
         return header + "\n\n(no subsystems in this namespace)"
     blocks = [_render_subsystem_human(sub) for sub in subs]
     return header + "\n\n" + ("\n\n" + ("-" * 40) + "\n\n").join(blocks)
+
+
+def _render_discover_human(payload: dict) -> str:
+    """Render a ``bounds discover`` proposal: kept subsystems, schema dirs, dropped, writes.
+
+    Re-renders the same data the JSON carries. Schema subsystems are called out with their
+    folded table count so a run that maps a migration set reads as a concrete win rather than
+    an empty-``exposes`` subsystem.
+    """
+    candidates = payload.get("candidates", []) or []
+    kept = [c for c in candidates if not c.get("dropped")]
+    dropped = [c for c in candidates if c.get("dropped")]
+    applied = payload.get("applied", False)
+    verb = "wrote" if applied else "would map"
+    lines = [f"discover: {verb} {len(kept)} subsystem{'s' if len(kept) != 1 else ''}"
+             + (" (dry-run — pass --apply to write)" if not applied else "")]
+    for cand in sorted(kept, key=lambda c: c.get("name", "")):
+        name = cand.get("name", "")
+        if cand.get("schema"):
+            tables = cand.get("tables", 0)
+            detail = f"schema · {cand.get('files', 0)} migration(s) → {tables} table(s)"
+        else:
+            detail = (f"{cand.get('role', '')}/{cand.get('criticality', '')} · "
+                      f"{cand.get('files', 0)} file(s) · {len(cand.get('exposes', []))} export(s)")
+        lines.append(f"  {name}  ({detail})")
+    if dropped:
+        # The full dropped list lives in the JSON; here we summarize so a repo with hundreds
+        # of tiny leaf dirs (route folders, fixtures) doesn't bury the signal under names.
+        names = sorted(c.get("name", "") for c in dropped)
+        shown = ", ".join(names[:12])
+        more = f", … and {len(names) - 12} more" if len(names) > 12 else ""
+        lines.append(f"dropped {len(dropped)} low-signal dir(s): {shown}{more}")
+    notice = payload.get("notice")
+    if notice:
+        lines.append(notice)
+    skipped = payload.get("skipped", []) or []
+    if applied and skipped:
+        lines.append(f"skipped {len(skipped)} existing manifest(s) — run `bounds calibrate` to reconcile")
+    return "\n".join(lines)
+
+
+def _render_drift_human(payload: dict) -> str:
+    """Render a ``calibrate --check`` / ``--dump-baseline`` result from the same JSON."""
+    if payload.get("mode") == "calibrate-baseline":
+        return payload.get("note", "drift baseline written")
+    lines = [payload.get("note", "")]
+    for item in payload.get("new_drift", []) or []:
+        change = item.get("change", "")
+        lines.append(f"  + {item.get('subsystem', '')}: {change} {item.get('target', '')}".rstrip())
+    if not payload.get("has_baseline"):
+        lines.append("(no baseline committed — run `bounds calibrate --dump-baseline` to set one)")
+    return "\n".join(line for line in lines if line)
 
 
 def emit_error(err: BoundsError, human: bool, stream=None) -> None:

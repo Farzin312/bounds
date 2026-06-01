@@ -18,6 +18,10 @@ SUBSYS_FILE = "bounds.yaml"
 MANIFESTS_DIR = "manifests"
 CACHE_FILE = "cache.db"  # binary SQLite extraction cache (context armor)
 STATE_FILE = "state.json"  # legacy JSON cache; read once for auto-migration to cache.db
+# Committed drift baseline for `calibrate --check`: the set of manifest-vs-source
+# discrepancies that already exist on the main branch. The check flags only NEW drift
+# above this baseline, so a PR is never blocked by pre-existing rot it didn't introduce.
+DRIFT_BASELINE_FILE = "drift-baseline.json"
 
 # ---- Schema / versioning ----
 SCHEMA_VERSION = "1"
@@ -38,7 +42,10 @@ BUILTIN_CRITICALITY = {"core", "connector", "leaf"}
 VALID_ROLES = BUILTIN_ROLES
 VALID_CRITICALITY = BUILTIN_CRITICALITY
 VALID_MODES = {"quick", "full", "preflight", "hotfix", "audit"}
-VALID_ENFORCE = {"on", "off"}
+# enforce tri-state: "on" blocks on structural errors, "off" runs purely advisory, and
+# "warn" reports every issue (so CI surfaces drift) but never blocks the pipeline — the
+# middle ground that lets a team see structural signal before committing to a hard gate.
+VALID_ENFORCE = {"on", "off", "warn"}
 
 # Behavior each base role encodes (what the structural checks key off, never the label):
 #   orphan_exposes -- True if exposes may legitimately have zero consumers (entrypoints).

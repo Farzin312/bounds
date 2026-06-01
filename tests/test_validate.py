@@ -493,6 +493,18 @@ def test_engine_enforce_gates_blocking(py_project):
     assert any(i.code == errors.E_STRUCTURAL_DRIFT and i.severity == "error" for i in on.issues)
 
 
+def test_engine_warn_reports_but_never_blocks(py_project):
+    # warn mode surfaces the drift (status stale, error issue present) yet never blocks —
+    # not even in preflight, which blocks on errors under on/off.
+    (py_project / "src" / "models" / "thing.py").write_text("x = 1\n", encoding="utf-8")
+    full = engine.run(py_project, mode="full", enforce="warn")
+    assert full.status == "stale"
+    assert full.ok is True  # reported...
+    assert any(i.code == errors.E_STRUCTURAL_DRIFT and i.severity == "error" for i in full.issues)
+    pre = engine.run(py_project, mode="preflight", enforce="warn")
+    assert pre.ok is True  # ...but the preflight gate still does not block under warn
+
+
 def test_engine_hotfix_never_blocks(py_project):
     report = engine.run(py_project, mode="hotfix")
     assert report.ok is True

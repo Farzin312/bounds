@@ -136,14 +136,25 @@ def check(fetch=None) -> dict:
     Returns a JSON-serializable dict with a stable, additive shape::
 
         {
-            "current": <str>,          # installed version (bounds.__version__)
-            "latest": <str|null>,      # latest released version, or null if unknown
-            "outdated": <bool|null>,   # True if current < latest; null if undecidable
-            "is_dev_build": <bool>,    # True for a git/pipx dev build
-            "fix": <str>,              # how to refresh a git install
-            "checked": <bool>,         # False if the network lookup didn't succeed
-            "note": <str>,             # human-readable explanation of the result
+            "current": <str>,            # installed version (bounds.__version__)
+            "latest": <str|null>,        # latest released version, or null if unknown
+            "status": <str>,             # one machine verdict (see below) — switch on this
+            "needs_upgrade": <bool>,     # True only when a newer release supersedes current
+            "outdated": <bool|null>,     # True if current < latest; null if undecidable
+            "is_dev_build": <bool>,      # True for a git/pipx dev build
+            "fix": <str>,                # how to refresh a git install
+            "checked": <bool>,           # False if the network lookup didn't succeed
+            "note": <str>,               # human-readable explanation of the result
         }
+
+    ``status`` is the single field an agent should branch on; the rest stay for
+    backward compatibility and human messaging. It is exactly one of:
+
+    - ``"up_to_date"``  — a release exists and the installed version is current
+    - ``"outdated"``    — a newer release supersedes the installed version (``needs_upgrade``)
+    - ``"dev_build"``   — a git/pipx build with no stable ordering against the release
+    - ``"no_release"``  — the API answered but no release has been published yet
+    - ``"unreachable"`` — the lookup never succeeded (offline / DNS / timeout)
 
     Degraded cases all fail soft (``checked``/``latest``/``outdated`` reflect what we
     could and couldn't determine); this function never raises.
@@ -156,6 +167,8 @@ def check(fetch=None) -> dict:
     result: dict = {
         "current": current,
         "latest": None,
+        "status": "unreachable",
+        "needs_upgrade": False,
         "outdated": None,
         "is_dev_build": is_dev,
         "fix": _FIX,
@@ -168,6 +181,7 @@ def check(fetch=None) -> dict:
     if latest is None:
         # The lookup never succeeded (offline, DNS failure, or timeout): checked stays
         # False and latest stays null, since we genuinely don't know.
+        result["status"] = "unreachable"
         result["note"] = "couldn't reach the GitHub Releases API (offline or timed out); try again later"
         return result
 
@@ -175,6 +189,7 @@ def check(fetch=None) -> dict:
         # The API answered, so the lookup itself succeeded — there simply isn't a
         # release to compare against yet. latest stays null; outdated is undecidable.
         result["checked"] = True
+        result["status"] = "no_release"
         result["note"] = "no published release yet to compare against"
         return result
 
@@ -185,6 +200,7 @@ def check(fetch=None) -> dict:
     if is_dev:
         # A dev build has no stable ordering against a release, so leave outdated=null
         # and point the user at the refresh command for git/pipx installs.
+        result["status"] = "dev_build"
         result["note"] = (
             f"running a development build ({current}); the latest release is {latest}. "
             f"git/pipx installs can refresh with: {_FIX}"
@@ -194,7 +210,10 @@ def check(fetch=None) -> dict:
     outdated = _compare(current, latest)
     result["outdated"] = outdated
     if outdated:
+        result["status"] = "outdated"
+        result["needs_upgrade"] = True
         result["note"] = f"a newer release ({latest}) is available; run: {_FIX}"
     else:
+        result["status"] = "up_to_date"
         result["note"] = f"bounds {current} is up to date"
     return result

@@ -88,7 +88,11 @@ jobs:
         with:
           path: .bounds/cache.db
           key: bounds-${{ hashFiles('.bounds/root.yaml', '.bounds/manifests/**') }}
-      - run: pipx install bounds
+      - run: pipx install bounds-cli
+      # Freshness gate: flag NEW manifest-vs-source drift above the committed baseline.
+      # Non-blocking by default (|| true) until you commit a baseline and trust the signal;
+      # drop the `|| true` to make new drift fail the build.
+      - run: bounds calibrate --check || true
       - run: bounds preflight --ci
 """
 
@@ -113,7 +117,11 @@ _GITLAB_JOB = {
         "stage": "test",
         "image": "python:3.12-slim",
         "rules": [{"changes": ["src/**/*", ".bounds/**/*"]}],
-        "script": ["pip install bounds", "bounds preflight --ci"],
+        "script": [
+            "pipx install bounds-cli || pip install bounds-cli",
+            "bounds calibrate --check || true",  # freshness gate; drop `|| true` to enforce
+            "bounds preflight --ci",
+        ],
     }
 }
 
