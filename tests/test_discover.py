@@ -95,6 +95,39 @@ def test_discover_namespace_tag(tmp_path):
     assert all(c["namespace"] == "backend" for c in kept)
 
 
+def test_discover_folds_module_subparts_into_parent(tmp_path):
+    # A NestJS-shaped module (auth.module.ts directly + dto/ and services/ subdirs) becomes ONE
+    # `auth` subsystem, not auth + auth-dto + auth-services (the spex_backend over-fragmentation).
+    (tmp_path / ".bounds").mkdir()
+    auth = tmp_path / "src" / "auth"
+    (auth / "dto").mkdir(parents=True)
+    (auth / "services").mkdir()
+    (auth / "auth.module.ts").write_text("export class AuthModule {}\n")
+    (auth / "auth.controller.ts").write_text("export class AuthController {}\n")
+    (auth / "dto" / "login.dto.ts").write_text("export class LoginDto {}\n")
+    (auth / "dto" / "register.dto.ts").write_text("export class RegisterDto {}\n")
+    (auth / "services" / "auth.service.ts").write_text("export class AuthService {}\n")
+    (auth / "services" / "token.service.ts").write_text("export class TokenService {}\n")
+    result = run_discover(tmp_path)
+    names = {c["name"] for c in result["candidates"] if not c["dropped"]}
+    assert names == {"auth"}
+    auth_cand = next(c for c in result["candidates"] if c["name"] == "auth")
+    assert auth_cand["paths"] == ["src/auth"]  # collapsed to the covering root, not three paths
+
+
+def test_discover_keeps_standalone_structural_dir(tmp_path):
+    # A structural-named dir whose parent is NOT a candidate (no sibling module files) is preserved
+    # — folding never invents a parent or fuses unrelated trees.
+    (tmp_path / ".bounds").mkdir()
+    types = tmp_path / "src" / "types"
+    types.mkdir(parents=True)
+    for i in range(4):
+        (types / f"t{i}.ts").write_text(f"export type T{i} = string;\n")
+    result = run_discover(tmp_path)
+    names = {c["name"] for c in result["candidates"] if not c["dropped"]}
+    assert "types" in names
+
+
 def test_discover_disambiguates_colliding_basenames(tmp_path):
     # a/utils and b/utils must NOT fuse into one 'utils' subsystem.
     for tree in ("a", "b"):

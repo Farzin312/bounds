@@ -62,7 +62,7 @@ per-command breakdown).
 aren't self-selected: it shallow-clones each repo, runs `bounds discover`, and
 records the commit SHA + repo URL for every subject. On **click** (`c480210`)
 the whole-map `bounds list` is 205 vs 208,242 source tokens (**99.9%**); on
-**axios** (`4306df2`, TypeScript) it is 966 vs 558,868 (**99.8%**). See
+**axios** (`4306df2`, TypeScript) it is 814 vs 573,740 (**99.9%**). See
 `results/oss-token-economics.md` for the cited table and a same-model capability
 head-to-head (does the model answer correctly, and at what token cost, with vs
 without Bounds).

@@ -18,7 +18,7 @@ and at what token cost, with Bounds vs without).
 | Repo | Commit | Subsystems | `bounds list` | All source | Map reduction | `bounds describe` | Subsystem source | API reduction |
 |------|--------|-----------:|-------------:|-----------:|--------------:|------------------:|-----------------:|--------------:|
 | click | `c480210` | 4 | 205 | 208,242 | **99.9%** | 5,971 (`click`) | 103,392 | **94.2%** |
-| axios | `4306df2` | 20 | 966 | 558,868 | **99.8%** | 156 (`lib-adapters`) | 18,172 | **99.1%** |
+| axios | `4306df2` | 16 | 814 | 573,740 | **99.9%** | 901 (`lib`) | 50,483 | **98.2%** |
 
 - *Map reduction* = `bounds list` (whole-repo orientation) vs reading every subsystem's source.
 - *API reduction* = `bounds describe <name>` (one subsystem's verified contract) vs reading that
@@ -53,8 +53,7 @@ layer, not a comprehension layer.
 
 - The token tokenizer here is the char/4 estimate; exact counts differ under cl100k/Claude/Gemini
   tokenizers (all show the same order-of-magnitude reduction).
-- `describe` reduction depends on subsystem size; a tiny subsystem (axios `lib-adapters`) shows a
-  larger % than a big one (click `click`). The whole-map `bounds list` reduction is the stable
-  headline.
+- `describe` reduction depends on subsystem size, so it varies (axios `lib` 98.2%, click `click`
+  94.2%). The whole-map `bounds list` reduction is the stable headline.
 - The capability section is one model's observation on one task; it is illustrative, not a
   statistical claim.

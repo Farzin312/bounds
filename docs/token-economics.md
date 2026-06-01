@@ -48,10 +48,10 @@ To answer the obvious "but you measured your own repo" objection, the same deter
 | Repo | Commit | `bounds list` | All source | Map reduction | `bounds describe` | Subsystem source | API reduction |
 |------|--------|-------------:|-----------:|--------------:|------------------:|-----------------:|--------------:|
 | click (Python) | `c480210` | 205 | 208,242 | **99.9%** | 5,971 (`click`) | 103,392 | **94.2%** |
-| axios (TypeScript) | `4306df2` | 966 | 558,868 | **99.8%** | 156 (`lib-adapters`) | 18,172 | **99.1%** |
+| axios (TypeScript) | `4306df2` | 814 | 573,740 | **99.9%** | 901 (`lib`) | 50,483 | **98.2%** |
 
-- **Map reduction** is the whole-system `bounds list` figure (orient on the entire repo) vs reading every subsystem's source — that's the 99.9% / 99.8% headline.
-- **API reduction** is one subsystem's `bounds describe` contract vs reading *that* subsystem's source; it tracks subsystem size, so a small subsystem (axios `lib-adapters`, 99.1%) shows a larger % than a big one (click `click`, 94.2%). The whole-map `list` reduction is the stable headline; per-`describe` reductions vary with the exposed surface.
+- **Map reduction** is the whole-system `bounds list` figure (orient on the entire repo) vs reading every subsystem's source — that's the 99.9% headline.
+- **API reduction** is one subsystem's `bounds describe` contract vs reading *that* subsystem's source; it tracks subsystem size, so it varies (axios `lib` 98.2%, click `click` 94.2%). The whole-map `list` reduction is the stable headline; per-`describe` reductions vary with the exposed surface.
 - The axios (TypeScript) edges only resolve correctly because of the dotted-filename + tsconfig path-alias resolver fixes on this branch.
 
 Same estimate basis as above (~4 chars/token; tiktoken not installed in the recorded run). The numbers are **reproducible**: re-clone each repo at the cited commit and re-run `python benchmarks/oss_run.py`.

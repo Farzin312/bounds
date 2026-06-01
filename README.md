@@ -128,7 +128,7 @@ vs the equivalent source):
 | Repo | Whole-repo orientation (`bounds list`) | One subsystem's API (`bounds describe`) |
 |------|----------------------------------------|-----------------------------------------|
 | [click](https://github.com/pallets/click) (Python) | 205 vs 208,242 tok — **99.9% less** | 5,971 vs 103,392 tok — **94.2% less** |
-| [axios](https://github.com/axios/axios) (TypeScript) | 966 vs 558,868 tok — **99.8% less** | 156 vs 18,172 tok — **99.1% less** |
+| [axios](https://github.com/axios/axios) (TypeScript) | 814 vs 573,740 tok — **99.9% less** | 901 vs 50,483 tok — **98.2% less** |
 
 A same-model **capability head-to-head** on click (answer "what's the public API and what depends on
 it?") cost ~6,149 tokens and was tree-sitter-verified *with* Bounds, versus ~103k tokens of source

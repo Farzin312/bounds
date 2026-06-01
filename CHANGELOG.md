@@ -13,6 +13,7 @@
 - **SQL adapter** — `schema_meta` symbols (revision headers) no longer mask all-error SQL files. A migration with a valid `-- revision` header but zero parseable statements now correctly returns a hard parse failure instead of folding partial data.
 - **TypeScript import resolver — dotted filenames.** Imports targeting files whose names contain dots (e.g. `foo.bar.ts`, `index.browser.ts`) now resolve correctly instead of being dropped, fixing undercounted dependency edges in TS projects.
 - **TypeScript import resolver — tsconfig path aliases + `baseUrl`.** `@/…`-style path aliases (and `baseUrl`-relative bare imports) declared in `tsconfig.json` are now resolved to real files, so alias-heavy TS codebases no longer show a badly undercounted subsystem graph.
+- **`discover` over-fragmented framework modules.** A module's structural sub-directories (`dto/`, `services/`, `entities/`, `types/`, …) sitting under a candidate module now fold into it, so a NestJS-style `auth/{dto,services,auth.module.ts}` becomes one `auth` subsystem instead of `auth` + `auth-dto` + `auth-services` (fewer, clearer names; e.g. axios 20→16 subsystems). Conservative: a standalone structural dir whose parent has no sources is preserved. `paths:` also collapses to the covering root.
 
 ### Changed
 

@@ -212,6 +212,16 @@ def _group(
         dkey = "" if parent in (Path("."), Path("")) else parent.as_posix()
         by_dir.setdefault(dkey, []).append(rel)
 
+    # 2b. Fold a module's structural sub-directories (dto/, services/, entities/, …) into the
+    #     module dir so a framework module (e.g. NestJS auth/{dto,services,auth.module.ts}) becomes
+    #     ONE `auth` subsystem, not five confusingly-named ones (auth-dto, auth-services, …). Only
+    #     folds when the parent is itself a candidate, so a standalone structural dir is preserved.
+    dir_set = set(by_dir)
+    folded: dict[str, list[str]] = {}
+    for dkey, files in by_dir.items():
+        folded.setdefault(_fold_target(dkey, dir_set), []).extend(files)
+    by_dir = folded
+
     # 3. Name each directory: its basename when unique, else a path-derived name so two
     #    same-named dirs in different trees (e.g. a/utils and b/utils) stay SEPARATE
     #    subsystems instead of being silently fused.
@@ -222,6 +232,40 @@ def _group(
             file_to_candidate[rel] = name
             candidate_files.setdefault(name, set()).add(rel)
     return file_to_candidate, candidate_files
+
+
+# Directory basenames that are a module's implementation sub-parts, not subsystem boundaries of
+# their own. When one sits directly under another candidate directory, its files fold into that
+# parent — so a framework module's `dto/`/`services/`/… don't each become a separate (and
+# confusingly-named) subsystem. Conservative by design: folding requires the parent to already be
+# a candidate, so a deliberate standalone `src/types` (whose parent has no direct sources) is kept.
+_STRUCTURAL_SUBPARTS = frozenset({
+    "dto", "dtos", "entity", "entities", "model", "models", "schema", "schemas",
+    "interface", "interfaces", "type", "types", "constant", "constants", "enum", "enums",
+    "service", "services", "controller", "controllers", "guard", "guards", "pipe", "pipes",
+    "decorator", "decorators", "middleware", "middlewares", "repository", "repositories",
+    "dao", "util", "utils", "helper", "helpers", "validator", "validators",
+})
+
+
+def _fold_target(dkey: str, dir_set: set[str]) -> str:
+    """Walk a structural sub-dir up to the module candidate it belongs to (else return it as-is).
+
+    ``src/auth/dto`` → ``src/auth`` when ``src/auth`` is a candidate; repeats so
+    ``src/auth/dto/nested`` collapses too. Stops at the first non-structural dir or when the parent
+    isn't a candidate, so unrelated trees never fuse.
+    """
+    cur = dkey
+    seen: set[str] = set()
+    while cur and cur not in seen:
+        seen.add(cur)
+        base = cur.rsplit("/", 1)[-1] if "/" in cur else cur
+        parent = cur.rsplit("/", 1)[0] if "/" in cur else ""
+        if base in _STRUCTURAL_SUBPARTS and parent in dir_set:
+            cur = parent
+        else:
+            break
+    return cur
 
 
 def _merge_match(rel: str, merge_index: list[tuple[str, list[str]]]) -> str | None:
@@ -268,9 +312,17 @@ def _disambiguate(dkey: str, used: set[str]) -> str:
 
 
 def _candidate_paths(name: str, files: list[str]) -> list[str]:
-    """The common parent directories owning a candidate's files (deduped, sorted)."""
+    """The minimal set of parent directories owning a candidate's files (deduped, sorted).
+
+    A dir already covered by an ancestor in the set is dropped, so a folded module collapses to a
+    single root path (``src/auth`` rather than ``src/auth`` + ``src/auth/dto`` + ``src/auth/services``).
+    """
     dirs = sorted({Path(f).parent.as_posix() for f in files})
-    return dirs or [name]
+    covering: list[str] = []
+    for d in dirs:  # sorted ⇒ an ancestor always precedes its descendants
+        if not any(d == c or d.startswith(c + "/") for c in covering):
+            covering.append(d)
+    return covering or [name]
 
 
 # ---------------------------------------------------------------------------
