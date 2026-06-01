@@ -16,10 +16,12 @@ today; Codex, Gemini, and others as people contribute).
 benchmarks/
   README.md          # this file: methodology, metrics, how to contribute
   TEMPLATE.md        # copy-paste submission template
-  run.py             # deterministic token-economics harness
+  run.py             # deterministic token-economics harness (Bounds repo / dogfood)
+  oss_run.py         # same harness across real third-party OSS repos (clones + measures)
   results/
-    claude-baseline.md   # first entry: Claude / tiktoken-estimate baseline
-    <agent>-<model>.md   # your submission
+    claude-baseline.md        # first entry: Claude / tiktoken-estimate baseline
+    oss-token-economics.md    # cross-repo (click, axios) numbers + capability head-to-head
+    <agent>-<model>.md        # your submission
 ```
 
 ## Why there are no hardware specs
@@ -55,6 +57,15 @@ list` call cuts ~98.7% of source-equivalent tokens, while a single `bounds
 describe` is ~86% (399 vs 2,872 tokens). Read "~98%" as the whole-map figure,
 never as the per-`describe` number (see `results/claude-baseline.md` for the
 per-command breakdown).
+
+`oss_run.py` runs the same measurement on real third-party repos so the numbers
+aren't self-selected: it shallow-clones each repo, runs `bounds discover`, and
+records the commit SHA + repo URL for every subject. On **click** (`c480210`)
+the whole-map `bounds list` is 205 vs 208,242 source tokens (**99.9%**); on
+**axios** (`4306df2`, TypeScript) it is 966 vs 558,868 (**99.8%**). See
+`results/oss-token-economics.md` for the cited table and a same-model capability
+head-to-head (does the model answer correctly, and at what token cost, with vs
+without Bounds).
 
 ### 2. Retrieval scaling + context-rot (the core large-codebase argument)
 
@@ -136,3 +147,4 @@ own. State your tokenizer.
 | Submission | Agent | Model | Tokenizer |
 |------------|-------|-------|-----------|
 | [`claude-baseline.md`](results/claude-baseline.md) | Claude Code | Claude (Opus) | char/4 estimate |
+| [`oss-token-economics.md`](results/oss-token-economics.md) | Claude Code | Claude (Opus 4.8) | char/4 estimate |

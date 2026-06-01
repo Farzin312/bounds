@@ -95,27 +95,24 @@ def _subsystem_sources(name: str) -> list[Path]:
     paths: list[Path] = []
     in_paths = False
     for raw in manifest.read_text(encoding="utf-8").splitlines():
-        if raw.strip().startswith("#") or not raw.strip():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        if not raw.startswith((" ", "\t")):  # top-level key
-            in_paths = raw.strip().startswith("paths:")
+        # A YAML block-sequence item ("- x") may sit flush-left or indented; treat it as an item,
+        # never as a key. Any other non-blank line is a mapping key that toggles the paths section.
+        if stripped.startswith("- "):
+            if in_paths:
+                paths.extend(_expand_source(REPO_ROOT / stripped[2:].strip().strip("'\"")))
             continue
-        if in_paths:
-            stripped = raw.strip()
-            if stripped.startswith("- "):
-                rel = stripped[2:].strip().strip("'\"")
-                candidate = REPO_ROOT / rel
-                if candidate.is_dir():
-                    paths.extend(
-                        sorted(
-                            f
-                            for f in candidate.rglob("*")
-                            if f.is_file() and f.suffix in SOURCE_EXTS
-                        )
-                    )
-                elif candidate.is_file():
-                    paths.append(candidate)
+        in_paths = stripped.startswith("paths:")
     return paths
+
+
+def _expand_source(candidate: Path) -> list[Path]:
+    """A manifest path → the source files it covers (the dir's sources, or the file itself)."""
+    if candidate.is_dir():
+        return sorted(f for f in candidate.rglob("*") if f.is_file() and f.suffix in SOURCE_EXTS)
+    return [candidate] if candidate.is_file() else []
 
 
 def _source_text(paths: list[Path]) -> str:
