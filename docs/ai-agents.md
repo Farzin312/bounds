@@ -16,6 +16,19 @@ today**. The instruction is the same regardless of agent:
 > subsystem interface or table. Output is JSON by default — parse it. Run `bounds validate --quick`
 > after edits and treat a non-`fresh` `validation_status` as a signal to update the manifests.
 
+### Which command for which task
+
+The contract Bounds writes leads with this mapping so the agent knows exactly what to reach for:
+
+| Task | Command |
+|------|---------|
+| Understand the layout / find the right subsystem | `bounds list` |
+| A subsystem's public API or DB tables | `bounds describe <name>` |
+| Where a symbol or table is defined | `bounds where <symbol>` |
+| What breaks if you change a subsystem or table (blast radius) | `bounds impact <name>` |
+| Confirm an edit didn't drift the contract | `bounds validate --quick` |
+| Project health at a glance | `bounds overview` |
+
 ## Compliance is advisory, not enforced
 
 Bounds **writes these instructions** into the config files agents already read, but it **cannot
@@ -24,22 +37,32 @@ agents — lowering the cost of the right behavior rather than blocking the wron
 the one **hard** enforcement point, and it runs in your pipeline, not in the agent. For the enforced
 loop (pre-commit hooks + CI), see [./team-workflow.md](./team-workflow.md).
 
-> **No auto-detection — wiring is one explicit command.** There is **no** plugin that auto-detects a
+> **No auto-loading — wiring is one explicit command.** There is **no** plugin that auto-detects a
 > project's `.bounds/` directory; nothing auto-loads it (by design — see the binary-cache note below).
 > The supported path is to run `bounds agent --sync` **once** per repo: it writes an instruction file
 > that each coding agent already reads (see the table below), telling the agent to query `bounds
-> describe` / `bounds list` instead of reading raw source. Native MCP detection — where an MCP-aware
-> agent discovers Bounds as a structured tool with no instruction file — is on the roadmap (v0.3),
-> not shipped today.
+> describe` / `bounds list` instead of reading raw source. (Run bare `bounds agent` first if you just
+> want to see which agents are present — it is read-only and writes nothing.) Native MCP detection —
+> where an MCP-aware agent discovers Bounds as a structured tool with no instruction file — is on the
+> roadmap (v0.3), not shipped today.
 
 ---
 
-## One-command agent setup: `bounds agent --sync`
+## Agent setup in three steps: detect → sync → check
 
-No manual copy-paste. `bounds agent --sync` writes the canonical contract into `AGENTS.md` (the
-cross-ecosystem standard agents already read) plus a short pointer file for **eight** coding agents —
-telling each to query `bounds list`, `bounds describe`, and `bounds impact` before broad source
-searches, and to run `bounds validate --quick` after edits:
+No manual copy-paste. The flow is three commands, safe to run in order:
+
+1. **`bounds agent`** — bare, read-only. Lists which coding agents this repo already has (it
+   defaults to `--detect`, so typing it does nothing destructive). Start here.
+2. **`bounds agent --sync`** — wire them. Writes the canonical contract into `AGENTS.md` and a
+   pointer file for each agent.
+3. **`bounds agent --check`** — verify the wiring is current (JSON by default, so it drops straight
+   into CI).
+
+`bounds agent --sync` writes the canonical contract into `AGENTS.md` (the cross-ecosystem standard
+agents already read) plus a short pointer file for **eight** coding agents — telling each to query
+`bounds list`, `bounds describe`, and `bounds impact` before broad source searches, and to run
+`bounds validate --quick` after edits:
 
 | Agent | Config file written |
 |-------|---------------------|
@@ -60,19 +83,24 @@ standard file). Every per-tool pointer above — `.claude/commands/bounds.md`, `
 `.github/copilot-instructions.md` — is **gitignored and regenerated locally** by `bounds agent --sync`,
 so a clone stays lean. Run `bounds agent --sync` after cloning to (re)create the ones your editor uses.
 
-### Companion flags
+### Commands & flags
 
 ```bash
-bounds agent --detect          # list which agents are present in this project
-bounds agent --check           # verify each detected agent has a Bounds config
+bounds agent                   # bare = --detect: list which agents are present (read-only)
+bounds agent --sync            # wire the detected agents (prompts in a terminal; see below)
 bounds agent --sync --claude   # scope --sync/--check to one agent (--codex, --cursor, …)
 bounds agent --sync --all      # wire every supported agent, no prompt
+bounds agent --check           # verify each detected agent has an up-to-date Bounds config
 ```
+
+Bare `bounds agent` is the read-only first step — it runs `--detect`, never errors, and writes
+nothing. The three modes (`--detect`, `--sync`, `--check`) are mutually exclusive; passing two at
+once is a usage error.
 
 Run interactively (`bounds agent --sync` in a terminal, no tool flags) and Bounds asks which
 tools to wire — pre-selecting the ones it detected — so you pick yours instead of getting all
 eight. A piped/CI run, an explicit `--<tool>` flag, or `--all` skips the prompt; `AGENTS.md`
-(the canonical contract) is written either way.
+(the canonical contract) is **always** written either way.
 
 ---
 
@@ -80,7 +108,25 @@ eight. A piped/CI run, an explicit `--<tool>` flag, or `--all` skips the prompt;
 
 `bounds agent --sync` is the single supported path. The canonical contract lives in
 [`AGENTS.md`](../AGENTS.md) (committed; the standard filename agents already read) and every per-tool
-pointer is **generated from it**, so there is no template to copy or keep in sync.
+pointer is **generated from it**, so there is no template to copy or keep in sync. `AGENTS.md` is
+**always** (re)written by `--sync`, regardless of which agents you select — every pointer references it.
+
+**It won't clobber a hand-written doc.** If your project already keeps a big hand-authored `AGENTS.md`
+(or `GEMINI.md`) that happens to mention bounds but has no Bounds markers, `--sync` **leaves it alone**
+— that's intentional, so your doc survives. To let Bounds manage a section inside it, add empty
+`<!-- BOUNDS:START -->` / `<!-- BOUNDS:END -->` markers where you want the block, then re-sync; Bounds
+fills and maintains only what's between the markers and never touches the rest.
+
+**What `--sync` reports.** Each file lands in one of these buckets, so you can see exactly what
+happened:
+
+- `created` — the file (or its Bounds block) was written for the first time.
+- `updated` — an existing Bounds block was refreshed to the current contract.
+- `already current` — the block matched; nothing to do.
+- `left alone (you maintain these)` — a human-authored file that mentions bounds but carries no
+  markers; opt it in with the marker pair above.
+- `left alone (you edited the bounds block)` — a managed block whose body you hand-edited since the
+  last sync; Bounds won't overwrite your changes.
 
 ## Manual copy block
 

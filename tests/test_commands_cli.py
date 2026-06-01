@@ -279,8 +279,17 @@ def test_agent_sync_cli(monkeypatch, py_project):
     assert (py_project / ".claude" / "commands" / "bounds.md").is_file()
 
 
-def test_agent_requires_one_mode(monkeypatch, py_project):
+def test_agent_bare_defaults_to_detect(monkeypatch, py_project):
+    # Bare `bounds agent` is read-only detect (not an error) — like every other top-level command,
+    # it does something useful with no arguments. Non-TTY (CliRunner) keeps it JSON.
     res = _invoke(monkeypatch, py_project, ["agent"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert "detected" in data and set(data.keys()) == {"detected"}
+
+
+def test_agent_rejects_multiple_modes(monkeypatch, py_project):
+    res = _invoke(monkeypatch, py_project, ["agent", "--sync", "--detect"])
     assert res.exit_code == 2
 
 

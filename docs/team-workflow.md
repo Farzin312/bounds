@@ -21,6 +21,8 @@ git add .bounds/root.yaml .bounds/manifests && git commit -m "chore: adopt Bound
 bounds agent --sync        # wire Bounds into the coding agents your team uses
 ```
 
+(Teammates can run bare `bounds agent` any time to see which agents are wired — it's read-only — and `bounds agent --check` is the CI-friendly way to verify the wiring is still current.)
+
 1. **`bounds discover`** groups source by directory, tree-sitter-extracts each candidate's verified `exposes`, infers `consumes` from the cross-candidate import graph, and seeds `role`/`criticality` from graph degree. It is a dry-run by default and never overwrites existing manifests.
 2. **Review the manifests.** Discovery proposes; humans decide. This is where you correct boundaries the heuristic got wrong and confirm the roles.
 3. **Commit `.bounds/root.yaml` and `.bounds/manifests/`** so the contract is versioned with the code. (The cache `.bounds/cache.db` is gitignored and regenerated — never commit it.)

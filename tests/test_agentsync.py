@@ -230,6 +230,41 @@ def test_unrelated_agents_md_is_appended_not_skipped(tmp_path):
     assert "AGENTS.md" in report["updated"] and "AGENTS.md" not in report["skipped_custom"]
 
 
+def test_sync_reports_unchanged_on_idempotent_resync(tmp_path):
+    """A no-op re-sync surfaces already-current files in `unchanged` (so the CLI can say
+    'everything already current') and writes nothing to created/updated."""
+    root = _mk_root(tmp_path)
+    agentsync.run_agent(root, mode="sync", only={"claude"})
+    report = agentsync.run_agent(root, mode="sync", only={"claude"})
+    assert report["created"] == [] and report["updated"] == []
+    assert "AGENTS.md" in report["unchanged"]
+    assert ".claude/commands/bounds.md" in report["unchanged"]
+
+
+def test_skip_reasons_distinguish_authored_from_hand_edited(tmp_path):
+    """skip_reasons explains *why* a file was left alone: a human-authored file with no markers
+    is 'authored'; our managed block whose body a human changed is 'hand-edited'."""
+    # authored: a hand-written AGENTS.md that mentions bounds but has no markers.
+    root = _mk_root(tmp_path)
+    (root / "AGENTS.md").write_text(
+        "# Agents\n\nUse `bounds list` to see the map.\n", encoding="utf-8")
+    report = agentsync.run_agent(root, mode="sync", only={"codex"})
+    assert "AGENTS.md" in report["skipped_custom"]
+    assert report["skip_reasons"]["AGENTS.md"] == "authored"
+
+    # hand-edited: sync a clean file, then change the body inside the markers.
+    second = tmp_path / "second"
+    second.mkdir()
+    root2 = _mk_root(second)
+    agentsync.run_agent(root2, mode="sync", only={"codex"})
+    path = root2 / "AGENTS.md"
+    path.write_text(
+        path.read_text("utf-8").replace("bounds validate --quick", "MY EDIT"), encoding="utf-8")
+    report2 = agentsync.run_agent(root2, mode="sync", only={"codex"})
+    assert "AGENTS.md" in report2["skipped_custom"]
+    assert report2["skip_reasons"]["AGENTS.md"] == "hand-edited"
+
+
 def test_only_filters_to_single_agent_but_canonical_always_written(tmp_path):
     root = _mk_root(tmp_path)
     report = agentsync.run_agent(root, mode="sync", only={"claude"})
