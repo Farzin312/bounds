@@ -74,6 +74,7 @@ def describe_one(
     deep: bool,
     report: ValidationReport | None,
     entry_matcher: IgnoreMatcher,
+    full: bool = False,
 ) -> dict:
     """Build the merged Tier-1 + Tier-2 describe payload for a single subsystem.
 
@@ -87,6 +88,11 @@ def describe_one(
     so an agent sees a symbol lives in a bootstrap file.
     """
     payload = sub.to_dict()
+    # ``SubsystemCompact.to_dict`` carries the (rarely-used, manifest-declared) ``files`` list;
+    # describe's ``files`` means the *owned* file roster, which historically overwrote it. We now
+    # gate that roster behind --full, so drop the model's key to avoid a stale empty ``files: []``
+    # sitting next to ``file_count``.
+    payload.pop("files", None)
     extracted_symbols, owned_files, unparsed_files, catalog, schema_hash, objects = extract_owned(root, sub)
     for expose in payload.get("exposes", []):
         ename = expose.get("name", "")
@@ -101,8 +107,17 @@ def describe_one(
                 expose["entry_point"] = True
         else:
             expose["verified"] = False
-    payload["files"] = sorted(owned_files)
-    # Always present (like ``files``) for a stable shape; the human renderer hides it when empty.
+    # The verified CONTRACT (exposes/tables/consumes) is always emitted in full — that is what
+    # an agent reads instead of source. The two non-contract bulk fields are gated behind
+    # ``--full`` so a default describe stays token-lean: the flat file roster (non-actionable —
+    # symbols already carry their own file) collapses to a count, and the potentially-huge
+    # schema-objects list (RPCs/views/indexes/policies, hundreds on a real schema) collapses to
+    # per-kind counts. ``--full`` restores both. This keeps `describe` cheaper than reading
+    # source even on a 289-migration subsystem, honoring the token-first thesis.
+    payload["file_count"] = len(owned_files)
+    if full:
+        payload["files"] = sorted(owned_files)
+    # Always present for a stable shape; the human renderer hides it when empty.
     payload["entry_points"] = sorted(
         f for f in owned_files if entry_matcher and entry_matcher.matches(f)
     )
@@ -113,11 +128,16 @@ def describe_one(
     if catalog:
         payload["tables"] = catalog
         payload["schema_hash"] = schema_hash
-    # Additive (only when non-empty): functions/RPCs, views, indexes, triggers, types, and RLS
-    # policies a migration set exposes — the non-table schema surface, so an agent can see e.g.
-    # which RPCs or row-level-security policies a subsystem defines without reading the DDL.
+    # The non-table schema surface (functions/RPCs, views, indexes, triggers, types, RLS
+    # policies). Counts by kind by default so an agent sees the shape cheaply; the full list
+    # (which can be hundreds of entries) is restored by ``--full``.
     if objects:
-        payload["schema_objects"] = objects
+        counts: dict[str, int] = {}
+        for obj in objects:
+            counts[obj["kind"]] = counts.get(obj["kind"], 0) + 1
+        payload["schema_object_counts"] = dict(sorted(counts.items()))
+        if full:
+            payload["schema_objects"] = objects
     payload["validation_status"] = subsystem_status(report, sub.name)
     payload["project_status"] = project_status(report)
     if deep:

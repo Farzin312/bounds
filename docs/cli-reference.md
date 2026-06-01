@@ -22,7 +22,7 @@ list and severity/exit-code mapping.
 |---------|-----------------|
 | `bounds init` | Scaffolds `.bounds/`. `--root` (flag — writes `root.yaml`), `--subsystem <name>`, `--namespace <ns>` |
 | `bounds list` | Agent starting map: all subsystems with role, criticality, exposes, consumes, consumed_by. `--namespace <ns>` filters |
-| `bounds describe <name>` | Agent context slice: one subsystem's merged Tier-1+2 surface as JSON. Per-expose `name`/`kind`/`file`/`verified`; table exposes include `columns`; subsystem-level `tables`/`consumes`/`consumed_by`/`entry_points`/`validation_status`. `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
+| `bounds describe <name>` | Agent context slice: one subsystem's merged Tier-1+2 surface as JSON. Per-expose `name`/`kind`/`file`/`verified`; table exposes include `columns`; subsystem-level `tables`/`consumes`/`consumed_by`/`entry_points`/`validation_status`. Token-lean by default — the file roster shows as `file_count` and schema objects as `schema_object_counts` (by kind); `--full` adds the complete `files` + `schema_objects` lists. `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
 | `bounds impact <name>` | Pre-edit blast radius for a subsystem, interface, or table + which interfaces each direct consumer relies on. Zero LLM |
 | `bounds validate` | Post-edit drift check — all 7 checks. `--quick`, `--mode quick\|full\|preflight\|hotfix\|audit`, `--enforce on\|off\|warn`, `--base <ref>` |
 | `bounds preflight` | Blocking CI gate: 7 pre-PR checks |

@@ -326,9 +326,11 @@ def _render_subsystem_human(payload: dict) -> str:
     paths = payload.get("paths", [])
     if paths:
         lines.append(f"paths:      {', '.join(paths)}")
-    files = payload.get("files", [])
+    files = payload.get("files")
     if files:
         lines.append(f"files:      {', '.join(files)}")
+    elif payload.get("file_count"):
+        lines.append(f"files:      {payload['file_count']} file(s)  (use --full to list)")
     entry_points = payload.get("entry_points", [])
     if entry_points:
         lines.append(f"entry_points: {', '.join(entry_points)}")
@@ -372,13 +374,18 @@ def _render_subsystem_human(payload: dict) -> str:
             detail = f" [{', '.join(columns)}]" if columns else ""
             lines.append(f"  - {table.get('name', '?')}{detail}")
 
-    objects = payload.get("schema_objects", [])
+    objects = payload.get("schema_objects")
+    counts = payload.get("schema_object_counts")
     if objects:
         lines.append("")
         lines.append(f"schema objects ({len(objects)}):")
         for obj in objects:
             on = f" on {obj['table']}" if obj.get("table") else ""
             lines.append(f"  - {obj.get('kind', '?')} {obj.get('name', '?')}{on}")
+    elif counts:
+        lines.append("")
+        summary = ", ".join(f"{n} {kind}" for kind, n in counts.items())
+        lines.append(f"schema objects: {summary}  (use --full to list)")
 
     consumes = payload.get("consumes", [])
     if consumes:

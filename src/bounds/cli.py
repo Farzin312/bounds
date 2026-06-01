@@ -174,8 +174,10 @@ def list_cmd(namespace: str | None, human: bool) -> None:
 @click.option("--namespace", default=None,
               help="Describe every subsystem in this namespace instead of one by name.")
 @click.option("--deep", is_flag=True, default=False, help="Include Tier-3 LLM enrichment (roadmap).")
+@click.option("--full", "full", is_flag=True, default=False,
+              help="Include the full file roster and schema-object list (default shows counts).")
 @_human
-def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: bool) -> None:
+def describe_cmd(name: str | None, namespace: str | None, deep: bool, full: bool, human: bool) -> None:
     """Return one verified subsystem API/table contract as JSON."""
 
     def go() -> None:
@@ -201,7 +203,7 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: boo
             report = describe_mod.status_report(root) if matched else None
             payload = {
                 "namespace": namespace,
-                "subsystems": [describe_mod.describe_one(root, s, deep, report, entry_matcher) for s in matched],
+                "subsystems": [describe_mod.describe_one(root, s, deep, report, entry_matcher, full) for s in matched],
             }
             output.emit(payload, human)
             return
@@ -213,7 +215,7 @@ def describe_cmd(name: str | None, namespace: str | None, deep: bool, human: boo
                 fix=f"known subsystems: {sorted(subs)}; or run 'bounds init --subsystem {name}'",
             )
         output.emit(
-            describe_mod.describe_one(root, subs[name], deep, describe_mod.status_report(root), entry_matcher),
+            describe_mod.describe_one(root, subs[name], deep, describe_mod.status_report(root), entry_matcher, full),
             human,
         )
 
