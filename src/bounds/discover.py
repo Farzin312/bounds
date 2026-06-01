@@ -30,7 +30,7 @@ from pathlib import Path
 
 import yaml
 
-from . import config, errors, gitutil
+from . import config, errors, gitutil, tsconfig
 from .extract import adapter_for_language
 from .extract.scan import extract_file, iter_repo_source
 from .ignore import load_matcher
@@ -77,14 +77,15 @@ def run_discover(
             extracts[rel] = result
     known_noext, suffix_index = index_extracts(extracts)  # one shared projection (built once)
 
-    # Cross-candidate consume edges (direct imports only).
+    # Cross-candidate consume edges (direct imports only). TS path aliases (@/…) resolve too.
+    aliases = tsconfig.load(project_root)
     consumes: dict[str, set[str]] = {c: set() for c in candidate_files}
     for rel, result in extracts.items():
         owner = file_to_candidate.get(rel)
         if owner is None:
             continue
         for imp in result.imports:
-            target = resolve_import(rel, imp.module, known_noext, suffix_index)
+            target = resolve_import(rel, imp.module, known_noext, suffix_index, aliases)
             tgt_owner = file_to_candidate.get(target) if target else None
             if tgt_owner and tgt_owner != owner:
                 consumes[owner].add(tgt_owner)
