@@ -57,6 +57,7 @@ _HUMAN_RENDERERS = (
     (_has("symbol", "match", "results"), lambda p: _render_where_human(p)),
     (_has("current", "checked", "outdated"), lambda p: _render_upgrade_check_human(p)),
     (_has("command", "dry_run", "source"), lambda p: _render_upgrade_human(p)),
+    (lambda p: p.get("mode") == "guide", lambda p: _render_guide_human(p)),
     (lambda p: p.get("mode") == "discover", lambda p: _render_discover_human(p)),
     (lambda p: p.get("mode") in ("calibrate-check", "calibrate-baseline"), lambda p: _render_drift_human(p)),
     (_has("health", "edges"), lambda p: _render_overview_human(p)),
@@ -335,6 +336,32 @@ def _render_ci_human(payload: dict) -> str:
     lines = [f"ci: {'installed ' + ', '.join(created) if created else 'nothing new to install'}"]
     if skipped:
         lines.append(f"  already configured: {', '.join(skipped)}")
+    return "\n".join(lines)
+
+
+def _render_guide_human(payload: dict) -> str:
+    """Render `bounds guide` as a setup checklist + daily-command reference."""
+    steps = payload.get("steps", []) or []
+    done = sum(1 for s in steps if s.get("done"))
+    head = f"bounds setup — {done}/{len(steps)} steps done"
+    if payload.get("complete"):
+        head += "  ✓ all set"
+    lines = [head, ""]
+    nxt = payload.get("next")
+    for i, step in enumerate(steps, 1):
+        box = "x" if step.get("done") else " "
+        is_next = not step.get("done") and step.get("command") == nxt
+        lines.append(f"  [{box}] {i}. {step.get('title', '')}" + ("   ← next" if is_next else ""))
+        lines.append(f"         {step.get('command', '')}")
+        if not step.get("done") and step.get("why"):
+            lines.append(f"         {step['why']}")
+    daily = payload.get("daily", []) or []
+    if daily:
+        width = max((len(d.get("command", "")) for d in daily), default=0)
+        lines.append("")
+        lines.append("daily commands:")
+        for d in daily:
+            lines.append(f"  {d.get('command', ''):<{width}}  — {d.get('use', '')}")
     return "\n".join(lines)
 
 
