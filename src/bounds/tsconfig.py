@@ -60,7 +60,9 @@ class TsAliases:
 
         def add(stem: str) -> None:
             s = posixpath.normpath(stem).strip("/")
-            if s and s not in (".", "/") and s not in seen:
+            # Drop empties and any stem that escapes the project root — it can never match an
+            # in-repo file anyway, and keeping candidates in-tree avoids surprising lookups.
+            if s and s not in (".", "/") and not s.startswith("..") and s not in seen:
                 seen.add(s)
                 out.append(s)
 

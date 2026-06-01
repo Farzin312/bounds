@@ -120,8 +120,10 @@ The token win *widens* with size.
 
 ### Verified on real open-source repos
 
-These are measured, reproducible numbers — not projections. The harness shallow-clones each repo at
-a cited commit, runs `bounds discover`, and counts tokens (Bounds output vs the equivalent source):
+These are measured, reproducible numbers (token counts via a deterministic ~4-chars/token estimate;
+re-run with tiktoken for exact cl100k figures — the order of magnitude is the same). The harness
+shallow-clones each repo at a cited commit, runs `bounds discover`, and counts tokens (Bounds output
+vs the equivalent source):
 
 | Repo | Whole-repo orientation (`bounds list`) | One subsystem's API (`bounds describe`) |
 |------|----------------------------------------|-----------------------------------------|

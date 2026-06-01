@@ -915,43 +915,54 @@ def _check(root: Path, selected: list[str]) -> dict:
 
 
 def _config_status(root: Path, agent: "_Agent") -> str:
-    """Classify ``agent``'s config file as ``missing`` / ``stale`` / ``configured``.
+    """Classify ``agent`` as ``missing`` / ``stale`` / ``configured`` across ALL its files.
+
+    The primary signal is the pointer/canonical file (``missing`` ⇒ never synced; ``stale`` ⇒
+    synced-but-outdated). On top of that, any native command/skill artifact that is *present but
+    corrupted/outdated* (a hand-edit, an old stamp) downgrades the agent to ``stale`` — that is the
+    real risk the gate must catch, since the tool would load a broken file. A merely *absent*
+    artifact does not: it is an un-generated enhancement that an idempotent re-sync adds
+    non-destructively, and several agents (codex/opencode) are fully wired by ``AGENTS.md`` alone,
+    so requiring their optional artifact would falsely flag them after a single-agent sync.
+    """
+    pointer = _target_status(root, agent.path, agent.fmt, _expected_body(agent),
+                             agent.dedicated, _front_matter(agent))
+    if pointer != "configured":
+        return pointer  # missing (never synced) or stale (outdated) — primary signal wins
+    for art in _AGENT_ARTIFACTS.get(agent.key, ()):
+        if (root / Path(art.path)).exists():
+            if _target_status(root, art.path, art.fmt, art.body.rstrip("\n"), True, art.front) != "configured":
+                return "stale"  # a present artifact is broken/outdated — re-sync to refresh
+    return "configured"
+
+
+def _target_status(root: Path, rel: str, fmt: str, expected_body: str,
+                   dedicated: bool, front: str) -> str:
+    """Classify one managed file as ``missing`` / ``stale`` / ``configured``.
 
     "Up to date" means the file has our markers AND the in-marker block carries a stamp whose
-    version+hash exactly match what the installed CLI would generate for that file right now.
-    A present-but-un-stamped block, a present block stamped by an older version, or a present
-    block whose body was hand-edited all read as ``stale`` — so a synced file overwritten with
-    garbage no longer falsely reports ok.
+    hash matches what the installed CLI would generate now. A present-but-un-stamped block, an
+    older-hash stamp, a hand-edited body, or (for a dedicated file that expects it) removed
+    front-matter all read as ``stale``. The version string is deliberately not part of staleness —
+    it moves every commit, so the body hash is the contract signal.
     """
-    target = root / Path(agent.path)
+    target = root / Path(rel)
     if not target.exists():
         return "missing"
-
-    start = _YAML_START if agent.fmt == _YAML else _MD_START
-    end = _YAML_END if agent.fmt == _YAML else _MD_END
+    start = _YAML_START if fmt == _YAML else _MD_START
+    end = _YAML_END if fmt == _YAML else _MD_END
     text = _read_text(target)
     if start not in text or end not in text:
-        return "missing"  # file exists but was never synced (no bounds block).
-
+        return "missing"  # file exists but was never synced (no bounds block)
     inner = _extract_inner(text, start, end)
     if inner is None:
         return "missing"
-    _version_stamp, recorded, body = _split_stamp(inner, agent.fmt)
-
-    expected_body = _expected_body(agent)
-    expected_hash = _body_hash(expected_body)
-    # Stale if: never stamped, the recorded hash doesn't match the current expected body, or the
-    # on-disk body itself drifted from its own stamp. The version string is deliberately *not*
-    # part of staleness — it moves every commit (setuptools-scm dev version), so keying on it
-    # would flag every freshly-committed file as stale; the body hash already catches real
-    # contract changes.
-    if recorded is None or recorded != expected_hash:
+    _version_stamp, recorded, body = _split_stamp(inner, fmt)
+    if recorded is None or recorded != _body_hash(expected_body):
         return "stale"
     if _body_hash(body) != recorded:
         return "stale"
-    # A dedicated file whose tool-activating front-matter was removed is effectively
-    # de-registered even though its block is current — flag it so a re-sync restores it.
-    if agent.dedicated and _front_matter(agent) and not _has_front_matter(text):
+    if dedicated and front and not _has_front_matter(text):
         return "stale"
     return "configured"
 

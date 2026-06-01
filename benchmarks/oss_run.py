@@ -26,9 +26,7 @@ from pathlib import Path
 BENCH_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BENCH_DIR.parent
 sys.path.insert(0, str(BENCH_DIR))
-from run import _make_counter  # noqa: E402 - reuse the one token counter (DRY)
-
-SOURCE_EXTS = {".py", ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"}
+from run import _make_counter, manifest_source_files  # noqa: E402 - reuse the one counter + parser (DRY)
 
 # Pinned-by-clone OSS repos. Kept small + dependency-light so a contributor can re-run quickly; the
 # exact commit measured is recorded in the output. Add a (name, url, language) row to extend.
@@ -61,31 +59,9 @@ def _clone(url: str, dest: Path) -> str | None:
     return head.stdout.strip() or "unknown"
 
 
-def _manifest_paths(root: Path, name: str) -> list[Path]:
-    manifest = root / ".bounds" / "manifests" / f"{name}.yaml"
-    if not manifest.is_file():
-        return []
-    out: list[Path] = []
-    in_paths = False
-    for raw in manifest.read_text(encoding="utf-8").splitlines():
-        s = raw.strip()
-        if not s or s.startswith("#"):
-            continue
-        if s.startswith("- "):  # a sequence item — YAML allows it flush-left or indented
-            if in_paths:
-                cand = root / s[2:].strip().strip("'\"")
-                if cand.is_dir():
-                    out.extend(sorted(f for f in cand.rglob("*")
-                                      if f.is_file() and f.suffix in SOURCE_EXTS))
-                elif cand.is_file():
-                    out.append(cand)
-            continue
-        in_paths = s.startswith("paths:")  # any non-sequence line is a key line
-    return out
-
-
 def _source_tokens(root: Path, name: str, count) -> int:
-    text = "".join(p.read_text(encoding="utf-8", errors="ignore") for p in _manifest_paths(root, name))
+    text = "".join(p.read_text(encoding="utf-8", errors="ignore")
+                   for p in manifest_source_files(root, name))
     return count(text)
 
 

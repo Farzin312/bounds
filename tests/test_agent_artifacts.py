@@ -119,6 +119,31 @@ def test_skill_frontmatter_restored_if_removed(tmp_path):
     assert restored.startswith("---\nname: bounds\n")  # front-matter back
 
 
+def test_check_flags_corrupted_artifact_as_stale(tmp_path):
+    # A present-but-hand-edited native artifact is a real wiring risk (the tool loads a broken
+    # file), so --check reports the agent stale even though its pointer is current.
+    root = _mk_root(tmp_path)
+    (root / ".claude").mkdir()
+    agentsync.run_agent(root, mode="sync", only={"claude"})
+    assert agentsync.run_agent(root, mode="check")["ok"] is True
+    skill = root / ".claude/skills/bounds/SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8").replace("bounds list", "HACKED"),
+                     encoding="utf-8")
+    result = agentsync.run_agent(root, mode="check")
+    assert "claude" in result["stale"] and "claude" not in result["configured"]
+
+
+def test_check_ignores_absent_optional_artifact(tmp_path):
+    # codex is fully wired by AGENTS.md; an absent optional skill must NOT flag it (a re-sync
+    # would add it non-destructively).
+    import shutil
+    root = _mk_root(tmp_path)
+    agentsync.run_agent(root, mode="sync", only={"codex"})
+    shutil.rmtree(root / ".codex")  # drop the optional native skill
+    result = agentsync.run_agent(root, mode="check")
+    assert "codex" in result["configured"]
+
+
 def test_artifacts_only_for_selected_agents(tmp_path):
     root = _mk_root(tmp_path)
     agentsync.run_agent(root, mode="sync", only={"gemini"})

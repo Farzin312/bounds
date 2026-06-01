@@ -35,8 +35,6 @@ def run_guide(project_root: Path) -> dict:
 
     agent_check = agentsync.run_agent(base, mode="check")
     agents_done = bool(agent_check.get("ok")) and bool(agent_check.get("configured"))
-    agents_detected = bool(agent_check.get("configured") or agent_check.get("missing")
-                           or agent_check.get("stale"))
 
     steps = [
         {
@@ -82,7 +80,6 @@ def run_guide(project_root: Path) -> dict:
         "mode": "guide",
         "steps": steps,
         "daily": daily,
-        "agents_detected": agents_detected,
         "next": pending["command"] if pending else None,
         "complete": pending is None,
     }

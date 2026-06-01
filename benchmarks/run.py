@@ -35,8 +35,9 @@ MANIFEST_DIR = REPO_ROOT / ".bounds" / "manifests"
 # numbers are reproducible across releases.
 SUBSYSTEM = "models"
 
-# Extensions counted as source when a manifest path points at a directory.
-SOURCE_EXTS = {".py", ".ts", ".tsx", ".js", ".jsx"}
+# Extensions counted as source when a manifest path points at a directory. Shared by both
+# harnesses (run.py / oss_run.py) so the two never count a different source set.
+SOURCE_EXTS = {".py", ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"}
 
 
 # --------------------------------------------------------------------------- #
@@ -92,17 +93,29 @@ def _subsystem_sources(name: str) -> list[Path]:
     manifest = MANIFEST_DIR / f"{name}.yaml"
     if not manifest.exists():
         return []
+    return manifest_source_files(REPO_ROOT, name)
+
+
+def manifest_source_files(root: Path, name: str) -> list[Path]:
+    """Source files a subsystem manifest's ``paths:`` cover, under ``root``.
+
+    The one parser shared by both harnesses (imported by oss_run.py) so they never measure a
+    different source set. Minimal stdlib YAML: a block-sequence item (``- x``) may sit flush-left
+    or indented — treat it as an item, never a key; any other non-blank line is a mapping key that
+    toggles the ``paths`` section.
+    """
+    manifest = root / ".bounds" / "manifests" / f"{name}.yaml"
+    if not manifest.exists():
+        return []
     paths: list[Path] = []
     in_paths = False
     for raw in manifest.read_text(encoding="utf-8").splitlines():
         stripped = raw.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        # A YAML block-sequence item ("- x") may sit flush-left or indented; treat it as an item,
-        # never as a key. Any other non-blank line is a mapping key that toggles the paths section.
         if stripped.startswith("- "):
             if in_paths:
-                paths.extend(_expand_source(REPO_ROOT / stripped[2:].strip().strip("'\"")))
+                paths.extend(_expand_source(root / stripped[2:].strip().strip("'\"")))
             continue
         in_paths = stripped.startswith("paths:")
     return paths
