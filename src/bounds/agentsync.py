@@ -376,6 +376,166 @@ def _pointer_block_body(fmt: str) -> str:
     return "## Bounds\n\n" + _AGENT_POINTER_BODY.rstrip("\n")
 
 
+# ===========================================================================
+# Targeted, invokable command/skill artifacts (native to each agent)
+# ---------------------------------------------------------------------------
+# Beyond the always-on pointer file, each agent that supports a *committable, invokable* command
+# or auto-triggering skill gets one — generated in that tool's native location + format, so the
+# agent can act on Bounds directly (a real `/bounds`, an auto-firing skill) instead of only being
+# told to. Each artifact is bounds-owned (dedicated) and marker-managed, so re-sync is idempotent
+# and a human's hand-edit is never clobbered. Agents with no committable command mechanism (aider)
+# get none — we never fake a file a tool won't load.
+# ===========================================================================
+
+# The auto-trigger description for skill files (Claude/Codex). It is the matcher the model reads
+# to decide *when* to invoke — so it is written as concrete trigger conditions, not a tagline.
+_SKILL_TRIGGER = (
+    "Read this codebase's architecture with the Bounds CLI instead of grepping or opening files. "
+    "Use when exploring an unfamiliar area, when you need a subsystem's public API or database "
+    "tables, before changing a shared or core subsystem or a migration (check blast radius first), "
+    "when asked what depends on X or what breaks if X changes, or to verify drift after an edit. "
+    "Never read .bounds/ files directly."
+)
+
+# Markdown body shared by the skill files — the task -> command decision table.
+_SKILL_BODY = """\
+# Bounds — architecture navigation
+
+Read this project's architecture through the Bounds CLI; never open `.bounds/` files or grep for
+structure first. Output is JSON by default; add `-H` for human-readable.
+
+## Which command for which task
+- Find the right subsystem / get the map → `bounds list`
+- A subsystem's verified public API or DB tables → `bounds describe <name>`
+- Where a symbol or table is defined → `bounds where <symbol>`
+- Blast radius before changing a subsystem or migration → `bounds impact <name>`
+- Catch drift after an edit → `bounds validate --quick`
+
+Run `bounds guide` for setup; see `AGENTS.md` for the full contract.
+"""
+
+# Gemini custom command (TOML). `#` comments are valid TOML, so the YAML marker style wraps it.
+# `{{args}}` is Gemini's argument placeholder.
+_GEMINI_TOML_BODY = '''\
+description = "Read this project's architecture via the Bounds CLI (subsystems, APIs, drift)."
+prompt = """
+Use the Bounds CLI to answer the user's architecture question; never read .bounds/ files.
+Run the right command and summarize its JSON:
+- bounds list — the subsystem map
+- bounds describe <name> — a subsystem's verified API/tables
+- bounds impact <name> — blast radius before a change
+- bounds validate --quick — drift after an edit
+
+User request: {{args}}
+"""'''
+
+# OpenCode custom command (Markdown). `$ARGUMENTS` forwards the user's input.
+_OPENCODE_CMD_BODY = """\
+Read this project's architecture via the Bounds CLI — never read `.bounds/` files.
+
+Run:
+
+```
+bounds $ARGUMENTS
+```
+
+If no arguments were given, run `bounds overview -H`. Common commands: `list`,
+`describe <name>`, `impact <name>`, `validate --quick`, `where <symbol>`.
+"""
+
+# GitHub Copilot prompt file (Markdown). `${input:...}` is Copilot's input-variable syntax.
+_COPILOT_PROMPT_BODY = """\
+Read this project's architecture via the Bounds CLI — never open `.bounds/` files.
+
+Run the right command and summarize its JSON:
+- `bounds list` — the subsystem map
+- `bounds describe <name>` — a subsystem's verified API/tables
+- `bounds impact <name>` — blast radius before a change
+- `bounds validate --quick` — drift after an edit
+
+Task: ${input:task:What do you want to know about the architecture?}
+"""
+
+# Cursor command (Markdown prompt template; Cursor commands take no bound arguments).
+_CURSOR_CMD_BODY = """\
+# Bounds
+
+Use the Bounds CLI to read this project's architecture instead of grepping or opening files:
+
+- `bounds list` — the subsystem map
+- `bounds describe <name>` — a subsystem's verified API/tables
+- `bounds impact <name>` — blast radius before a change
+- `bounds validate --quick` — drift after an edit
+
+Never read `.bounds/` files directly. See `AGENTS.md` for the full contract.
+"""
+
+# Windsurf workflow (Markdown; workflows take no bound arguments, so steps prompt for the name).
+_WINDSURF_WORKFLOW_BODY = """\
+# Bounds
+
+Read this project's architecture via the Bounds CLI — never read `.bounds/` files.
+
+1. Unsure of the layout? Run `bounds list`.
+2. Need a subsystem's API/tables? Run `bounds describe <name>`.
+3. About to change a shared subsystem or a migration? Run `bounds impact <name>` first.
+4. After an edit, run `bounds validate --quick` and fix drift.
+"""
+
+
+class _Artifact:
+    """One bounds-owned command/skill file in an agent's native location.
+
+    ``front`` is leading content that must sit at line 1 (YAML front-matter for a skill/prompt),
+    written outside the managed markers like a dedicated pointer file's front-matter. ``fmt``
+    selects the marker style (``_YAML`` ``#`` markers are valid in TOML too).
+    """
+
+    __slots__ = ("path", "fmt", "body", "front")
+
+    def __init__(self, path: str, fmt: str, body: str, front: str = ""):
+        self.path = path
+        self.fmt = fmt
+        self.body = body
+        self.front = front
+
+
+def _skill_front() -> str:
+    """YAML front-matter for a SKILL.md — ``name`` (display) + the auto-trigger ``description``."""
+    return f"---\nname: bounds\ndescription: {_SKILL_TRIGGER}\n---\n"
+
+
+_ARTIFACT_DESC = "Read this project's architecture via the Bounds CLI, not the raw files"
+
+# Per-agent native artifacts. Keys mirror AGENT_KEYS; an agent absent here (aider) gets only its
+# always-on pointer, since it has no committable command mechanism to target.
+_AGENT_ARTIFACTS: dict[str, tuple[_Artifact, ...]] = {
+    # Claude & Codex: auto-triggering skills (the description fires them). Tool-specific dirs so
+    # the two tools don't both load one shared copy.
+    "claude": (_Artifact(".claude/skills/bounds/SKILL.md", _MARKDOWN, _SKILL_BODY, _skill_front()),),
+    "codex": (_Artifact(".codex/skills/bounds/SKILL.md", _MARKDOWN, _SKILL_BODY, _skill_front()),),
+    # Gemini: TOML custom command -> /bounds.
+    "gemini": (_Artifact(".gemini/commands/bounds.toml", _YAML, _GEMINI_TOML_BODY),),
+    # OpenCode: Markdown custom command -> /bounds (singular `command/` dir matches the config key).
+    "opencode": (
+        _Artifact(".opencode/command/bounds.md", _MARKDOWN, _OPENCODE_CMD_BODY,
+                  f"---\ndescription: {_ARTIFACT_DESC}\nagent: build\n---\n"),
+    ),
+    # Copilot: prompt file -> /bounds.
+    "copilot": (
+        _Artifact(".github/prompts/bounds.prompt.md", _MARKDOWN, _COPILOT_PROMPT_BODY,
+                  f"---\nmode: agent\ndescription: {_ARTIFACT_DESC}\n---\n"),
+    ),
+    # Cursor: command -> /bounds (the always-on rule is the per-agent pointer file).
+    "cursor": (_Artifact(".cursor/commands/bounds.md", _MARKDOWN, _CURSOR_CMD_BODY),),
+    # Windsurf: workflow -> /bounds (the always-on rule is the per-agent pointer file).
+    "windsurf": (
+        _Artifact(".windsurf/workflows/bounds.md", _MARKDOWN, _WINDSURF_WORKFLOW_BODY,
+                  f"---\ndescription: {_ARTIFACT_DESC}\n---\n"),
+    ),
+}
+
+
 # ---------------------------------------------------------------------------
 # mode = sync
 # ---------------------------------------------------------------------------
@@ -422,6 +582,20 @@ def _sync(root: Path, selected: list[str]) -> dict:
             dedicated=agent.dedicated,
         )
         buckets.record(outcome, Path(agent.path).as_posix())
+
+    # 3. Targeted, invokable command/skill files (native to each agent). Each is bounds-owned
+    #    (dedicated), so it is marker-managed + idempotent like the rest. Agents with no
+    #    committable command mechanism (aider) have none — never faked.
+    for key in selected:
+        for art in _AGENT_ARTIFACTS.get(key, ()):
+            if art.path in done:
+                continue
+            done.add(art.path)
+            outcome = _upsert_block(
+                root / Path(art.path), art.fmt, art.body.rstrip("\n"),
+                prefix=art.front, dedicated=True,
+            )
+            buckets.record(outcome, Path(art.path).as_posix())
 
     return {
         "created": sorted(buckets.created),
@@ -511,9 +685,12 @@ def _upsert_block(
             new = _ensure_front_matter(new, prefix)
 
         # A differing version stamp alone is not a real change: the dev version moves every
-        # commit, so decide on the body (and, for a dedicated file, front-matter presence).
+        # commit, so decide on the body — and, for a dedicated file that *expects* front-matter
+        # (non-empty prefix), its presence. A dedicated file with no front-matter (e.g. a TOML
+        # command, a Cursor command) must still read as unchanged when its body matches.
         current_body = _split_stamp(current_inner, fmt)[2] if current_inner is not None else None
-        if current_body == body and (not dedicated or _has_front_matter(existing)):
+        front_ok = not dedicated or not prefix or _has_front_matter(existing)
+        if current_body == body and front_ok:
             return "unchanged"
         _write_text(target, new)
         return "updated"
