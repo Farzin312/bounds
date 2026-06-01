@@ -62,18 +62,23 @@ CANONICAL_BODY = f"""\
 
 Bounds models this codebase as subsystem boundary manifests. Query them through the CLI — never read the raw files.
 
-### Agent workflow
-- Start with `bounds list` to find the subsystem map before searching the repo.
-- Read `bounds describe <name>` for the verified public API/table catalog instead of opening source or migrations first.
-- Run `bounds impact <name>` before changing a subsystem interface; run `bounds impact <table>` before editing migrations.
-- After edits, run `bounds validate --quick` and fix drift before broadening context.
+### Which command for which task
+- Understand the layout / find the right subsystem → `bounds list`
+- A subsystem's public API or DB tables → `bounds describe <name>` (a few hundred tokens, tree-sitter-verified — read this instead of opening source or migrations)
+- Every subsystem in a namespace → `bounds describe --namespace <ns>`
+- Where a symbol or table is defined → `bounds where <symbol>`
+- What breaks if you change a subsystem or table → `bounds impact <name>`
+- Confirm an edit didn't drift the contract → `bounds validate --quick`
+- Project health at a glance → `bounds overview`
 
-### Commands
-- `bounds list` — all subsystems (the map; roles + dependency counts)
-- `bounds describe <name>` — one subsystem's public surface/table catalog (a few hundred tokens for a small subsystem, tree-sitter-verified)
-- `bounds describe --namespace <ns>` — every subsystem in a namespace
-- `bounds validate --quick` — catch drift after a change
-- `bounds impact <name>` — transitive blast radius before a risky code or schema change
+### Workflow
+1. `bounds list` before searching the repo.
+2. `bounds describe <name>` instead of opening source or migrations.
+3. `bounds impact <name>` before changing an interface or a migration.
+4. `bounds validate --quick` after edits; fix drift before broadening context.
+
+### Output
+- JSON by default — parse it. Add `-H`/`--human` for a readable view of the same data.
 
 ### Source of Truth
 - GitHub is the single source of truth.
@@ -91,10 +96,11 @@ _AGENT_POINTER_BODY = """\
 This project uses **Bounds** to model its architecture as subsystem boundary manifests.
 Read the architecture through the Bounds CLI, never by opening the raw files.
 
-- `bounds list` — map of all subsystems (roles + dependency counts)
-- `bounds describe <name>` — one subsystem's verified public surface/table catalog (a few hundred tokens for a small subsystem)
-- `bounds impact <name>` — blast radius before changing a subsystem or table
-- `bounds validate --quick` — catch structural drift after a change
+- Find the right subsystem → `bounds list`
+- A subsystem's API/tables → `bounds describe <name>` (verified, a few hundred tokens — use instead of opening source)
+- Where a symbol/table lives → `bounds where <symbol>`
+- What breaks if you change it → `bounds impact <name>`
+- After an edit → `bounds validate --quick`
 
 **Never** read `.bounds/cache.db`, `.bounds/*.json`, or `.bounds/manifests/*.yaml` directly —
 the cache is binary and the manifests bypass tree-sitter verification. The CLI is the API.
@@ -343,6 +349,7 @@ Usage — `/bounds <subcommand> [args]` forwards verbatim to `bounds <subcommand
 - `/bounds list` — all subsystems (roles + dependency counts)
 - `/bounds describe <name>` — one subsystem's verified public surface/table catalog (a few hundred tokens for a small subsystem)
 - `/bounds describe --namespace <ns>` — every subsystem in a namespace
+- `/bounds where <symbol>` — locate a symbol/table without grepping
 - `/bounds validate --quick` — catch drift after a change
 - `/bounds impact <name>` — transitive blast radius before a risky code or schema change
 - `/bounds overview -H` — project health at a glance
@@ -386,19 +393,19 @@ def _sync(root: Path, selected: list[str]) -> dict:
     it (its content no longer matches the recorded hash), it is reported ``skipped_custom`` and
     left untouched rather than clobbered.
 
-    Returns sorted, POSIX-relative ``created`` / ``updated`` / ``skipped_custom`` path lists
-    plus ``canonical`` (always ``"AGENTS.md"``).
+    Returns sorted, POSIX-relative ``created`` / ``updated`` / ``unchanged`` / ``skipped_custom``
+    path lists, a ``skip_reasons`` map (``path -> "authored" | "hand-edited"``) explaining each
+    skip, and ``canonical`` (always ``"AGENTS.md"``). ``unchanged`` lets a no-op sync confirm
+    "everything already current" instead of looking like nothing happened.
     """
-    created: set[str] = set()
-    updated: set[str] = set()
-    skipped: set[str] = set()
+    buckets = _Buckets()
 
     # 1. Canonical AGENTS.md — always written, as a marked block so any other AGENTS.md
     #    content the project keeps is preserved.
     canonical_path = root / CANONICAL_NAME
     rel_canonical = CANONICAL_NAME
     outcome = _upsert_block(canonical_path, _MARKDOWN, CANONICAL_BODY.rstrip("\n"))
-    _record(outcome, rel_canonical, created, updated, skipped)
+    buckets.record(outcome, rel_canonical)
 
     # 2. Per-tool files for the selected agents (AGENTS.md already handled above).
     done: set[str] = {CANONICAL_NAME}
@@ -414,24 +421,49 @@ def _sync(root: Path, selected: list[str]) -> dict:
             prefix=_front_matter(agent),
             dedicated=agent.dedicated,
         )
-        _record(outcome, Path(agent.path).as_posix(), created, updated, skipped)
+        buckets.record(outcome, Path(agent.path).as_posix())
 
     return {
-        "created": sorted(created),
-        "updated": sorted(updated),
-        "skipped_custom": sorted(skipped),
+        "created": sorted(buckets.created),
+        "updated": sorted(buckets.updated),
+        "unchanged": sorted(buckets.unchanged),
+        "skipped_custom": sorted(buckets.skipped),
+        "skip_reasons": {k: buckets.reasons[k] for k in sorted(buckets.reasons)},
         "canonical": rel_canonical,
     }
 
 
-def _record(outcome: str, rel: str, created: set, updated: set, skipped: set) -> None:
-    """Bucket a write outcome into the right report set (``unchanged`` reports nothing)."""
-    if outcome == "created":
-        created.add(rel)
-    elif outcome == "updated":
-        updated.add(rel)
-    elif outcome == "skipped_custom":
-        skipped.add(rel)
+class _Buckets:
+    """Accumulates per-file ``_upsert_block`` outcomes into the sync report's sorted lists.
+
+    A skip carries *why* (``"authored"`` = a file the human wrote that already mentions bounds;
+    ``"hand-edited"`` = our managed block whose body a human changed) so the human renderer can
+    explain it honestly and point at the fix, rather than the old flat "hand-edited" wording that
+    mislabeled files which were never bounds-managed in the first place.
+    """
+
+    __slots__ = ("created", "updated", "unchanged", "skipped", "reasons")
+
+    def __init__(self) -> None:
+        self.created: set[str] = set()
+        self.updated: set[str] = set()
+        self.unchanged: set[str] = set()
+        self.skipped: set[str] = set()
+        self.reasons: dict[str, str] = {}
+
+    def record(self, outcome: str, rel: str) -> None:
+        if outcome == "created":
+            self.created.add(rel)
+        elif outcome == "updated":
+            self.updated.add(rel)
+        elif outcome == "unchanged":
+            self.unchanged.add(rel)
+        elif outcome == "skipped_authored":
+            self.skipped.add(rel)
+            self.reasons[rel] = "authored"
+        elif outcome == "skipped_hand_edited":
+            self.skipped.add(rel)
+            self.reasons[rel] = "hand-edited"
 
 
 def _upsert_block(
@@ -452,9 +484,11 @@ def _upsert_block(
         ``unchanged``      — file already held our block with an identical body and (for a
                              dedicated file) intact front-matter. A differing version stamp
                              alone does not count as a change.
-        ``skipped_custom`` — a *shared* file whose in-marker body was hand-edited, or which
-                             mentions bounds but has no markers. Left untouched. Dedicated files
-                             are never skipped — we own them.
+        ``skipped_hand_edited`` — a *shared* file whose in-marker body a human edited since we
+                             stamped it. Left untouched (never clobber a human's edit).
+        ``skipped_authored`` — a *shared* file with no markers that already mentions bounds, so a
+                             human wrote it. Left untouched. Dedicated files are never skipped —
+                             we own them.
     """
     start, end = (_YAML_START, _YAML_END) if fmt == _YAML else (_MD_START, _MD_END)
     block = _build_block(fmt, body)
@@ -468,7 +502,7 @@ def _upsert_block(
     if start in existing and end in existing:
         current_inner = _extract_inner(existing, start, end)
         if current_inner is not None and _is_hand_edited(current_inner, fmt):
-            return "skipped_custom"  # human edited inside the markers — never clobber.
+            return "skipped_hand_edited"  # human edited inside the markers — never clobber.
 
         # Refresh the block, and for a dedicated file restore front-matter a human may have
         # removed (which would otherwise silently de-activate the tool).
@@ -494,7 +528,7 @@ def _upsert_block(
 
     # Shared file: if it already talks about bounds, a human wrote it — don't clobber.
     if _looks_bounds_authored(existing):
-        return "skipped_custom"
+        return "skipped_authored"
 
     # Unrelated content with no markers: append our block, preserving theirs.
     sep = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")

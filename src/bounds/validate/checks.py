@@ -198,7 +198,18 @@ def _candidate_stems(importer_rel: str, module: str) -> list[str]:
         up = importer_dir
         for _ in range(max(leading - 1, 0)):
             up = posixpath.dirname(up)
-        rest_path = rest.replace(".", "/").strip("/")
+        # The two relative-import dialects disagree on what a "." means in `rest`, and conflating
+        # them silently drops most TS edges (the spex_backend 63/93 `consumed_by 0` bug):
+        #   * TS/JS — `rest` is already a filesystem path ("./auth.service" -> rest "/auth.service").
+        #     Dots belong to the *filename* (`auth.service.ts`); splitting them yields the bogus
+        #     stem `.../auth/service`, which never matches. A TS specifier always has a slash after
+        #     its leading dots, so `rest` starts with "/".
+        #   * Python — `rest` is dotted package notation ("..models" -> rest "models",
+        #     "..a.b" -> "a.b"); here a "." IS the separator and must become "/". No slash present.
+        if rest.startswith("/"):
+            rest_path = rest.strip("/")
+        else:
+            rest_path = rest.replace(".", "/").strip("/")
         stem = normpath(posixpath.join(up, rest_path)) if rest_path else normpath(up or ".")
         return [] if stem in (".", "", "/") else [stem]
     # Bare dotted (Python "a.b.c") or bare package (TS "react", "os" -> won't match local files).

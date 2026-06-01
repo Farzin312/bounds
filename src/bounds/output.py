@@ -339,33 +339,71 @@ def _render_ci_human(payload: dict) -> str:
 
 
 def _render_agent_human(payload: dict) -> str:
-    """Render `bounds agent` (sync/detect/check) as a one-or-two-line summary."""
-    if "detected" in payload:
-        det = payload.get("detected", []) or []
-        return "agents detected: " + (", ".join(det) if det else "(none)")
+    """Render `bounds agent` (detect/sync/check) as a short, action-guided summary.
+
+    Dispatches by payload shape to a per-mode helper so each stays small and single-purpose.
+    """
+    if "detected" in payload:  # --detect (also the bare `bounds agent` default)
+        return _render_agent_detect_human(payload)
     if {"missing", "configured"} <= payload.keys():  # --check
-        ok = payload.get("ok")
-        lines = [f"agent wiring: {'up to date' if ok else 'needs sync'}"]
-        if payload.get("configured"):
-            lines.append(f"  configured: {', '.join(payload['configured'])}")
-        if payload.get("missing"):
-            lines.append(f"  missing: {', '.join(payload['missing'])}")
-        if payload.get("stale"):
-            lines.append(f"  stale: {', '.join(payload['stale'])}")
-        if payload.get("fix"):
-            lines.append(f"  fix: {payload['fix']}")
-        return "\n".join(lines)
-    # --sync
+        return _render_agent_check_human(payload)
+    return _render_agent_sync_human(payload)  # --sync
+
+
+def _render_agent_detect_human(payload: dict) -> str:
+    """`bounds agent --detect`: which agents are present + the obvious next step."""
+    det = payload.get("detected", []) or []
+    if not det:
+        return ("agents detected: (none)\n"
+                "  next: 'bounds agent --sync' to wire agents into this repo")
+    return ("agents detected: " + ", ".join(det) + "\n"
+            "  next: 'bounds agent --check' to verify wiring · "
+            "'bounds agent --sync' to (re)wire")
+
+
+def _render_agent_check_human(payload: dict) -> str:
+    """`bounds agent --check`: wiring status, with the fix hint when something needs a sync."""
+    lines = [f"agent wiring: {'up to date' if payload.get('ok') else 'needs sync'}"]
+    for label in ("configured", "missing", "stale"):
+        if payload.get(label):
+            lines.append(f"  {label}: {', '.join(payload[label])}")
+    if payload.get("fix"):
+        lines.append(f"  fix: {payload['fix']}")
+    return "\n".join(lines)
+
+
+def _render_agent_sync_human(payload: dict) -> str:
+    """`bounds agent --sync`: what was written/left alone, with honest, reason-tagged skips."""
     created = payload.get("created", []) or []
     updated = payload.get("updated", []) or []
+    unchanged = payload.get("unchanged", []) or []
     skipped = payload.get("skipped_custom", []) or []
-    lines = [f"agent sync: wrote {len(created) + len(updated)} config(s)"]
+    reasons = payload.get("skip_reasons", {}) or {}
+    wrote = len(created) + len(updated)
+    head = f"agent sync: wrote {wrote} config(s)"
+    if not wrote and not skipped and unchanged:
+        head += " — everything already current"
+    lines = [head]
     if created:
         lines.append(f"  created: {', '.join(created)}")
     if updated:
         lines.append(f"  updated: {', '.join(updated)}")
-    if skipped:
-        lines.append(f"  left alone (hand-edited): {', '.join(skipped)}")
+    if unchanged:
+        lines.append(f"  already current: {', '.join(unchanged)}")
+    # Honest skip wording: a file the human wrote ("authored") is not the same as one whose
+    # managed block they edited ("hand-edited"). Files with no recorded reason fall back to the
+    # neutral "you maintain these" group rather than mislabeling them as edited.
+    edited = [p for p in skipped if reasons.get(p) == "hand-edited"]
+    yours = [p for p in skipped if reasons.get(p) != "hand-edited"]
+    if yours:
+        lines.append(f"  left alone (you maintain these): {', '.join(yours)}")
+        # The marker hint only applies to files we DON'T already manage (no BOUNDS block yet).
+        lines.append("  to let Bounds manage a section in one of these, add empty "
+                     "BOUNDS:START / BOUNDS:END markers where you want it, then re-sync")
+    if edited:
+        lines.append(f"  left alone (you edited the bounds block): {', '.join(edited)}")
+        lines.append("  to refresh one of these, revert your in-block edit (or delete the block) "
+                     "and re-sync")
     return "\n".join(lines)
 
 

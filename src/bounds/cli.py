@@ -144,7 +144,65 @@ def _version_display(raw: str) -> str:
     return raw
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+# Commands rendered in purpose-ordered sections in ``bounds --help`` (instead of click's flat
+# alphabetical list) so a human scanning the help reads them by *when they'd reach for them*, not
+# by spelling. Every registered command must appear in exactly one group; a stray command not
+# listed here still shows up under "Other" (a loud signal to add it), so nothing is ever hidden.
+_COMMAND_GROUPS = (
+    ("Set up", ("init", "discover", "agent", "ci")),
+    ("Read the map (do this before grepping source)", ("list", "describe", "overview", "where", "impact")),
+    ("Catch drift", ("validate", "preflight", "calibrate")),
+    ("Maintain", ("cache", "upgrade", "upgrade-check")),
+)
+
+# Leading "\b" marks the quick-start block as pre-formatted so click does not reflow the
+# command line mid-word; the prose paragraph after the blank line is allowed to wrap normally.
+_HELP_EPILOG = (
+    "\b\n"
+    "Quick start:\n"
+    "  bounds init --root  ·  bounds discover --apply  ·  bounds agent --sync\n"
+    "\n"
+    "Output is JSON by default; add -H/--human for a readable view of the same data.\n"
+    "AI agents: read AGENTS.md, then use 'bounds list' and 'bounds describe <name>'."
+)
+
+
+class _BoundsGroup(click.Group):
+    """``click.Group`` that lists commands in :data:`_COMMAND_GROUPS` sections.
+
+    Only the top-level ``bounds --help`` listing changes; per-command help, parsing, and the
+    JSON contract are untouched. Each section's short help comes from the command's own
+    ``short_help`` (kept concise so click never truncates it with an ellipsis).
+    """
+
+    def format_commands(self, ctx, formatter):  # noqa: D102 - click hook
+        listed: set[str] = set()
+        sections: list[tuple[str, list[tuple[str, str]]]] = []
+        for title, names in _COMMAND_GROUPS:
+            rows = []
+            for name in names:
+                cmd = self.get_command(ctx, name)
+                if cmd is None or getattr(cmd, "hidden", False):
+                    continue
+                listed.add(name)
+                rows.append((name, cmd.get_short_help_str(limit=formatter.width)))
+            if rows:
+                sections.append((title, rows))
+        # Safety net: a registered command we forgot to group still shows, never silently dropped.
+        rest = [
+            (name, self.get_command(ctx, name).get_short_help_str(limit=formatter.width))
+            for name in self.list_commands(ctx)
+            if name not in listed and self.get_command(ctx, name) is not None
+        ]
+        if rest:
+            sections.append(("Other", rest))
+        for title, rows in sections:
+            with formatter.section(title):
+                formatter.write_dl(rows)
+
+
+@click.group(cls=_BoundsGroup, context_settings={"help_option_names": ["-h", "--help"]},
+             epilog=_HELP_EPILOG)
 @click.version_option(_version_display(__version__), prog_name="bounds",
                       message="%(prog)s %(version)s")
 def main() -> None:
@@ -159,7 +217,7 @@ def main() -> None:
 # ===========================================================================
 # list
 # ===========================================================================
-@main.command("list")
+@main.command("list", short_help="Show the subsystem map (read before grepping source)")
 @click.option("--namespace", default=None, help="Only list subsystems in this namespace.")
 @_human
 def list_cmd(namespace: str | None, human: bool) -> None:
@@ -196,7 +254,7 @@ def list_cmd(namespace: str | None, human: bool) -> None:
 # ===========================================================================
 # describe
 # ===========================================================================
-@main.command("describe")
+@main.command("describe", short_help="Show one subsystem's verified API/table contract")
 @click.argument("name", required=False)
 @click.option("--namespace", default=None,
               help="Describe every subsystem in this namespace instead of one by name.")
@@ -277,7 +335,7 @@ def _scan_flags(fn):
     return fn
 
 
-@main.command("validate")
+@main.command("validate", short_help="Catch source-vs-contract drift after edits")
 @click.option("--quick", is_flag=True, default=False, help="Git-diff incremental validation.")
 @click.option("--mode", type=click.Choice(sorted(config.VALID_MODES)), default=None,
               help="Explicit validation mode (default: full).")
@@ -309,7 +367,7 @@ def validate_cmd(quick: bool, mode: str | None, enforce: str | None, base: str,
 # ===========================================================================
 # preflight
 # ===========================================================================
-@main.command("preflight")
+@main.command("preflight", short_help="Blocking CI gate: drift, boundaries, contracts, cycles")
 @_scan_flags
 @_human
 def preflight_cmd(include_ignored: bool, include_gitignored: bool, follow_symlinks: bool,
@@ -343,7 +401,7 @@ def preflight_cmd(include_ignored: bool, include_gitignored: bool, follow_symlin
 # ===========================================================================
 # overview
 # ===========================================================================
-@main.command("overview")
+@main.command("overview", short_help="Project health dashboard")
 @_human
 def overview_cmd(human: bool) -> None:
     """Project health dashboard."""
@@ -385,7 +443,7 @@ def overview_cmd(human: bool) -> None:
 # ===========================================================================
 # impact
 # ===========================================================================
-@main.command("impact")
+@main.command("impact", short_help="Blast radius before changing a subsystem or table")
 @click.argument("name", required=True)
 @click.option("--verify", is_flag=True, default=False,
               help="Cross-check the declared blast radius against the resolved import graph "
@@ -408,7 +466,7 @@ def impact_cmd(name: str, verify: bool, include_raw: bool, human: bool) -> None:
 # ===========================================================================
 # where
 # ===========================================================================
-@main.command("where")
+@main.command("where", short_help="Locate a symbol or table without grepping")
 @click.argument("symbol", required=True)
 @click.option("--prefix", is_flag=True, default=False,
               help="Match symbols whose name starts with SYMBOL, instead of an exact match.")
@@ -448,7 +506,7 @@ consumes: []
 '''
 
 
-@main.command("init")
+@main.command("init", short_help="Initialize .bounds/, or add a subsystem")
 @click.option("--root", "root_flag", is_flag=True, default=False, help="Initialize .bounds/root.yaml.")
 @click.option("--subsystem", default=None, help="Scaffold a new subsystem manifest.")
 @click.option("--namespace", default=None, help="Namespace for the scaffolded subsystem (requires --subsystem).")
@@ -515,7 +573,7 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
 # ===========================================================================
 # discover
 # ===========================================================================
-@main.command("discover")
+@main.command("discover", short_help="Auto-generate initial contracts from source")
 @click.option("--apply", "do_apply", is_flag=True, default=False,
               help="Write proposed manifests to .bounds/ (default: dry-run preview).")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
@@ -557,7 +615,7 @@ def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
 # ===========================================================================
 # calibrate
 # ===========================================================================
-@main.command("calibrate")
+@main.command("calibrate", short_help="Realign contracts with source after code changes")
 @click.option("--subsystem", default=None, help="Calibrate only this subsystem.")
 @click.option("--apply", "do_apply", is_flag=True, default=False,
               help="Write the proposed reconciliation to the manifests (default: diff only).")
@@ -615,40 +673,55 @@ def _agent_selectors(fn):
     return fn
 
 
-@main.command("agent")
+@main.command("agent", short_help="Wire coding agents to query Bounds first")
 @click.option("--sync", "do_sync", is_flag=True, default=False,
-              help="Generate the canonical AGENTS.md contract + per-agent config files.")
+              help="Write the AGENTS.md contract + per-agent config files.")
 @click.option("--detect", "do_detect", is_flag=True, default=False,
-              help="List which coding agents are present in this project.")
+              help="List which coding agents are present in this project (the default).")
 @click.option("--check", "do_check", is_flag=True, default=False,
-              help="Verify detected agents have a Bounds config.")
+              help="Verify detected agents have an up-to-date Bounds config.")
 @click.option("--all", "want_all", is_flag=True, default=False,
               help="Wire every supported agent without prompting (skips the interactive picker).")
 @_agent_selectors
 @_human
 def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, want_all: bool,
               human: bool, **selectors: bool) -> None:
-    """Teach Claude, Codex, Gemini, Cursor, and other agents to query Bounds first."""
+    """Teach coding agents (Claude, Codex, Gemini, Cursor, …) to query Bounds first.
+
+    Pick at most one mode. Bare 'bounds agent' runs the read-only --detect, so it is always
+    safe to type to see what's present:
+
+    \b
+      bounds agent            list which agents this repo has (read-only; the default)
+      bounds agent --sync     write AGENTS.md + each selected agent's config
+      bounds agent --check    verify wiring is current (CI-friendly; JSON by default)
+
+    '--sync' in a terminal asks which tools to wire (pre-checked = detected); '--all' or an
+    explicit '--claude'/'--codex'/… selector skips the prompt. AGENTS.md is always written.
+    """
     # --sync/--detect are interactive actions → announce in a terminal; --check is a CI gate →
     # keep it JSON-default (still honors explicit --human).
     human = human if do_check else _interactive_human(human)
 
     def go() -> None:
         modes = [m for m, on in (("sync", do_sync), ("detect", do_detect), ("check", do_check)) if on]
-        if len(modes) != 1:
+        if len(modes) > 1:
             raise errors.BoundsError(
-                errors.E_USAGE, "pass exactly one of --sync, --detect, --check",
-                fix="e.g. 'bounds agent --sync' to generate configs, '--detect' to list agents",
+                errors.E_USAGE, "pass at most one of --sync, --detect, --check",
+                fix="run 'bounds agent --sync' to wire agents, or bare 'bounds agent' to list them",
             )
+        # Bare `bounds agent` (no mode flag) defaults to the read-only detect — like every other
+        # top-level command, it does something useful with no arguments instead of erroring.
+        mode = modes[0] if modes else "detect"
         only = None if want_all else ({k for k in _AGENT_FLAGS if selectors.get(k)} or None)
         root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
         # Interactive --sync with no tools chosen up front: ask which to wire (pre-checked =
         # detected) instead of writing the whole kitchen sink. Piped/CI runs (non-TTY), an
         # explicit selector, or --all skip the prompt — the canonical AGENTS.md is always written.
-        if modes[0] == "sync" and only is None and not want_all and sys.stdout.isatty():
+        if mode == "sync" and only is None and not want_all and sys.stdout.isatty():
             detected = set(agentsync.run_agent(root, mode="detect").get("detected", []))
             only = _prompt_agent_selection(_AGENT_FLAGS, detected)
-        payload = agentsync.run_agent(root, mode=modes[0], only=only)
+        payload = agentsync.run_agent(root, mode=mode, only=only)
         output.emit(payload, human)
 
     _run(human, go)
@@ -687,7 +760,7 @@ def _prompt_agent_selection(available: list[str], detected: set[str]) -> set[str
 # ===========================================================================
 # ci
 # ===========================================================================
-@main.command("ci")
+@main.command("ci", short_help="Install drift/boundary gates in CI")
 @click.option("--install", "do_install", is_flag=True, default=False,
               help="Generate CI config for the detected systems.")
 @click.option("--action", "want_action", is_flag=True, default=False, help="GitHub Action only.")
@@ -725,7 +798,7 @@ def ci_cmd(do_install: bool, want_action: bool, want_precommit: bool, want_gitla
 # ===========================================================================
 # cache
 # ===========================================================================
-@main.command("cache")
+@main.command("cache", short_help="Manage the binary extraction cache")
 @click.option("--migrate", "do_migrate", is_flag=True, default=False,
               help="Convert a legacy state.json cache to the binary cache.db.")
 @click.option("--prune", "do_prune", is_flag=True, default=False,
@@ -761,7 +834,7 @@ def cache_cmd(do_migrate: bool, do_prune: bool, do_inspect: bool, human: bool) -
 # ===========================================================================
 # upgrade
 # ===========================================================================
-@main.command("upgrade")
+@main.command("upgrade", short_help="Upgrade a stale Bounds CLI via pipx")
 @click.option("--ref", "ref", default="main", show_default=True,
               help="Git ref to install from when upgrading from GitHub.")
 @click.option("--local", "local", type=click.Path(path_type=Path, file_okay=False, dir_okay=True, exists=True),
@@ -789,7 +862,7 @@ def upgrade_cmd(ref: str, local: Path | None, dry_run: bool, human: bool) -> Non
 # ===========================================================================
 # upgrade-check
 # ===========================================================================
-@main.command("upgrade-check")
+@main.command("upgrade-check", short_help="Check for a newer Bounds release")
 @_human
 def upgrade_check_cmd(human: bool) -> None:
     """Check whether a newer Bounds release is available (opt-in; makes a network call)."""

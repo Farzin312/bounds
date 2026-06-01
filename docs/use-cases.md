@@ -79,7 +79,8 @@ A new agent is asked to add a discount field to the checkout flow in an unfamili
 
 No directory spelunking, no guessing where a symbol lives. `bounds agent --sync` wires this in as the
 default workflow for whatever agent the contributor uses, so a cooperating agent reaches for `list` /
-`describe` before it reaches for the file tree.
+`describe` before it reaches for the file tree. (Bare `bounds agent` is read-only — it just lists
+which agents the repo has.)
 
 ---
 

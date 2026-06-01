@@ -88,6 +88,7 @@ bounds upgrade --local .
 cd your-project
 bounds discover                     # preview auto-generated manifests   (dry-run)
 bounds discover --apply             # write root.yaml + manifests
+bounds agent                        # read-only: list which agents this repo has
 bounds agent --sync                 # wire Bounds into your coding agents
 ```
 

@@ -611,9 +611,13 @@ AGENT_KEYS = ("claude","codex","opencode","gemini","copilot","cursor","aider","w
 def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
     # mode "sync"   → write the canonical AGENTS.md (marked block, always) + per-agent pointer
     #                 files (dedicated files overwritten; shared files get a marked block;
-    #                 hand-written configs left untouched). → {created, updated, skipped_custom, canonical}
+    #                 hand-written configs left untouched).
+    #                 → {created, updated, unchanged, skipped_custom, skip_reasons, canonical};
+    #                   skip_reasons maps path → "authored" (human-written file already mentions
+    #                   bounds) | "hand-edited" (our managed block's body changed since we stamped it)
     # mode "detect" → {detected:[agent keys with a native footprint]}
-    # mode "check"  → {ok, missing, configured} over detected-and-selected agents
+    # mode "check"  → {ok, missing, stale, configured} over detected-and-selected agents
+    #                 (+ fix when missing/stale)
     # Raises E_USAGE for an unknown mode or agent key.
 ```
 
@@ -817,7 +821,7 @@ bounds discover [--apply|--dry-run] [--namespace NS] [--merge-into 'name=p1,p2' 
 bounds calibrate [--subsystem S] [--apply|--dry-run|--check|--dump-baseline]
                                    → run_calibrate payload, or calibrate-check / calibrate-baseline payload (see §4)
                                    → --check exits 1 on NEW drift above the committed baseline
-bounds agent (--sync|--detect|--check) [--<agent> ...]
+bounds agent [--detect|--sync|--check] [--<agent> ...]   (no mode = --detect)
                                    → agentsync.run_agent payload (see §4)
 bounds ci --install [--action|--precommit|--gitlab|--all]
                                    → ciconfig.run_ci_install payload {created, skipped, targets}

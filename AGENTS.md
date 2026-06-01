@@ -1,23 +1,28 @@
 <!-- BOUNDS:START -->
-<!-- BOUNDS:GENERATED v=0.1.dev18+gad1b4cc7e.d20260531 h=aa2dffee -->
+<!-- BOUNDS:GENERATED v=2026.6.24 h=9dea5636 -->
 > Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agentsync.py`) instead.
 
 ## Bounds — architecture contract for agents
 
 Bounds models this codebase as subsystem boundary manifests. Query them through the CLI — never read the raw files.
 
-### Agent workflow
-- Start with `bounds list` to find the subsystem map before searching the repo.
-- Read `bounds describe <name>` for the verified public API/table catalog instead of opening source or migrations first.
-- Run `bounds impact <name>` before changing a subsystem interface; run `bounds impact <table>` before editing migrations.
-- After edits, run `bounds validate --quick` and fix drift before broadening context.
+### Which command for which task
+- Understand the layout / find the right subsystem → `bounds list`
+- A subsystem's public API or DB tables → `bounds describe <name>` (a few hundred tokens, tree-sitter-verified — read this instead of opening source or migrations)
+- Every subsystem in a namespace → `bounds describe --namespace <ns>`
+- Where a symbol or table is defined → `bounds where <symbol>`
+- What breaks if you change a subsystem or table → `bounds impact <name>`
+- Confirm an edit didn't drift the contract → `bounds validate --quick`
+- Project health at a glance → `bounds overview`
 
-### Commands
-- `bounds list` — all subsystems (the map; roles + dependency counts)
-- `bounds describe <name>` — one subsystem's public surface/table catalog (a few hundred tokens for a small subsystem, tree-sitter-verified)
-- `bounds describe --namespace <ns>` — every subsystem in a namespace
-- `bounds validate --quick` — catch drift after a change
-- `bounds impact <name>` — transitive blast radius before a risky code or schema change
+### Workflow
+1. `bounds list` before searching the repo.
+2. `bounds describe <name>` instead of opening source or migrations.
+3. `bounds impact <name>` before changing an interface or a migration.
+4. `bounds validate --quick` after edits; fix drift before broadening context.
+
+### Output
+- JSON by default — parse it. Add `-H`/`--human` for a readable view of the same data.
 
 ### Source of Truth
 - GitHub is the single source of truth.
