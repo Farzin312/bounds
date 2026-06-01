@@ -259,8 +259,9 @@ create type mood as enum ('happy', 'sad');
 
 
 def test_sql_adapter_recovers_policies_and_rls():
-    # tree-sitter-sql can't parse Postgres RLS; the adapter recovers it by text scan instead
-    # of dropping it as schema_error, and emits no phantom column for the RLS statement.
+    # tree-sitter-sql can't parse Postgres RLS; the adapter recovers policies from ERROR-node
+    # text and RLS structurally from the misparsed alter, instead of dropping them as
+    # schema_error, and emits no phantom column for the RLS statement.
     src = b"""create table profiles (id uuid primary key);
 alter table profiles enable row level security;
 create policy "owner can read" on profiles for select using (auth.uid() = id);
@@ -275,6 +276,34 @@ create policy "owner can read" on profiles for select using (auth.uid() = id);
     # No phantom column named "enable" from the misparsed RLS statement, and no schema_error.
     assert not any(s.name.endswith(".enable") for s in res.symbols)
     assert "schema_error" not in by_kind
+
+
+def test_sql_disable_rls_is_recovered():
+    res = get_adapter("d.sql").extract("d.sql", b"alter table bar disable row level security;\n")
+    assert res.error is None
+    rls = [s for s in res.symbols if s.kind == "rls"]
+    assert rls and rls[0].name == "bar" and rls[0].metadata.get("schema_op") == "disable_rls"
+    assert not any(s.kind == "schema_error" for s in res.symbols)
+
+
+def test_sql_policy_in_a_comment_is_not_a_symbol():
+    # Policy recovery scans only ERROR-node text; a comment is its own node type, never an
+    # ERROR, so a commented-out CREATE POLICY must not produce a phantom policy symbol.
+    src = b"-- create policy fake on nope for all using (true)\ncreate table t (id int);\n"
+    res = get_adapter("c.sql").extract("c.sql", src)
+    assert res.error is None
+    assert not any(s.kind == "policy" for s in res.symbols)
+    assert {s.kind for s in res.symbols} == {"table"}
+
+
+def test_sql_genuine_error_beside_policy_is_not_masked():
+    # A real broken statement next to a policy must still report as schema_error — the RLS/
+    # policy recovery must never discount a genuine parse error into silence.
+    src = b"create table t (id int);\nalter table t add column;\ncreate policy p on t for all using (true);\n"
+    res = get_adapter("b.sql").extract("b.sql", src)
+    schema_errors = [s for s in res.symbols if s.kind == "schema_error"]
+    assert schema_errors, "a genuine parse error must still surface as schema_error"
+    assert any(s.kind == "table" for s in res.symbols)  # the valid statement still folds
 
 
 def test_sql_all_error_with_revision_header_is_hard_failure():
