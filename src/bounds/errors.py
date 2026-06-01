@@ -25,6 +25,10 @@ E_SCHEMA_NO_ORDER = "E_SCHEMA_NO_ORDER"
 E_SCHEMA_UNPARSED = "E_SCHEMA_UNPARSED"
 E_UNSUPPORTED_LANGUAGE = "E_UNSUPPORTED_LANGUAGE"
 E_EXTRACTION_FAILED = "E_EXTRACTION_FAILED"
+# An adapter's extracted output violated its own declared self-consistency contract
+# (see extract.base.LanguageAdapter.check_contract). Advisory by construction: a
+# contract violation is a regression signal, surfaced as a warning, never a hard block.
+E_ADAPTER_CONTRACT = "E_ADAPTER_CONTRACT"
 
 # ---- Fatal codes (raised) ----
 E_MANIFEST_NOT_FOUND = "E_MANIFEST_NOT_FOUND"
@@ -48,6 +52,7 @@ SEVERITY = {
     E_SCHEMA_UNPARSED: "warning",
     E_UNSUPPORTED_LANGUAGE: "warning",
     E_EXTRACTION_FAILED: "warning",
+    E_ADAPTER_CONTRACT: "warning",
 }
 
 

@@ -301,12 +301,15 @@ def overview_cmd(human: bool) -> None:
 @click.option("--verify", is_flag=True, default=False,
               help="Cross-check the declared blast radius against the resolved import graph "
                    "(extracts source — off the fast path).")
+@click.option("--include-raw-queries", "include_raw", is_flag=True, default=False,
+              help="Add advisory raw-SQL-string consumers of a table (LOW-CONFIDENCE, never "
+                   "counted in blast_radius, never blocking).")
 @_human
-def impact_cmd(name: str, verify: bool, human: bool) -> None:
+def impact_cmd(name: str, verify: bool, include_raw: bool, human: bool) -> None:
     """Show blast radius before changing a subsystem interface or table."""
 
     def go() -> None:
-        output.emit(locate.run_impact(_require_root(), name, verify), human)
+        output.emit(locate.run_impact(_require_root(), name, verify, include_raw), human)
 
     _run(human, go)
 

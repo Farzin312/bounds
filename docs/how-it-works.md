@@ -69,7 +69,7 @@ The two-directional diff distinguishes three failure modes:
 - **Incomplete manifest** — the source exports something the manifest doesn't declare (drift in the other direction).
 - **Cross-subsystem drift** — a provider's interface surface changed and a consumer still declares an interface the provider no longer exports (`E_STALE_INTERFACE`, `E_CONTRACT_MISSING_EXPORT`).
 
-Every `describe`/`validate` payload carries a machine-readable `validation_status` (`fresh` / `stale` / `unresolved`) an agent can branch on. The full set of six checks and their error codes is specified in [../ARCHITECTURE.md](../ARCHITECTURE.md) §7–8.
+Every `describe`/`validate` payload carries a machine-readable `validation_status` (`fresh` / `stale` / `unresolved`) an agent can branch on. The full set of seven checks and their error codes is specified in [../ARCHITECTURE.md](../ARCHITECTURE.md) §7–8.
 
 ## The cache is binary by design — context armor, not access control
 

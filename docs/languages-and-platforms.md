@@ -10,16 +10,17 @@
 
 | Language | Extraction | Describe Merge | Validate | Status |
 |----------|-----------|---------------|----------|--------|
-| **Python** | Functions, classes, decorators (see gaps below) | Yes | Yes | **Implemented** |
-| **TypeScript / JavaScript** | ESM/CommonJS imports and exports; ORM table declarations (see gaps below) | Yes | Yes | **Implemented** |
-| **SQL** | DDL migrations: create/drop/rename tables, add/drop/rename columns | Table catalog | Yes | **Implemented** |
+| **Python** | Functions, classes, decorators; ORM table declarations — SQLAlchemy (`__tablename__`/`__table__`), Django (`models.Model`/`Meta.db_table`) (see gaps below) | Yes | Yes | **Implemented** |
+| **TypeScript / JavaScript** | ESM/CommonJS imports and exports; ORM table declarations — Drizzle (`pgTable`/`sqliteTable`/`mysqlTable`), TypeORM (`@Entity`) (see gaps below) | Yes | Yes | **Implemented** |
+| **SQL** | DDL migrations: create/drop/rename tables, add/drop/rename columns; deterministic migration fold to the current table catalog | Table catalog | Yes | **Implemented** |
+| **Prisma** | `model` blocks → tables (`@@map`/`@map` honored) | Table catalog | Yes | **Implemented** |
 | **Go** | Functions, methods, exported symbols | Planned | Planned | Future (v0.2.0 target) |
 | **Rust** | `pub fn`, `pub struct`, `pub enum`, traits | Planned | Planned | Future (v0.2.0 target) |
 | **Java** | Classes, interfaces, public methods | Planned | Planned | Future (v0.3.0 target) |
 | **Fallback** | YAML-only metadata, no tree-sitter | No merge | Data integrity only | Only for files **explicitly declared** in a manifest |
 
-Python, TypeScript/JavaScript, and SQL migrations are tree-sitter-verified today; Go, Rust, and Java
-are on the roadmap. The **fallback path is not a catch-all** — it only covers files a manifest **names
+Python, TypeScript/JavaScript, SQL migrations, and Prisma schemas are verified today (Prisma via a
+deterministic block parser, the rest tree-sitter); Go, Rust, and Java are on the roadmap. The **fallback path is not a catch-all** — it only covers files a manifest **names
 directly** (metadata is preserved, but there is no tree-sitter verification). Files in an unsupported
 language that are only **auto-discovered** (not declared in a manifest) are silently skipped rather
 than validated.
@@ -33,10 +34,19 @@ than validated.
 >   and only **top-level** imports/exports are captured (nested or conditional ones are skipped).
 > - **Python — `.pyi` stubs** are not analyzed, and **`__all__` is not honored** — the extractor reports
 >   the actual top-level definitions rather than an `__all__`-declared surface.
-> - **SQL — migration ordering.** Plain migrations are ordered by filename prefix/name. Alembic and
->   Django dependency-aware ordering are roadmap items; Bounds never uses file mtimes.
-> - **SQL — query strings.** Raw query references are not treated as verified edges. A query-string
->   guess must not become a blocking boundary violation.
+> - **SQL — migration ordering.** Migrations are ordered by filename numeric/timestamp prefix, an
+>   embedded `revision`/`down_revision` header chain (Alembic-style offline SQL), or an explicit
+>   `-- bounds:order N` header; an order that can't be determined deterministically is folded in
+>   lexical filename order and flagged `E_SCHEMA_NO_ORDER`. Bounds never uses file mtimes. Alembic
+>   and Django *Python* migration files (`op.create_table(...)` / `migrations.CreateModel`) are code,
+>   not `.sql`, and are not folded — model classes are picked up via ORM recognition instead.
+> - **SQL/ORM — query strings.** Raw query references are never verified edges. They are available
+>   only opt-in via `bounds impact <table> --include-raw-queries` as a low-confidence advisory and can
+>   never become a blocking boundary violation (the "verified, not guessed" moat).
+> - **Prisma/ORM — relation fields.** A Prisma relation field (`posts Post[]`, `author User`) is
+>   excluded from the column catalog — it's a model reference, not a database column. Only scalar fields
+>   (`String`, `Int`, `Boolean`, `DateTime`, `Float`, `Json`, `Bytes`, `BigInt`, `Decimal`) and their
+>   list forms (`String[]`) produce column entries.
 >
 > These are extraction limits, not validation bugs: a symbol Bounds can't see simply won't appear in a
 > contract. Declaring such a symbol in a manifest's `exposes` will surface it as unverified.

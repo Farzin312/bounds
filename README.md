@@ -54,7 +54,7 @@ Bounds maintains a hidden `.bounds/` directory of tiny YAML **subsystem manifest
 tree-sitter to validate them against your real source, in both directions.
 
 - **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`; schema subsystems include the current table catalog folded from migrations.
-- **`bounds validate`** — catch drift the moment your code's exports stop matching the manifest. Six structural checks, zero LLM.
+- **`bounds validate`** — catch drift the moment your code's exports stop matching the manifest. Seven checks, zero LLM.
 - **`bounds validate --quick`** — git-diff incremental validation, safe for every commit.
 - **`bounds preflight`** — run all the pre-PR checks at once: drift, boundary violations, broken contracts, dependency cycles, orphaned subsystems, and impact.
 - **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface or a table changes.
@@ -118,9 +118,10 @@ measured numbers (one repo, one data point), the scaling argument, and the conte
 
 ## Languages & platforms
 
-**Python, TypeScript/JavaScript, and SQL migrations** are tree-sitter-verified today; runs on
-**Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on the roadmap. See
-[docs/languages-and-platforms.md](docs/languages-and-platforms.md).
+**Python, TypeScript/JavaScript, SQL migrations, and Prisma schemas** are verified today — including
+database tables, whether declared as raw DDL, ORM models (SQLAlchemy/Django/Drizzle/TypeORM), or
+Prisma `model` blocks. Runs on **Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java
+adapters are on the roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
 
 ---
 

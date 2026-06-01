@@ -129,6 +129,99 @@ export class Account {}
     assert tables == {"users": "users", "accounts": "Account"}
 
 
+def _py_tables(src: bytes) -> dict[str, str]:
+    res = get_adapter("m.py").extract("m.py", src)
+    return {s.name: s.metadata.get("model") for s in res.symbols if s.kind == "table"}
+
+
+def _py_kinds(src: bytes) -> dict[str, str]:
+    res = get_adapter("m.py").extract("m.py", src)
+    return {s.name: s.kind for s in res.symbols}
+
+
+# ---- Python ORM false-positives / false-negatives ----
+def test_orm_django_abstract_model_is_not_a_table():
+    # Meta.abstract = True is a base/mixin, never a real table (no false positive).
+    assert _py_tables(b"class Base(models.Model):\n    class Meta:\n        abstract = True\n") == {}
+
+
+def test_orm_tablename_substring_is_not_a_table():
+    # A string literal that merely contains "__tablename__" must not fabricate a table.
+    assert _py_kinds(b'class Foo(Bar):\n    note = "see __tablename__ docs"\n')["Foo"] == "class"
+
+
+def test_orm_fstring_tablename_falls_back_to_class_name():
+    # A dynamic f-string name is not statically knowable → fall back, don't fabricate.
+    assert _py_tables(b'class A(Base):\n    __tablename__ = f"p_{x}"\n') == {"A": "A"}
+
+
+def test_orm_sqlalchemy_imperative_table_is_detected():
+    assert _py_tables(b'class A(Base):\n    __table__ = Table("widgets", meta)\n') == {"widgets": "A"}
+
+
+def test_orm_plain_class_stays_class():
+    assert _py_kinds(b"class Foo(Bar):\n    pass\n")["Foo"] == "class"
+
+
+def test_orm_typeorm_entity_object_name_form():
+    src = b'@Entity({ name: "accounts" })\nexport class Account {}\n'
+    res = get_adapter("e.ts").extract("e.ts", src)
+    assert {s.name: s.metadata.get("model") for s in res.symbols if s.kind == "table"} == {"accounts": "Account"}
+
+
+def test_orm_drizzle_sqlite_and_mysql_tables():
+    src = (b'export const a = sqliteTable("a_tbl", {});\n'
+           b'export const b = mysqlTable("b_tbl", {});\n')
+    res = get_adapter("d.ts").extract("d.ts", src)
+    assert {s.name for s in res.symbols if s.kind == "table"} == {"a_tbl", "b_tbl"}
+
+
+def test_prisma_adapter_extracts_models_as_tables():
+    src = (b'model User {\n  id Int @id\n  email String\n  @@map("users")\n}\n'
+           b'model Post {\n  id Int @id\n  title String @map("post_title")\n}\n')
+    res = get_adapter("schema.prisma").extract("schema.prisma", src)
+    assert res.language == "prisma"
+    tables = {s.name: sorted(s.metadata.get("columns", [])) for s in res.symbols if s.kind == "table"}
+    assert tables == {"users": ["email", "id"], "Post": ["id", "post_title"]}
+
+
+def test_prisma_brace_inside_string_does_not_desync():
+    # A `{`/`}` inside a string default must not swallow or split the next model.
+    src = (b'model A {\n  id Int @id\n  cfg String @default("{")\n}\n'
+           b'model B {\n  id Int @id\n}\n')
+    res = get_adapter("schema.prisma").extract("schema.prisma", src)
+    names = {s.name for s in res.symbols if s.kind == "table"}
+    assert names == {"A", "B"}  # B not dropped; no phantom 'model' column on A
+    a = next(s for s in res.symbols if s.name == "A")
+    assert "model" not in a.metadata.get("columns", [])
+
+
+def test_prisma_relation_fields_are_not_columns():
+    # Relation fields (PascalCase model/enum types) are joins, not database columns, so they
+    # must not appear in a table's column surface — else `describe` reports phantom columns and
+    # a column-granular contract like `User.posts` passes check_contract incorrectly.
+    src = (b"model User {\n"
+           b"  id Int @id\n"
+           b"  email String\n"
+           b"  posts Post[]\n"            # relation (model list)
+           b"  profile Profile?\n"        # relation (optional model)
+           b"  role Role\n"               # relation (enum)
+           b"  tags String[]\n"           # scalar list — still a column
+           b"}\n"
+           b"model Post {\n"
+           b"  id Int @id\n"
+           b"  title String\n"
+           b"  author User @relation(fields: [authorId], references: [id])\n"  # relation
+           b"  authorId Int\n"            # scalar FK — a real column
+           b"}\n")
+    res = get_adapter("schema.prisma").extract("schema.prisma", src)
+    cols = {s.name: sorted(s.metadata.get("columns", [])) for s in res.symbols if s.kind == "table"}
+    assert cols == {
+        "User": ["email", "id", "tags"],
+        "Post": ["authorId", "id", "title"],
+    }
+
+
 def test_sql_adapter_extracts_ddl_operations():
     src = b"""CREATE TABLE users (id integer primary key, email text);
 ALTER TABLE users ADD COLUMN name text;
@@ -140,6 +233,16 @@ ALTER TABLE users RENAME COLUMN name TO full_name;
     assert ("table", "users", "create_table") in ops
     assert ("column", "users.name", "add_column") in ops
     assert ("rename", "users.name", "rename_column") in ops
+
+
+def test_sql_all_error_with_revision_header_is_hard_failure():
+    # A migration whose body is wholly unparsable is a hard extraction failure even when it
+    # carries a valid `-- revision` header: the schema_meta header is not a parsed statement,
+    # so it must not be folded as a partial/cached result that masks the breakage.
+    src = b"-- revision: 1\n-- down_revision: 0\n@@@ not sql at all @@@\n"
+    res = get_adapter("001_broken.sql").extract("001_broken.sql", src)
+    assert res.error  # non-empty hard error, not a partial result
+    assert not res.symbols  # no schema_meta / partial symbols leak through
 
 
 # ---- TypeScript/JS: CommonJS ----

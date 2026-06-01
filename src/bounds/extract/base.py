@@ -21,7 +21,8 @@ from abc import ABC, abstractmethod
 
 import json
 
-from ..models import ExtractResult, ImportRef, Symbol
+from .. import errors
+from ..models import ExtractResult, ImportRef, Issue, Symbol
 
 
 class LanguageAdapter(ABC):
@@ -29,6 +30,9 @@ class LanguageAdapter(ABC):
 
     language_name: str
     extensions: tuple[str, ...]
+    # Human-readable statement of the self-consistency invariant an adapter's output
+    # must satisfy, surfaced in docs/help. Empty when the adapter declares no contract.
+    contract_description: str = ""
 
     @abstractmethod
     def extract(self, rel_path: str, source: bytes) -> ExtractResult:
@@ -39,6 +43,32 @@ class LanguageAdapter(ABC):
         the result, never a raised exception.
         """
         raise NotImplementedError
+
+    def check_contract(self, result: ExtractResult) -> list[Issue]:
+        """Return Issues when this adapter's *own output* violates its declared
+        self-consistency contract — a deterministic, zero-LLM regression guard.
+
+        The check reads only an already-built :class:`ExtractResult` (never the
+        filesystem or tree-sitter), so it is a pure function of the adapter's output
+        and safe to run inside the validation checks. Base implementation declares no
+        contract and returns no issues; adapters with invariants override this and
+        build issues via :meth:`_contract_issue`.
+        """
+        return []
+
+    def _contract_issue(self, message: str, file: str | None, fix: str | None = None) -> Issue:
+        """Build an ``E_ADAPTER_CONTRACT`` Issue with the code's canonical severity.
+
+        Centralises construction so every adapter's contract violation carries the
+        same code/severity (``errors.SEVERITY`` is the single home for the latter).
+        """
+        return Issue(
+            errors.E_ADAPTER_CONTRACT,
+            errors.SEVERITY[errors.E_ADAPTER_CONTRACT],
+            message,
+            file=file,
+            fix=fix,
+        )
 
 
 def content_hash(source: bytes) -> str:

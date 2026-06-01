@@ -1,4 +1,4 @@
-"""The 6 structural checks + the CheckContext they run against + the per-mode dispatch table.
+"""The 7 checks (six structural + the adapter-output-contract advisory) + a schema-health advisory + the CheckContext they run against + the per-mode dispatch table.
 
 Every check is a pure function ``(CheckContext) -> list[Issue]``. None of them read the filesystem or
 call tree-sitter — they operate on the already-extracted results and the loaded manifests. All produced
@@ -13,9 +13,10 @@ from pathlib import Path
 from posixpath import normpath
 
 from .. import errors
+from ..extract import get_adapter
 from ..extract.scan import strip_ext
 from ..models import ExtractResult, Issue, RootManifest, SubsystemCompact
-from .schema import _fold_subsystem_schema
+from .schema import SCHEMA_LANGUAGES, _fold_subsystem_schema, schema_diagnostics
 
 
 def _issue(
@@ -66,25 +67,43 @@ class CheckContext:
         )
 
     def actual_exports(self, subsystem: str) -> set[str]:
-        """Union of exported symbol names across the subsystem's extracted files."""
+        """Exported surface of a subsystem: code's exported symbols + folded table names.
+
+        Table-level only here (not ``table.column``): column-granular drift is resolved
+        against the fold in :func:`check_structural_drift`, so enumerating every column into
+        the flat set would otherwise spam an undeclared-export ``info`` per column.
+        """
         out: set[str] = set()
         for p in self.files_of(subsystem):
             out |= self.extracts[p].exported_names()
-        out |= set(_fold_subsystem_schema(subsystem, self.extracts, self.file_owner))
+        out |= set(self.schema_tables(subsystem))
         return out
 
     def all_symbol_names(self, subsystem: str) -> set[str]:
-        """All symbol names (exported or not) the subsystem actually defines."""
+        """All symbol names (exported or not) the subsystem actually defines.
+
+        For SQL files the materialized fold is the authority (a dropped/renamed table must
+        not linger via its raw CREATE symbol), so raw per-statement SQL symbols are skipped
+        and the table + ``table.column`` surface comes from the fold instead.
+        """
         out: set[str] = set()
         for p in self.files_of(subsystem):
+            if self.extracts[p].language in SCHEMA_LANGUAGES:
+                continue
             out |= {s.name for s in self.extracts[p].symbols}
-        for table, state in _fold_subsystem_schema(subsystem, self.extracts, self.file_owner).items():
+        for table, state in self.schema_tables(subsystem).items():
             out.add(table)
             out |= {f"{table}.{column}" for column in state.columns}
         return out
 
     def schema_tables(self, subsystem: str):
-        return _fold_subsystem_schema(subsystem, self.extracts, self.file_owner)
+        """Folded ``{table: _TableState}`` for a schema subsystem (memoized per context)."""
+        cache = getattr(self, "_schema_cache", None)
+        if cache is None:
+            cache = self._schema_cache = {}
+        if subsystem not in cache:
+            cache[subsystem] = _fold_subsystem_schema(subsystem, self.extracts, self.file_owner)
+        return cache[subsystem]
 
     def _index(self) -> tuple[dict[str, str], dict[str, str]]:
         cached = getattr(self, "_idx", None)
@@ -222,7 +241,16 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
         sub = ctx.subsystems[name]
         declared = sub.expose_names()
         actual = ctx.actual_exports(name)
+        schema = ctx.schema_tables(name)
         for missing in sorted(declared - actual):
+            # A column-granular expose (``users.email``) is satisfied when the fold still has
+            # that table+column; a dropped column then correctly drifts. This mirrors the
+            # consumes resolution in check_contract so exposes and consumes agree.
+            if "." in missing:
+                table, column = missing.split(".", 1)
+                state = schema.get(table)
+                if table in actual and state is not None and column in state.columns:
+                    continue
             issues.append(
                 _issue(
                     errors.E_STRUCTURAL_DRIFT,
@@ -237,7 +265,12 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
         # most common real drift (a new undeclared export on a leaf/connector) was invisible.
         # Severity stays info (never blocks), so exit codes are unchanged.
         if declared:
+            # Tables whose columns are declared column-granularly (``users.email``) shouldn't
+            # also be reported as an undeclared table-level export.
+            declared_table_parents = {d.split(".", 1)[0] for d in declared if "." in d}
             for extra in sorted(actual - declared):
+                if extra in declared_table_parents:
+                    continue
                 issues.append(
                     _issue(
                         errors.E_STRUCTURAL_DRIFT,
@@ -456,6 +489,55 @@ def check_orphans(ctx: CheckContext) -> list[Issue]:
 
 
 # ===========================================================================
+# Check 7 — schema health (advisory; warnings only, never blocks)
+# ===========================================================================
+def check_schema(ctx: CheckContext) -> list[Issue]:
+    """Surface SQL-fold advisories: unparsable statements and undetermined migration order.
+
+    Both are warnings by construction (see ``errors.SEVERITY``) — a schema that can't be
+    perfectly parsed or ordered is reported, never blocking, honouring fail-soft/report-hard.
+    """
+    issues: list[Issue] = []
+    seen: set[tuple] = set()
+    for name in sorted(ctx.subsystems):
+        for code, message, file in schema_diagnostics(name, ctx.extracts, ctx.file_owner):
+            key = (code, name, file, message)
+            if key in seen:
+                continue
+            seen.add(key)
+            issues.append(_issue(code, message, subsystem=name, file=file,
+                                 fix="add a numeric filename prefix, a revision/down_revision "
+                                     "header, or '-- bounds:order N'; or fix the SQL syntax"))
+    return issues
+
+
+# ===========================================================================
+# Check 8 — adapter output contracts (advisory; warnings only, never blocks)
+# ===========================================================================
+def check_adapter_contracts(ctx: CheckContext) -> list[Issue]:
+    """Run each adapter's self-consistency contract against its own extracted output.
+
+    A pure regression guard (zero LLM; no tree-sitter parse, no filesystem read — it
+    only inspects already-built ``ExtractResult``s): for every extracted file it resolves
+    the owning adapter by extension and asks it to validate its own output. Catches the
+    class of bug that adapter logic alone can silently regress on — a Prisma relation
+    field leaking in as a column, or an all-unparsable SQL migration whose revision header
+    masked the failure. Always advisory (``E_ADAPTER_CONTRACT``
+    is a warning in ``errors.SEVERITY``), so it never changes exit codes.
+    """
+    issues: list[Issue] = []
+    for rel in sorted(ctx.extracts):
+        adapter = get_adapter(rel)
+        if adapter is None:
+            continue
+        for issue in adapter.check_contract(ctx.extracts[rel]):
+            if issue.subsystem is None:
+                issue.subsystem = ctx.file_owner.get(rel)
+            issues.append(issue)
+    return issues
+
+
+# ===========================================================================
 # Mode dispatch
 # ===========================================================================
 _ALL = [
@@ -465,10 +547,12 @@ _ALL = [
     check_cross_impact,
     check_cycles,
     check_orphans,
+    check_schema,
+    check_adapter_contracts,
 ]
 
 CHECKS_BY_MODE = {
-    "quick": [check_structural_drift, check_cross_impact],
+    "quick": [check_structural_drift, check_cross_impact, check_schema, check_adapter_contracts],
     "full": list(_ALL),
     "preflight": list(_ALL),
     "audit": list(_ALL),
