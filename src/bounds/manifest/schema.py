@@ -59,7 +59,7 @@ def validate_root(data: dict) -> list[Issue]:
                 code=errors.E_SCHEMA_INVALID,
                 severity="error",
                 message=f"root manifest 'enforce' must be one of {sorted(config.VALID_ENFORCE)}, got {enforce!r}",
-                fix='set `enforce: "off"` (or "on") in root.yaml',
+                fix='set `enforce:` to "off" (advisory), "warn" (report, never block), or "on" (block) in root.yaml',
             )
         )
 

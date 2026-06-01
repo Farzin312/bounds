@@ -5,7 +5,7 @@ from __future__ import annotations
 import yaml
 
 from bounds import config
-from bounds.calibrate import run_calibrate
+from bounds.calibrate import check_drift, dump_baseline, run_calibrate
 
 
 def _build(tmp_path):
@@ -148,3 +148,51 @@ def test_calibrate_clean_subsystem_absent_from_proposal(tmp_path):
     result = run_calibrate(tmp_path)
     assert result["summary"]["added"] == 0
     assert result["summary"]["removed"] == 0
+
+
+# ---- Drift baseline + check (the freshness gate) ----
+def test_check_without_baseline_flags_all_drift(tmp_path):
+    _build(tmp_path)  # the fixture carries real drift (verify undeclared, DROPME stale, ...)
+    result = check_drift(tmp_path)
+    assert result["mode"] == "calibrate-check"
+    assert result["has_baseline"] is False
+    assert result["ok"] is False
+    assert result["new_count"] > 0
+    # Each item is structured for an agent, not a raw key.
+    assert all({"subsystem", "change", "target"} <= set(item) for item in result["new_drift"])
+
+
+def test_baseline_then_check_is_clean(tmp_path):
+    _build(tmp_path)
+    dumped = dump_baseline(tmp_path)
+    assert dumped["drift_count"] > 0
+    assert (tmp_path / config.BOUNDS_DIR / config.DRIFT_BASELINE_FILE).is_file()
+    # With every existing item baselined, the check passes (nothing NEW above baseline).
+    result = check_drift(tmp_path)
+    assert result["has_baseline"] is True
+    assert result["ok"] is True
+    assert result["new_count"] == 0
+
+
+def test_check_flags_only_new_drift_above_baseline(tmp_path):
+    _build(tmp_path)
+    dump_baseline(tmp_path)
+    # Introduce NEW drift: add an undeclared export to db.
+    (tmp_path / "src" / "db" / "store.py").write_text(
+        "def connect():\n    pass\ndef query(sql):\n    pass\ndef brand_new():\n    pass\n"
+    )
+    result = check_drift(tmp_path)
+    assert result["ok"] is False
+    assert result["new_count"] == 1
+    item = result["new_drift"][0]
+    assert item["subsystem"] == "db" and item["change"] == "add_expose" and item["target"] == "brand_new"
+
+
+def test_resolving_drift_does_not_fail_check(tmp_path):
+    _build(tmp_path)
+    dump_baseline(tmp_path)
+    # Resolve all drift by applying the reconciliation; fewer keys than baseline must pass.
+    run_calibrate(tmp_path, apply=True)
+    result = check_drift(tmp_path)
+    assert result["ok"] is True
+    assert result["resolved_count"] > 0

@@ -99,8 +99,19 @@ def _run(human: bool, fn, ci: bool = False):
         sys.exit(config.EXIT_FATAL)
 
 
+def _version_display(raw: str) -> str:
+    """A coherent ``--version`` string: a clean release reads as-is; an untagged build is
+    labelled so ``0.1.dev21`` doesn't look like a broken release number to a user."""
+    if raw == "unknown":
+        return "unknown (not installed as a package)"
+    if "dev" in raw or "+" in raw:
+        return f"{raw} (development build — install a tagged release for a stable version)"
+    return raw
+
+
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
-@click.version_option(__version__, prog_name="bounds")
+@click.version_option(_version_display(__version__), prog_name="bounds",
+                      message="%(prog)s %(version)s")
 def main() -> None:
     """Bounds — AI-first architecture context for coding agents.
 
@@ -503,17 +514,32 @@ def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
               help="Write the proposed reconciliation to the manifests (default: diff only).")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
               help="Explicitly show the diff without writing (the default).")
+@click.option("--check", "do_check", is_flag=True, default=False,
+              help="Exit non-zero on NEW drift above the committed baseline (CI gate; never writes).")
+@click.option("--dump-baseline", "do_dump", is_flag=True, default=False,
+              help="Record current drift as the accepted baseline in .bounds/drift-baseline.json.")
 @_human
-def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool, human: bool) -> None:
+def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
+                  do_check: bool, do_dump: bool, human: bool) -> None:
     """Keep contracts aligned with extracted source after code changes."""
 
     def go() -> None:
-        if do_apply and dry_run:
+        # The four modes are mutually exclusive: diff (default) / apply / check / dump-baseline.
+        chosen = [n for n, on in
+                  (("--apply", do_apply), ("--check", do_check), ("--dump-baseline", do_dump)) if on]
+        if len(chosen) > 1 or (do_apply and dry_run):
             raise errors.BoundsError(
-                errors.E_USAGE, "pass either --apply or --dry-run, not both",
-                fix="omit both for a diff, or pass --apply to write",
+                errors.E_USAGE, "pass at most one of --apply / --check / --dump-baseline",
+                fix="omit all for a diff, --apply to write, --check to gate, --dump-baseline to record",
             )
         root = _require_root()
+        if do_dump:
+            output.emit(calibrate_mod.dump_baseline(root, subsystem=subsystem), human)
+            return
+        if do_check:
+            payload = calibrate_mod.check_drift(root, subsystem=subsystem)
+            output.emit(payload, human)
+            sys.exit(config.EXIT_OK if payload["ok"] else config.EXIT_BLOCKED)
         payload = calibrate_mod.run_calibrate(root, subsystem=subsystem, apply=do_apply)
         output.emit(payload, human)
 

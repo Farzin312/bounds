@@ -24,16 +24,16 @@ list and severity/exit-code mapping.
 | `bounds list` | Agent starting map: all subsystems with role, criticality, exposes, consumes, consumed_by. `--namespace <ns>` filters |
 | `bounds describe <name>` | Agent context slice: one subsystem's merged Tier-1+2 surface as JSON. Per-expose `name`/`kind`/`file`/`verified`; table exposes include `columns`; subsystem-level `tables`/`consumes`/`consumed_by`/`entry_points`/`validation_status`. `--namespace <ns>` describes a whole group; `--deep` adds the (stubbed) Tier-3 LLM tier |
 | `bounds impact <name>` | Pre-edit blast radius for a subsystem, interface, or table + which interfaces each direct consumer relies on. Zero LLM |
-| `bounds validate` | Post-edit drift check — all 7 checks. `--quick`, `--mode quick\|full\|preflight\|hotfix\|audit`, `--enforce on\|off`, `--base <ref>` |
+| `bounds validate` | Post-edit drift check — all 7 checks. `--quick`, `--mode quick\|full\|preflight\|hotfix\|audit`, `--enforce on\|off\|warn`, `--base <ref>` |
 | `bounds preflight` | Blocking CI gate: 7 pre-PR checks |
 | `bounds overview` | Project dashboard: `project`, subsystem count, `roles`/`criticality` breakdown, dependency `edges` (from/to/interfaces), `cycles`, `schema_issues`, and a `health` summary (`ok`/`schema_errors`/`cycles`) |
 | `bounds discover` | Auto-generate candidate manifests from un-bounded source. `--apply`, `--namespace <ns>`, `--merge-into 'name=p1,p2'` |
-| `bounds calibrate` | Reconcile manifests vs tree-sitter reality (ADD / REMOVE / NEEDS_REVIEW / `consumes` fixes). `--apply`, `--subsystem <n>` |
+| `bounds calibrate` | Reconcile manifests vs tree-sitter reality (ADD / REMOVE / NEEDS_REVIEW / `consumes` fixes). `--apply`, `--subsystem <n>`, `--check` (CI freshness gate: exits non-zero on NEW drift above the committed baseline, never writes), `--dump-baseline` (record current drift as accepted in `.bounds/drift-baseline.json`) |
 | `bounds agent` | Wire Bounds into eight coding agents so they query `list`/`describe`/`impact` before broad source search. `--sync`, `--detect`, `--check`, per-agent flags |
 | `bounds ci` | Generate CI gate config to enforce the agent workflow. `--install`, `--action`, `--precommit`, `--gitlab`, `--all` |
 | `bounds cache` | Manage the binary `.bounds/cache.db`. `--inspect`, `--prune`, `--migrate` |
 | `bounds upgrade` | Opt-in self-upgrade through pipx. Defaults to GitHub `main`; `--ref <tag-or-branch>`, `--local <path>`, and `--dry-run` are available |
-| `bounds upgrade-check` | Opt-in: ask the GitHub Releases API whether a newer Bounds release exists. Returns `current`, `latest`, `outdated`, `is_dev_build`, `checked`, `fix`, `note`. Networked and off the structural path; fails soft when offline and always exits `0` |
+| `bounds upgrade-check` | Opt-in: ask the GitHub Releases API whether a newer Bounds release exists. Returns `status` (`up_to_date`\|`outdated`\|`dev_build`\|`no_release`\|`unreachable`) + `needs_upgrade` as the machine verdict, plus `current`, `latest`, `outdated`, `is_dev_build`, `checked`, `fix`, `note`. Networked and off the structural path; fails soft when offline and always exits `0` |
 
 ---
 

@@ -54,6 +54,12 @@ def run_upgrade(
         "command": primary,
         "returncode": None,
         "version": None,
+        # Semantic failure class so a consumer never has to interpret a raw pipx return
+        # code: null on success/dry-run, else one of the _ERROR_* codes below.
+        "error": None,
+        # True when --force was refused and the uninstall+reinstall fallback path was taken
+        # (whether or not that fallback then succeeded — check ``ok`` for the final outcome).
+        "fallback_used": False,
         "stderr": "",
         "note": "",
     }
@@ -70,6 +76,7 @@ def run_upgrade(
 
     # Some pipx versions fail --force when the venv already exists. Fall back to an
     # explicit uninstall/install sequence, still under the user's explicit upgrade command.
+    payload["fallback_used"] = True
     fallback = fallback_commands(ref=ref, local=local, pipx=pipx)
     uninstall = _run(fallback[0])
     install = _run(fallback[1])
@@ -77,12 +84,28 @@ def run_upgrade(
     payload["ok"] = install.returncode == 0
     if payload["ok"]:
         payload["version"] = _extract_version(install.stdout)
-        payload["note"] = "upgrade completed"
+        payload["note"] = "upgrade completed (after reinstall)"
     else:
         all_stderr = "\n".join(filter(None, [first.stderr, uninstall.stderr, install.stderr]))
         payload["stderr"] = _tail(all_stderr)
+        payload["error"] = _error_class(install.returncode)
         payload["note"] = "upgrade failed"
     return payload
+
+
+# Stable, machine-readable failure classes derived from the subprocess return code.
+_ERROR_PIPX_NOT_FOUND = "pipx_not_found"  # 127 from _run's OSError branch (pipx missing)
+_ERROR_TIMEOUT = "timeout"               # 124 from _run's TimeoutExpired branch
+_ERROR_INSTALL_FAILED = "install_failed"  # any other non-zero pipx exit
+
+
+def _error_class(returncode: int | None) -> str:
+    """Map a pipx return code to a stable semantic error class for the JSON contract."""
+    if returncode == 127:
+        return _ERROR_PIPX_NOT_FOUND
+    if returncode == 124:
+        return _ERROR_TIMEOUT
+    return _ERROR_INSTALL_FAILED
 
 
 def refresh_command() -> str:

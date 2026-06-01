@@ -42,8 +42,8 @@ A PyPI **release workflow is configured** (OIDC / trusted publishing, triggered 
 
 | Channel | Command | Status |
 |---------|---------|--------|
-| **pipx** | `pipx install bounds` | Works once PyPI publish lands (OIDC workflow configured) |
-| **pip** | `pip install bounds` | Works once PyPI publish lands (OIDC workflow configured) |
+| **pipx** | `pipx install bounds-cli` | Works once PyPI publish lands (the bare `bounds` name is an unrelated project — always use `bounds-cli`) |
+| **pip** | `pip install bounds-cli` | Works once PyPI publish lands (the bare `bounds` name is an unrelated project — always use `bounds-cli`) |
 | **Clone + pip (git)** | `pip install git+https://github.com/Farzin312/bounds.git` | Works now |
 | **install.sh (git ref)** | `BOUNDS_REF=main ./install.sh` | Works now (git install via `BOUNDS_REF`) |
 | **install.sh (PyPI)** | `curl -sSL https://bounds.dev/install.sh \| bash` | Pending PyPI publish |

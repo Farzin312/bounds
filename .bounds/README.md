@@ -6,7 +6,7 @@ YAML files that describe the architecture of this project to AI coding agents.
 ## Quick start
 
 ```bash
-pip install bounds
+pipx install "git+https://github.com/Farzin312/bounds.git"   # published on PyPI as bounds-cli
 bounds list                   # discover subsystems
 bounds describe <name>        # one subsystem in detail
 bounds validate --human       # check manifests vs source
@@ -28,7 +28,7 @@ everything.
     auth.yaml
     billing.yaml
     ...
-  state.json              # Content-addressed extraction cache (gitignored)
+  cache.db                # Binary SQLite extraction cache (gitignored; not human-readable by design)
 ```
 
 ## For AI agents

@@ -412,6 +412,11 @@ def _status(issues: list[Issue]) -> str:
 
 def _is_blocking(issues: list[Issue], mode: str, enforce: str) -> bool:
     has_error = any(i.severity == "error" for i in issues)
+    if enforce == "warn":
+        # Report-but-never-block: warn mode surfaces every issue (CI still prints the
+        # report and the JSON still carries the errors) yet always exits clean, so a team
+        # can watch structural drift on every PR before committing to a hard gate.
+        return False
     if mode == "preflight":
         return has_error
     if mode == "full":

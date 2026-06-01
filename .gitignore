@@ -37,6 +37,11 @@ __editable__.*
 .github/copilot-instructions.md
 GEMINI.md
 
+# Private design-vault stray docs accidentally dropped at the repo root. Internal idea-vault
+# notes use `s-<N>-*.md` filenames and reference internal IDs (gen labels, premortems); they
+# belong in the private vault, never in this public repo. Guard so they can't be committed.
+/s-[0-9]*-*.md
+
 # OS / editor
 .DS_Store
 Thumbs.db

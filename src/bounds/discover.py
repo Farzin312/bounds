@@ -11,7 +11,10 @@ Heuristic (deterministic, zero LLM):
 
 1. Walk the repo for supported source files (honouring ignore dirs + ``.boundsignore``).
 2. A **candidate** is any directory holding direct source files; score by direct-file count
-   (high 5-50, medium 3-5, low <3 — low candidates are dropped unless merged).
+   (high ≥5, medium 3-4, low <3 — low candidates are dropped unless merged). A directory
+   whose files are predominantly SQL/Prisma schema (a migration set) is always kept,
+   regardless of count: the schema fold collapses N migrations into one table surface, so
+   the per-file count carries no signal there.
 3. Tree-sitter each candidate's files → ``exposes`` (every exported symbol, ``verified: true``
    since extraction confirmed it), skipping ``@generated`` files.
 4. Resolve cross-candidate imports → ``consumes`` edges (direct imports only).
@@ -31,6 +34,7 @@ from . import config, errors, gitutil
 from .extract.scan import extract_file, iter_repo_source
 from .ignore import load_matcher
 from .validate.checks import index_extracts, resolve_import
+from .validate.schema import SCHEMA_LANGUAGES, schema_catalog
 
 
 def run_discover(
@@ -93,7 +97,10 @@ def run_discover(
     kept: list[str] = []
     for name in sorted(candidate_files):
         files = sorted(candidate_files[name])
-        score = _score(len(files))
+        is_schema = _is_schema_candidate(files, extracts)
+        # A migration set folds to one table surface, so file count is meaningless there:
+        # schema dirs are always kept (even a lone schema.sql), never count-dropped.
+        score = "schema" if is_schema else _score(len(files))
         merged = any(name == m[0] for m in merges)
         if score == "low" and not merged:
             candidates.append({"name": name, "files": len(files), "score": score, "dropped": True})
@@ -112,6 +119,13 @@ def run_discover(
             "exposes": exposes,
             "consumes": sorted(consumes.get(name, set())),
         }
+        if is_schema:
+            # SQL/Prisma DDL never produces *exported* symbols (the table surface is the
+            # fold's job, not a declared export), so ``exposes`` is legitimately empty here.
+            # Surface the folded table count so an --apply run visibly maps the schema
+            # instead of looking like an empty subsystem.
+            cand["schema"] = True
+            cand["tables"] = len(schema_catalog(name, extracts, file_to_candidate))
         if namespace:
             cand["namespace"] = namespace
         candidates.append(cand)
@@ -261,11 +275,32 @@ def _candidate_paths(name: str, files: list[str]) -> list[str]:
 # Scoring + inference
 # ---------------------------------------------------------------------------
 def _score(n: int) -> str:
-    if 5 <= n <= 50:
+    """Confidence that a directory is a real subsystem, from its direct-file count.
+
+    No upper bound: a large directory is a *legitimately large* subsystem (e.g. a flat
+    ``components/`` tree), not garbage — dropping it silently would hide the repo's biggest
+    surfaces from the map, the opposite of discovery's job. Junk dirs are excluded upstream
+    by ``DEFAULT_IGNORES`` + ``.gitignore`` + generated-file detection, not by a size cap.
+    """
+    if n >= 5:
         return "high"
-    if 3 <= n < 5:
+    if n >= 3:
         return "medium"
     return "low"
+
+
+def _is_schema_candidate(files: list[str], extracts: dict) -> bool:
+    """True when a candidate's extracted files are predominantly SQL/Prisma schema DDL.
+
+    Such a directory (a migration set, or a ``schema.sql`` snapshot) is always kept: the
+    subsystem-level schema fold collapses any number of migrations into a single table
+    surface, so the per-file count that scores ordinary code dirs carries no signal here.
+    """
+    langs = [extracts[rel].language for rel in files if rel in extracts]
+    if not langs:
+        return False
+    schema_n = sum(1 for lang in langs if lang in SCHEMA_LANGUAGES)
+    return schema_n >= 1 and schema_n * 2 >= len(langs)  # schema-dominant (≥ half)
 
 
 def _infer_role(consumed_by: int, consumes_count: int) -> str:
