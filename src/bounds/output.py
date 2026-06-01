@@ -308,6 +308,14 @@ def _render_subsystem_human(payload: dict) -> str:
             detail = f" [{', '.join(columns)}]" if columns else ""
             lines.append(f"  - {table.get('name', '?')}{detail}")
 
+    objects = payload.get("schema_objects", [])
+    if objects:
+        lines.append("")
+        lines.append(f"schema objects ({len(objects)}):")
+        for obj in objects:
+            on = f" on {obj['table']}" if obj.get("table") else ""
+            lines.append(f"  - {obj.get('kind', '?')} {obj.get('name', '?')}{on}")
+
     consumes = payload.get("consumes", [])
     if consumes:
         lines.append("")

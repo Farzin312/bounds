@@ -19,14 +19,16 @@ from .extract import scan, supported_extensions
 from .ignore import IgnoreMatcher
 from .models import SubsystemCompact, ValidationReport
 from .validate import engine as validate_engine
-from .validate.schema import schema_catalog, schema_structure_hash
+from .validate.schema import schema_catalog, schema_objects, schema_structure_hash
 
 
-def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], list[str], list[str], list[dict], str]:
+def extract_owned(
+    root: Path, sub: SubsystemCompact
+) -> tuple[dict[str, str], list[str], list[str], list[dict], str, list[dict]]:
     """Tier-1 extraction for one subsystem.
 
     Returns ``(exported_symbol_name -> owning_file, owned_files, unparsed_files, table_catalog,
-    schema_hash)``. Every file the
+    schema_hash, schema_objects)``. Every file the
     subsystem owns is recorded in ``owned_files`` regardless of whether it parses (so ``files``
     reflects the declared surface); only cleanly-extracted exported symbols populate the symbol map
     used to mark ``exposes`` entries ``verified``. A supported owned file that fails to extract
@@ -62,7 +64,8 @@ def extract_owned(root: Path, sub: SubsystemCompact) -> tuple[dict[str, str], li
         if files:
             extracted_symbols[str(table["name"])] = str(files[0])
     schema_hash = schema_structure_hash(sub.name, extracts, file_owner) if catalog else ""
-    return extracted_symbols, owned_files, unparsed_files, catalog, schema_hash
+    objects = schema_objects(sub.name, extracts, file_owner)
+    return extracted_symbols, owned_files, unparsed_files, catalog, schema_hash, objects
 
 
 def describe_one(
@@ -84,7 +87,7 @@ def describe_one(
     so an agent sees a symbol lives in a bootstrap file.
     """
     payload = sub.to_dict()
-    extracted_symbols, owned_files, unparsed_files, catalog, schema_hash = extract_owned(root, sub)
+    extracted_symbols, owned_files, unparsed_files, catalog, schema_hash, objects = extract_owned(root, sub)
     for expose in payload.get("exposes", []):
         ename = expose.get("name", "")
         if ename in extracted_symbols:
@@ -110,6 +113,11 @@ def describe_one(
     if catalog:
         payload["tables"] = catalog
         payload["schema_hash"] = schema_hash
+    # Additive (only when non-empty): functions/RPCs, views, indexes, triggers, types, and RLS
+    # policies a migration set exposes — the non-table schema surface, so an agent can see e.g.
+    # which RPCs or row-level-security policies a subsystem defines without reading the DDL.
+    if objects:
+        payload["schema_objects"] = objects
     payload["validation_status"] = subsystem_status(report, sub.name)
     payload["project_status"] = project_status(report)
     if deep:

@@ -203,6 +203,40 @@ def schema_catalog(subsystem: str, extracts: dict[str, ExtractResult], file_owne
     return [table.to_dict() for table in _fold_subsystem_schema(subsystem, extracts, file_owner).values()]
 
 
+# Non-table DDL objects surfaced alongside the table catalog: functions/RPCs, views, indexes,
+# triggers, types, RLS policies and row-level-security toggles. They don't fold into the table
+# surface, but an agent still needs to see what a migration set exposes.
+_OBJECT_KINDS = ("function", "view", "index", "trigger", "type", "policy", "rls")
+
+
+def schema_objects(subsystem: str, extracts: dict[str, ExtractResult], file_owner: dict[str, str]) -> list[dict]:
+    """Non-table schema objects owned by ``subsystem``, deduped by (kind, name) and sorted.
+
+    Deterministic: files are walked in sorted order and the output is sorted by (kind, name),
+    so the list is byte-stable across runs. Each entry carries ``{name, kind, [table], files}``.
+    """
+    merged: dict[tuple[str, str], dict] = {}
+    for rel in sorted(_schema_files(subsystem, extracts, file_owner)):
+        for sym in extracts[rel].symbols:
+            if sym.kind not in _OBJECT_KINDS:
+                continue
+            entry = merged.setdefault((sym.kind, sym.name),
+                                      {"name": sym.name, "kind": sym.kind, "files": set()})
+            entry["files"].add(rel)
+            table = (sym.metadata or {}).get("table")
+            if table:
+                entry["table"] = table
+    out: list[dict] = []
+    for key in sorted(merged):
+        entry = merged[key]
+        record = {"name": entry["name"], "kind": entry["kind"]}
+        if "table" in entry:
+            record["table"] = entry["table"]
+        record["files"] = sorted(entry["files"])
+        out.append(record)
+    return out
+
+
 def schema_structure_hash(subsystem: str, extracts: dict[str, ExtractResult], file_owner: dict[str, str]) -> str:
     """Deterministic sha256 over the ordered fold — the schema subsystem's structure hash.
 

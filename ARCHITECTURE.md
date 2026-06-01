@@ -717,8 +717,10 @@ bounds list [--namespace NS]       → {project, subsystems:[{name, role, critic
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name>             → SubsystemCompact.to_dict() + {files, entry_points, validation_status,
                                        project_status, unparsed_files?, exposes[*].verified, exposes[*].file?,
-                                       exposes[*].entry_point?, exposes[*].columns?, tables?}
+                                       exposes[*].entry_point?, exposes[*].columns?, tables?, schema_objects?}
                                        # tables?: [{name, kind:"table", columns:[...], files:[...]}]
+                                       # schema_objects?: [{name, kind, table?, files:[...]}]  # functions/views/
+                                       #   indexes/triggers/types/policies/rls — the non-table schema surface
                                        # validation_status is SUBSYSTEM-SCOPED (this subsystem's own issues);
                                        # project_status is the project-wide rollup, kept additively.
                                        # unparsed_files (present only when non-empty): owned source files
