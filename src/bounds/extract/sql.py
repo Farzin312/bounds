@@ -250,6 +250,10 @@ def _policies_from_error(node, source: bytes) -> tuple[list[Symbol], list[tuple[
         table = _strip(m.group("table"))
         out.append(Symbol(f"{table}.{name}", "policy", _line(node), exported=False,
                           metadata={"schema_op": "create_policy", "table": table, "policy": name}))
+        # Span = the policy statement, create → its terminating ';'. The ';' legitimately
+        # sits past this ERROR node (a policy's USING/CHECK tail parses into a sibling node),
+        # so we search the whole source. Assumes the policy is terminated — well-formed SQL
+        # always is; an unterminated policy is invalid input Postgres rejects too.
         start = node.start_byte + m.start()
         semi = source.find(b";", start)
         spans.append((start, semi + 1 if semi != -1 else node.end_byte))
