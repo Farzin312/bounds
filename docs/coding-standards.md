@@ -107,11 +107,21 @@ The thing Bounds preaches, applied to Bounds. **Do not define the same function/
 - [ ] Import resolution has **one home** — `validate.checks.resolve_import` + `build_suffix_index`
       (O(1), no `O(files × imports × files)` scans). Build the suffix index **once** per call site
       and pass it into the loop.
-- [ ] Schema (SQL/Prisma) has fixed homes: `validate.schema` folds migrations into the table catalog;
+- [ ] Schema (SQL/Prisma) has fixed homes: `validate.schema` is the only migration fold —
+      `_fold_subsystem_schema` for tables/columns and `_fold_subsystem_objects` for the non-table
+      surface (functions/views/indexes/triggers/types dedup; **policies + RLS are an ordered
+      create/alter/drop / enable-disable-force fold**, never a flat dedup — a dropped policy must net
+      out). `schema_objects` / `schema_rls_posture` read that fold; don't re-walk symbols to recount.
       `hash_schema_catalog(catalog)` hashes an **already-built** catalog (a caller holding a catalog
       reuses it — never call `schema_structure_hash` after `schema_catalog` and fold twice);
       `extract.base.canonical_columns` is the one column dedup/sort for every schema adapter's
       `metadata["columns"]`.
+- [ ] SQL extraction lives only in `extract.sql`: grammar-native DDL via `_grammar_symbols`
+      (descends into transaction containers via `_iter_statements`), Postgres RLS via the
+      comment/string/body-masked `_recover_rls` (never a raw whole-file regex — mask first, via
+      `_mask_spans`), and `_table_ref` canonicalises every table reference to its bare name. A
+      non-DDL parse error (cron/seed/grant) is never `E_SCHEMA_UNPARSED`. When extraction output
+      changes for unchanged source, **bump `config.STATE_VERSION`** so stale `cache.db` rebuilds.
 - [ ] "Does this file belong to language X?" has one home — `extract.registry.is_language_file`
       (or the adapter's own `extensions`). Never hardcode an extension list at a call site.
 - [ ] Loading feedback (spinners) has one home — `cli._progress(message)`. Wrap **only** the heavy

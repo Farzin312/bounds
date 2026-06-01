@@ -53,7 +53,7 @@ machine can reason about it **deterministically**.
 Bounds maintains a hidden `.bounds/` directory of tiny YAML **subsystem manifests** and uses
 tree-sitter to validate them against your real source, in both directions.
 
-- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`; schema subsystems include the current table catalog folded from migrations.
+- **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`; schema subsystems include the current table catalog folded from migrations, plus — for Postgres/Supabase — the live policy/RLS surface and a derived **RLS posture** (which tables are protected vs exposed).
 - **`bounds validate`** — catch drift the moment your code's exports stop matching the manifest. Seven checks, zero LLM.
 - **`bounds validate --quick`** — git-diff incremental validation, safe for every commit.
 - **`bounds preflight`** — run all the pre-PR checks at once: drift, boundary violations, broken contracts, dependency cycles, orphaned subsystems, and cross-subsystem impact.
@@ -120,8 +120,13 @@ measured numbers (one repo, one data point), the scaling argument, and the conte
 
 **Python, TypeScript/JavaScript, SQL migrations, and Prisma schemas** are verified today — including
 database tables, whether declared as raw DDL, ORM models (SQLAlchemy/Django/Drizzle/TypeORM), or
-Prisma `model` blocks. Runs on **Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java
-adapters are on the roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
+Prisma `model` blocks. For **Postgres/Supabase SQL** Bounds also folds functions, views, indexes,
+triggers, and **row-level-security policies** (descending into `BEGIN;…COMMIT;` transactions), and
+derives an RLS posture. tree-sitter-sql can't parse every Postgres construct (a `DO $$…$$` block,
+some pg_dump output); when a DDL statement is genuinely unparsable the catalog **self-reports it**
+(`E_SCHEMA_UNPARSED`) rather than silently dropping it, and a no-DDL file (seed/grant/cron) is never
+flagged. Runs on **Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on
+the roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
 
 ---
 

@@ -25,7 +25,11 @@ DRIFT_BASELINE_FILE = "drift-baseline.json"
 
 # ---- Schema / versioning ----
 SCHEMA_VERSION = "1"
-STATE_VERSION = "1"
+# Bump whenever extraction OUTPUT changes for unchanged source (new/changed adapter symbols),
+# so every existing binary cache.db is treated as version-mismatched and rebuilt rather than
+# serving stale symbols. v2: SQL adapter recovers transaction-wrapped DDL + folds policies/RLS
+# and canonicalises table names (see extract/sql.py, validate/schema.py).
+STATE_VERSION = "2"
 
 # The documented command to refresh a stale git/pipx install. Surfaced by `upgrade-check`
 # and embedded in the generated agent contract; kept here as the single source so the two

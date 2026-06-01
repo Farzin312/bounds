@@ -22,6 +22,10 @@ Only the top tier ever costs a token. The core validation loop runs Tiers 1 + 2 
 
 Today, Tier 1 extraction is fully implemented for **Python, TypeScript/JavaScript, SQL migrations, and Prisma schemas**. Go and Rust adapters are on the v0.2 roadmap, Java on v0.3; until then those languages fall back to YAML-only declared files (no tree-sitter verification) or are skipped if only auto-discovered.
 
+### Schema subsystems are *folded*, never declared
+
+For a SQL or Prisma schema subsystem the manifest declares only `paths:` (the migrations) — the table catalog, schema objects, and RLS posture are **derived on every run** by folding the migrations in deterministic order, because the migrations *are* the contract (re-declaring them in YAML would drift instantly). For Postgres/Supabase SQL the fold goes beyond tables: it descends into `BEGIN;…COMMIT;` transactions and recovers functions, views, indexes, triggers, types, and — since tree-sitter-sql has no grammar for them — `CREATE/ALTER/DROP POLICY` and `ENABLE/DISABLE/FORCE ROW LEVEL SECURITY` (via a comment/string/body-masked scan). Policies and RLS fold like tables, so a dropped policy or disabled table nets out of the live surface; `describe` then derives an **RLS posture** (protected / RLS-without-policy / unprotected tables). When a DDL statement is genuinely unparsable the catalog **self-reports** it (`E_SCHEMA_UNPARSED`, naming the file) instead of silently dropping it, and a no-DDL file (seed/grant/cron) is never flagged. Full detail: [languages-and-platforms.md](./languages-and-platforms.md#how-sql--schema-extraction-works-and-what-happens-when-it-cant).
+
 ## How `describe` merges Tiers 1 + 2
 
 `bounds describe` is where the deterministic and declared tiers meet. It returns the subsystem's declared surface, but **annotates each declared `exposes` entry with tree-sitter facts** so an agent can trust the manifest without reading source:

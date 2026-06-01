@@ -486,6 +486,50 @@ def _format_issue_lines(issue: dict) -> list[str]:
     return lines
 
 
+def _render_rls_posture(posture: dict) -> list[str]:
+    """RLS posture as text — re-renders the SAME fields the JSON carries (parity rule).
+
+    Summary line carries every default count (incl. ``rls_enabled``); when ``--full`` populated
+    the table-name lists + ``policy_count``, each is rendered too (never omit a field JSON has).
+    """
+    lines = ["", (
+        f"RLS posture: {posture.get('protected', 0)} protected, "
+        f"{posture.get('rls_without_policy', 0)} RLS-without-policy, "
+        f"{posture.get('unprotected', 0)} unprotected "
+        f"({posture.get('rls_enabled', 0)} RLS-enabled of {posture.get('tables', 0)} tables)"
+    )]
+    # --full restores the actual table-name lists (JSON carries the same lists then too).
+    name_lists = [(label, posture.get(key)) for label, key in
+                  (("unprotected (no RLS)", "unprotected_tables"),
+                   ("RLS but no policy", "rls_without_policy_tables"),
+                   ("protected", "protected_tables"))]
+    shown = [(label, names) for label, names in name_lists if names]
+    for label, names in shown:
+        lines.append(f"  {label}: {', '.join(names)}")
+    counts = posture.get("policy_count")
+    if counts:
+        lines.append("  policy_count: " + ", ".join(f"{t}={n}" for t, n in counts.items()))
+    if not shown and not counts and (posture.get("unprotected") or posture.get("rls_without_policy")):
+        lines.append("  (use --full to list at-risk tables)")
+    return lines
+
+
+def _render_schema_security(payload: dict) -> list[str]:
+    """Human lines for RLS posture + schema diagnostics (re-renders the SAME JSON data)."""
+    lines: list[str] = []
+    posture = payload.get("rls_posture")
+    if posture:
+        lines.extend(_render_rls_posture(posture))
+    diagnostics = payload.get("schema_diagnostics")
+    if diagnostics:
+        lines.append("")
+        lines.append(f"schema diagnostics ({len(diagnostics)}):")
+        for diag in diagnostics:
+            where = f" [{diag['file']}]" if diag.get("file") else ""
+            lines.append(f"  - {diag.get('code', '?')}{where}: {diag.get('message', '')}")
+    return lines
+
+
 def _render_subsystem_human(payload: dict) -> str:
     """Render a subsystem compact (shape of ``SubsystemCompact.to_dict()``) as readable text."""
     lines: list[str] = []
@@ -561,6 +605,8 @@ def _render_subsystem_human(payload: dict) -> str:
         lines.append("")
         summary = ", ".join(f"{n} {kind}" for kind, n in counts.items())
         lines.append(f"schema objects: {summary}  (use --full to list)")
+
+    lines.extend(_render_schema_security(payload))
 
     consumes = payload.get("consumes", [])
     if consumes:

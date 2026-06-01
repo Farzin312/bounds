@@ -74,8 +74,14 @@ differ only in policy), shared by engine + describe + discover/calibrate; never 
 `base.canonical_columns` = the one schema column dedup/sort; `rawquery.py` = opt-in, advisory raw-SQL
 table refs) · `cache/store.py` SQLite `cache.db` (+ migration/partial-read/inspect) ·
 `validate/{engine,propagation,checks,schema}` (`checks.resolve_import`/`build_suffix_index` = the one
-import resolver; `schema.py` folds SQL migrations into a table catalog, `hash_schema_catalog` hashes an
-already-built catalog without re-folding) · `describe.py` Tier-1+2
+import resolver; `schema.py` folds SQL migrations into the live surface — `_fold_subsystem_schema` =
+tables/columns, `_fold_subsystem_objects` = the one ordered fold for functions/views/indexes/triggers/
+types + **policies/RLS** (create/alter/drop, enable/disable/force net out), `schema_objects`/
+`schema_rls_posture` read it, `hash_schema_catalog` hashes an already-built catalog without re-folding;
+`extract/sql.py` is the one SQL extractor — grammar-native DDL descends into transaction blocks,
+Postgres RLS is recovered by comment/string/body-masked regex, table refs canonicalise to the bare
+name; bump `config.STATE_VERSION` whenever extraction output changes for unchanged source) ·
+`describe.py` Tier-1+2
 describe assembly · `locate.py` backs `where`+`impact` · `cli.py` command wiring (arg-parse + one
 `go()` per command, no business logic; `_progress(msg)` = the one loading-spinner seam — wrap compute
 only, never `output.emit`) · `discover.py` · `calibrate.py` · `agentsync.py` ·
