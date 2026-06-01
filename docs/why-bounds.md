@@ -37,7 +37,7 @@ The pattern: pull a verified slice of architecture into context with one CLI cal
 
 ## Token savings
 
-An agent's only real cost is tokens into context. A Bounds contract is `O(symbols/tables exposed)` — a subsystem with 50 internal functions and 5 exports is still ~5 expose entries, so the contract stays flat as a subsystem's *internals* grow (it scales with how much public surface it *exposes*, not its line count) — while reading source is `O(files)` and grows with the codebase. So the token win *widens* as a subsystem's implementation grows behind a stable public API.
+An agent's only real cost is tokens into context, and a Bounds contract is priced by what a subsystem *exposes*, not how big it is — so the token win *widens* as the implementation grows behind a stable public API. The full `O(public API)` vs `O(files)` scaling argument — with a worked example and a measured table — lives in [token-economics.md](token-economics.md).
 
 The numbers in the README are **measured on this repo only** — a single data point, estimated at roughly 4 chars/token, not a cross-repo study. Treat them as illustrative, not a guaranteed average. As one example from this repo, `bounds describe models` returned the verified public surface in ~400 tokens versus ~2,900 tokens for the full source file. The shape of the win is reliable; the exact ratio depends on your code.
 
