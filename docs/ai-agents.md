@@ -25,7 +25,7 @@ The contract Bounds writes leads with this mapping so the agent knows exactly wh
 | Task | Command |
 |------|---------|
 | Understand the layout / find the right subsystem | `bounds list` |
-| A subsystem's public API or DB tables | `bounds describe <name>` |
+| A subsystem's public surface or DB tables | `bounds describe <name>` |
 | Where a symbol or table is defined | `bounds where <symbol>` |
 | What breaks if you change a subsystem or table (blast radius) | `bounds impact <name>` |
 | Confirm an edit didn't drift the contract | `bounds validate --quick` |
@@ -192,7 +192,7 @@ in that tool's own format and location:
 **The auto-trigger skills are the intelligence layer.** A Claude/Codex `SKILL.md` carries the decision
 logic in its `description` front-matter — the matcher the model reads to decide *when* to invoke
 Bounds. It encodes concrete trigger conditions, not a tagline: exploring an unfamiliar area, needing a
-subsystem's public API or DB tables, **before** a risky change to a shared/core subsystem or a
+subsystem's public surface or DB tables, **before** a risky change to a shared/core subsystem or a
 migration (check the blast radius first), "what depends on X" / "what breaks if X changes," and
 verifying drift after an edit. With the skill in place the agent reaches for Bounds on its own, rather
 than only when a human reminds it.
@@ -223,7 +223,7 @@ This repo uses Bounds for architecture context. Query architecture through the C
 source search:
 
 - Run `bounds list` first to see the subsystem map.
-- Run `bounds describe <name>` to read one subsystem's verified public API/table catalog.
+- Run `bounds describe <name>` to read one subsystem's verified public surface/table catalog.
 - Run `bounds impact <name>` before changing a subsystem interface or table.
 - Run `bounds validate --quick` after edits and fix drift before expanding context.
 

@@ -1,6 +1,9 @@
 <div align="center">
 
-# Bounds
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/bounds-wordmark.svg">
+  <img src="assets/bounds-wordmark-light.svg" alt="Bounds" width="300">
+</picture>
 
 ### Verified architecture context for AI coding agents
 
@@ -127,7 +130,7 @@ harness shallow-clones each repo at a cited commit, runs `bounds init` + `bounds
 counts tokens (Bounds output vs the equivalent source). Full corpus, full-command coverage, and the
 bugs it surfaced: **[benchmarks/results/oss-cross-language.md](benchmarks/results/oss-cross-language.md)**.
 
-| Repo | Whole-repo orientation (`bounds list`) | One subsystem's API (`bounds describe`) |
+| Repo | Whole-repo orientation (`bounds list`) | One subsystem's surface (`bounds describe`) |
 |------|----------------------------------------|-----------------------------------------|
 | [click](https://github.com/pallets/click) (Python) | 243 vs 196,257 tok — **99.9% less** | `click` (505 exports): 6,955 vs 93,020 — **92.5% less** |
 | [axios](https://github.com/axios/axios) (TypeScript) | 977 vs 526,284 tok — **99.8% less** | `lib`: 1,007 vs 47,092 — **97.9% less** |
@@ -185,8 +188,8 @@ flowchart LR
   V -->|"100% supported + 0 dark"| DONE["✓ fully covered"]
   V -->|"unowned supported file"| S["add the file to a<br/>manifest's paths:"]
   V -->|"dark unsupported file"| AI["agent authors a manifest<br/>(copy .bounds/manifests/*.yaml)"]
-  S --> V
-  AI --> V
+  S -.->|"re-validate"| V
+  AI -.->|"re-validate"| V
 ```
 
 - **Unowned but supported** (a Python/TS/JS/SQL/Prisma/shell file in no subsystem) → add it to a manifest's

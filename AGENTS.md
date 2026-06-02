@@ -1,5 +1,5 @@
 <!-- BOUNDS:START -->
-<!-- BOUNDS:GENERATED v=2026.6.24 h=579912c4 -->
+<!-- BOUNDS:GENERATED v=2026.6.24 h=91cadf8f -->
 > Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agentsync.py`) instead.
 
 ## Bounds — architecture contract for agents
@@ -8,7 +8,7 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 
 ### Which command for which task
 - Understand the layout / find the right subsystem → `bounds list`
-- A subsystem's public API or DB tables → `bounds describe <name>` (a few hundred tokens, tree-sitter-verified — use this before opening source or migrations)
+- A subsystem's public surface or DB tables → `bounds describe <name>` (a few hundred tokens, tree-sitter-verified — use this before opening source or migrations)
 - Every subsystem in a namespace → `bounds describe --namespace <ns>`
 - Where a symbol or table is defined → `bounds where <symbol>`
 - What breaks if you change a subsystem or table → `bounds impact <name>`
@@ -20,7 +20,8 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 2. `bounds describe <name>` to scope the contract, then read only the implementation files you need to edit.
 3. `bounds impact <name>` before changing an interface or a migration.
 4. If `bounds overview` reports partial coverage, overlaps, cycles, or validation errors, follow `health.validation.next_steps` before trusting that part of the map.
-5. `bounds validate --quick` after edits; fix drift before broadening context.
+5. On an `E_COVERAGE_GAP`, follow the issue `fix`: add supported files to a manifest's `paths:` (deterministic); for an unsupported language (no adapter yet), author a manifest with a hand-written `exposes:` — durable, calibrate/validate keep it (never stripped or flagged as drift).
+6. `bounds validate --quick` after edits; fix drift before broadening context.
 
 ### Enforcement (CI is the hard gate, not agent goodwill)
 - After manifests exist, wire the gate once: `bounds ci --install --github` (or `--gitlab`) generates the CI config that runs `bounds preflight --ci` on every PR. This — not agent compliance — is the hard enforcement of the contract.

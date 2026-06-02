@@ -1,3 +1,12 @@
+<div align="center">
+  <a href="../README.md">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/bounds-wordmark.svg">
+      <img src="../assets/bounds-wordmark-light.svg" alt="Bounds" width="220">
+    </picture>
+  </a>
+</div>
+
 # Bounds documentation
 
 Everything beyond the [project README](../README.md): the rationale, day-to-day workflows, the full

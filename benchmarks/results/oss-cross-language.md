@@ -82,7 +82,7 @@ nestjs/nest, chalk/chalk, documenso/documenso, spf13/cobra, BurntSushi/ripgrep, 
 
 ## 1. Token economics — exact `tiktoken cl100k_base`
 
-| Repo | `bounds list` | all source | map ↓ | key subsystem (exposes) | `describe` key | its source | api ↓ | `describe` min / median / max |
+| Repo | `bounds list` | all source | map ↓ | key subsystem (exposes) | `describe` key | its source | surface ↓ | `describe` min / median / max |
 |------|------:|-----------:|------:|-------------------------|----------:|-----------:|------:|------------------------------|
 | `click` | 243 | 196,257 | 99.9% | `click` (505) | 6,955 | 93,020 | 92.5% | 163 / 3,736 / 19,632 |
 | `flask` | 562 | 160,649 | 99.7% | `flask` (360) | 4,466 | 76,984 | 94.2% | 361 / 967 / 13,852 |
@@ -102,7 +102,7 @@ nestjs/nest, chalk/chalk, documenso/documenso, spf13/cobra, BurntSushi/ripgrep, 
   source. Range **98.7 – 100%**, median **99.8%**. *Caveat:* the baseline (read **all** source) is
   generous — it is the cost of the thing nobody does. Read it as "orientation is ~free," not as a
   literal per-task saving.
-- **api ↓** = `bounds describe <name>` vs reading that subsystem's source. Range **54.4 – 100%**,
+- **surface ↓** = `bounds describe <name>` vs reading that subsystem's source. Range **54.4 – 100%**,
   median **92.5%**. The low outliers are honest and informative: `express`'s key subsystem is tiny
   (`support`, 20 exports → 320 vs 702 tokens = 54%), and `zod`'s `core` exposes **831** symbols, so
   its contract is **35,493 tokens** — bigger isn't always cheaper when a subsystem's whole point is a
@@ -277,7 +277,7 @@ box" — on a freshly-discovered library it is a wall of warnings.
   tokens" without the tail.
 - **Reframe:** the 99%+ "map reduction" → it compares against reading **all** source. Present it as
   "orientation is near-free" and lead with the **targeted-retrieval** comparison instead.
-- **Qualify:** API reduction is **54–100%** depending on subsystem size — cite the range, never a
+- **Qualify:** surface reduction is **54–100%** depending on subsystem size — cite the range, never a
   single flat percentage.
 - **Add an honest caveat:** `discover` produces a **draft** to curate; a fresh `discover` does not
   validate clean (0/13 here) and `calibrate` does not make it clean (0/13). Frame the drift gate as

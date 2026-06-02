@@ -45,7 +45,7 @@ These percentages follow from the single-repo measurements above; the same cavea
 
 To answer the obvious "but you measured your own repo" objection, the harness was run on **16 real third-party repos** across Python/TS/JS, cloned at cited commits, with **exact `tiktoken cl100k_base`** counts. Full corpus, per-repo numbers, full-command coverage, and the bugs it surfaced: **[`benchmarks/results/oss-cross-language.md`](../benchmarks/results/oss-cross-language.md)** (the older two-repo `~4 chars/token` run lives in [`oss-token-economics.md`](../benchmarks/results/oss-token-economics.md) and is superseded).
 
-| Repo | Commit | `bounds list` | All source | Map reduction | `bounds describe` | Subsystem source | API reduction |
+| Repo | Commit | `bounds list` | All source | Map reduction | `bounds describe` | Subsystem source | Surface reduction |
 |------|--------|-------------:|-----------:|--------------:|------------------:|-----------------:|--------------:|
 | click (Python) | `c480210` | 243 | 196,257 | **99.9%** | 6,955 (`click`, 505 exports) | 93,020 | **92.5%** |
 | axios (TypeScript) | `4306df2` | 977 | 526,284 | **99.8%** | 1,007 (`lib`) | 47,092 | **97.9%** |
@@ -53,7 +53,7 @@ To answer the obvious "but you measured your own repo" objection, the harness wa
 | zod (TypeScript) | `bbc68f9` | 1,285 | 1,772,284 | **99.9%** | 35,493 (`core`, 831 exports) | 117,947 | **69.9%** |
 
 - **Map reduction** (whole-repo `bounds list` vs reading every subsystem's source) is **98.7–100%** across the 13 supported repos. *But the baseline is generous* — nobody reads a whole repo — so read it as "orientation is near-free," not a literal per-task saving.
-- **API reduction** (`bounds describe` vs that subsystem's source) ranges **54–100%** (median ~92.5%) and tracks the exposed surface: zod's `core` (831 exports) is a 35k-token contract → only 69.9%. Per-`describe` cost is a **median of a few hundred tokens** with a heavy tail; cite the range, not a flat number.
+- **Surface reduction** (`bounds describe` vs that subsystem's source) ranges **54–100%** (median ~92.5%) and tracks the exposed surface: zod's `core` (831 exports) is a 35k-token contract → only 69.9%. Per-`describe` cost is a **median of a few hundred tokens** with a heavy tail; cite the range, not a flat number.
 - **Honest scope:** these are extraction + retrieval economics, which generalize. The auto-`discover` contracts are a *draft to curate* — a fresh `discover` did **not** validate clean on any of the 13 repos (real drift + library orphan-export noise). See the cross-language report.
 
 The numbers are **reproducible**: re-clone each repo at the cited commit and re-run `python benchmarks/oss_bench.py --repo <path>` (token economics) / `python benchmarks/oss_features.py --repo <path>` (full-command matrix).

@@ -155,7 +155,7 @@ def measure(root: Path, name: str, lang: str, count) -> dict:
         result["describe_median_tok"] = int(statistics.median(describe_toks))
         result["describe_max_tok"] = max(describe_toks)
 
-    # --- key subsystem: describe + impact vs its own source (API reduction) ---
+    # --- key subsystem: describe + impact vs its own source (surface reduction) ---
     key = pick_subsystem(subs)
     result["key_subsystem"] = key
     d_out, _, _, d_t = _run(["describe", key], root)
@@ -164,7 +164,7 @@ def measure(root: Path, name: str, lang: str, count) -> dict:
     result["describe_tok"] = count(d_out)
     result["impact_tok"] = count(i_out)
     result["sub_source_tok"] = sub_source
-    result["api_reduction_pct"] = round((1 - count(d_out) / sub_source) * 100, 1) if sub_source else None
+    result["surface_reduction_pct"] = round((1 - count(d_out) / sub_source) * 100, 1) if sub_source else None
     result["describe_sec"] = round(d_t, 3)
 
     # --- overview health ---

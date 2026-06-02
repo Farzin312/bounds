@@ -67,7 +67,7 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 
 ### Which command for which task
 - Understand the layout / find the right subsystem → `bounds list`
-- A subsystem's public API or DB tables → `bounds describe <name>` (a few hundred tokens, tree-sitter-verified — use this before opening source or migrations)
+- A subsystem's public surface or DB tables → `bounds describe <name>` (a few hundred tokens, tree-sitter-verified — use this before opening source or migrations)
 - Every subsystem in a namespace → `bounds describe --namespace <ns>`
 - Where a symbol or table is defined → `bounds where <symbol>`
 - What breaks if you change a subsystem or table → `bounds impact <name>`
@@ -111,7 +111,7 @@ This project uses **Bounds** to model its architecture as subsystem boundary man
 Read the architecture through the Bounds CLI, never by opening raw `.bounds` files.
 
 - Find the right subsystem → `bounds list`
-- A subsystem's API/tables → `bounds describe <name>` (verified, a few hundred tokens — use before opening source)
+- A subsystem's surface/tables → `bounds describe <name>` (verified, a few hundred tokens — use before opening source)
 - Where a symbol/table lives → `bounds where <symbol>`
 - What breaks if you change it → `bounds impact <name>`
 - Trust/coverage/next steps → `bounds overview`
@@ -474,7 +474,7 @@ def _pointer_block_body(fmt: str) -> str:
 # to decide *when* to invoke — so it is written as concrete trigger conditions, not a tagline.
 _SKILL_TRIGGER = (
     "Read this codebase's architecture with the Bounds CLI before grepping or opening implementation files. "
-    "Use when exploring an unfamiliar area, when you need a subsystem's public API or database "
+    "Use when exploring an unfamiliar area, when you need a subsystem's public surface or database "
     "tables, before changing a shared or core subsystem or a migration (check blast radius first), "
     "when asked what depends on X or what breaks if X changes, or to verify drift after an edit. "
     "Never read .bounds/ files directly."
@@ -489,7 +489,7 @@ structure first. Output is JSON by default; add `-H` for human-readable.
 
 ## Which command for which task
 - Find the right subsystem / get the map → `bounds list`
-- A subsystem's verified public API or DB tables → `bounds describe <name>`
+- A subsystem's verified public surface or DB tables → `bounds describe <name>`
 - Where a symbol or table is defined → `bounds where <symbol>`
 - Blast radius before changing a subsystem or migration → `bounds impact <name>`
 - Catch drift after an edit → `bounds validate --quick`
@@ -500,12 +500,12 @@ Run `bounds guide` for setup; see `AGENTS.md` for the full contract.
 # Gemini custom command (TOML). `#` comments are valid TOML, so the YAML marker style wraps it.
 # `{{args}}` is Gemini's argument placeholder.
 _GEMINI_TOML_BODY = '''\
-description = "Read this project's architecture via the Bounds CLI (subsystems, APIs, drift)."
+description = "Read this project's architecture via the Bounds CLI (subsystems, surfaces, drift)."
 prompt = """
 Use the Bounds CLI to answer the user's architecture question; never read .bounds/ files.
 Run the right command and summarize its JSON:
 - bounds list — the subsystem map
-- bounds describe <name> — a subsystem's verified API/tables
+- bounds describe <name> — a subsystem's verified surface/tables
 - bounds impact <name> — blast radius before a change
 - bounds validate --quick — drift after an edit
 
@@ -532,7 +532,7 @@ Read this project's architecture via the Bounds CLI — never open `.bounds/` fi
 
 Run the right command and summarize its JSON:
 - `bounds list` — the subsystem map
-- `bounds describe <name>` — a subsystem's verified API/tables
+- `bounds describe <name>` — a subsystem's verified surface/tables
 - `bounds impact <name>` — blast radius before a change
 - `bounds validate --quick` — drift after an edit
 
@@ -546,7 +546,7 @@ _CURSOR_CMD_BODY = """\
 Use the Bounds CLI to scope this project's architecture before grepping or opening implementation files:
 
 - `bounds list` — the subsystem map
-- `bounds describe <name>` — a subsystem's verified API/tables
+- `bounds describe <name>` — a subsystem's verified surface/tables
 - `bounds impact <name>` — blast radius before a change
 - `bounds validate --quick` — drift after an edit
 
@@ -560,7 +560,7 @@ _WINDSURF_WORKFLOW_BODY = """\
 Read this project's architecture via the Bounds CLI — never read `.bounds/` files.
 
 1. Unsure of the layout? Run `bounds list`.
-2. Need a subsystem's API/tables? Run `bounds describe <name>`.
+2. Need a subsystem's surface/tables? Run `bounds describe <name>`.
 3. About to change a shared subsystem or a migration? Run `bounds impact <name>` first.
 4. After an edit, run `bounds validate --quick` and fix drift.
 """

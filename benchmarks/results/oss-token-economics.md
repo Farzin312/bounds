@@ -26,13 +26,13 @@ and at what token cost, with Bounds vs without).
 
 ## 1. Token economics (deterministic)
 
-| Repo | Commit | Subsystems | `bounds list` | All source | Map reduction | `bounds describe` | Subsystem source | API reduction |
+| Repo | Commit | Subsystems | `bounds list` | All source | Map reduction | `bounds describe` | Subsystem source | Surface reduction |
 |------|--------|-----------:|-------------:|-----------:|--------------:|------------------:|-----------------:|--------------:|
 | click | `c480210` | 4 | 205 | 208,242 | **99.9%** | 5,971 (`click`) | 103,392 | **94.2%** |
 | axios | `4306df2` | 16 | 814 | 573,740 | **99.9%** | 901 (`lib`) | 50,483 | **98.2%** |
 
 - *Map reduction* = `bounds list` (whole-repo orientation) vs reading every subsystem's source.
-- *API reduction* = `bounds describe <name>` (one subsystem's verified contract) vs reading that
+- *Surface reduction* = `bounds describe <name>` (one subsystem's verified contract) vs reading that
   subsystem's source.
 - **axios is TypeScript** — these edges only resolve because of the dotted-filename + tsconfig
   path-alias resolver fixes on this branch; on `main` axios's graph is badly undercounted.

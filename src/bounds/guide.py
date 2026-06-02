@@ -87,7 +87,7 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
 
     daily = [
         {"command": "bounds list", "use": "see the subsystem map before searching source"},
-        {"command": "bounds describe <name>", "use": "one subsystem's verified API / tables"},
+        {"command": "bounds describe <name>", "use": "one subsystem's verified surface / tables"},
         {"command": "bounds where <symbol>", "use": "locate a symbol or table without grepping"},
         {"command": "bounds impact <name>", "use": "blast radius before a risky change"},
         {"command": "bounds validate --quick", "use": "catch drift after an edit"},
