@@ -41,8 +41,16 @@ from .validate.checks import index_extracts, resolve_import
 __all__ = ["run_calibrate"]
 
 
-def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bool = False) -> dict:
-    """Reconcile manifests against source; return the proposed diff (and apply it if asked)."""
+def run_calibrate(
+    project_root: Path, *, subsystem: str | None = None, apply: bool = False,
+    prune_unknown: bool = False,
+) -> dict:
+    """Reconcile manifests against source; return the proposed diff (and apply it if asked).
+
+    ``prune_unknown`` (only meaningful with ``apply``) additionally removes ``consumes`` edges
+    that point at a subsystem which doesn't exist. Off by default so a genuine forward reference
+    survives an apply; on, it clears the stale/typo'd edges that otherwise keep ``validate``
+    reporting ``unresolved`` forever."""
     _root, subs, _ = manifest_loader.load_all(project_root)
     if subsystem is not None and subsystem not in subs:
         raise errors.BoundsError(
@@ -83,8 +91,9 @@ def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bo
     applied = False
     if apply and proposals:
         for name, proposal in proposals.items():
-            _apply_proposal(subs[name], proposal)
-        applied = True
+            if _has_applicable_changes(proposal, prune_unknown):
+                _apply_proposal(subs[name], proposal, prune_unknown=prune_unknown)
+                applied = True
 
     return {
         "mode": "calibrate",
@@ -175,10 +184,17 @@ def _calibrate_one(
     ]
 
     remove_consumes: list[dict] = []
+    unknown_consumes: list[str] = []
     for c in sub.consumes:
         provider = subs.get(c.subsystem)
         if provider is None:
-            continue  # forward reference — leave it
+            # Consumes a subsystem that doesn't exist. It could be a genuine forward reference
+            # (incremental adoption) or stale cruft / a typo — Bounds can't read intent, so it
+            # SURFACES the edge here (never silently dropped, the old behaviour) and removes it
+            # only under an explicit --prune-unknown. validate reports the same edge as
+            # E_UNRESOLVED_REFERENCE; this is the calibrate-side fix path for it.
+            unknown_consumes.append(c.subsystem)
+            continue
         stale = sorted(i for i in c.interfaces if i not in provider.expose_names())
         if stale:
             remove_consumes.append({"subsystem": c.subsystem, "interfaces": stale})
@@ -190,20 +206,34 @@ def _calibrate_one(
         "add_consumes": add_consumes,
         "add_consume_interfaces": add_consume_interfaces,
         "remove_consumes": remove_consumes,
+        "unknown_consumes": sorted(set(unknown_consumes)),
     }
 
 
 def _has_changes(p: dict) -> bool:
     return any(
-        p[k]
+        p.get(k)
         for k in (
             "add_exposes",
             "remove_exposes",
             "add_consumes",
             "add_consume_interfaces",
             "remove_consumes",
+            "unknown_consumes",  # surfaced so a dangling-consumes-only subsystem still appears
         )
     )
+
+
+def _has_applicable_changes(p: dict, prune_unknown: bool) -> bool:
+    """Whether applying this proposal would actually rewrite the manifest, given the prune flag.
+
+    ``needs_review`` and (un-pruned) ``unknown_consumes`` are SURFACED in the diff but never
+    written, so a proposal carrying only those must not trigger a no-op manifest rewrite (which
+    would strip comments for nothing)."""
+    if any(p.get(k) for k in
+           ("add_exposes", "remove_exposes", "add_consumes", "add_consume_interfaces", "remove_consumes")):
+        return True
+    return prune_unknown and bool(p.get("unknown_consumes"))
 
 
 # ---------------------------------------------------------------------------
@@ -362,18 +392,20 @@ def _summarize(proposals: dict[str, dict]) -> dict:
             for aci in p.get("add_consume_interfaces", [])
         ),
         "consumes_removed": sum(len(p["remove_consumes"]) for p in proposals.values()),
+        "consumes_unknown": sum(len(p.get("unknown_consumes", [])) for p in proposals.values()),
     }
 
 
 # ---------------------------------------------------------------------------
 # Apply (rewrite manifest YAML)
 # ---------------------------------------------------------------------------
-def _apply_proposal(sub, proposal: dict) -> None:
+def _apply_proposal(sub, proposal: dict, prune_unknown: bool = False) -> None:
     """Rewrite the subsystem's manifest YAML with the proposed exposes/consumes changes.
 
     Re-serializes via ``yaml.safe_dump`` (comments are not preserved — calibrate is a
     reviewed reconcile step, so the developer has already seen the diff). ``role`` and
-    ``criticality`` are passed through untouched.
+    ``criticality`` are passed through untouched. With ``prune_unknown`` the consumes edges
+    naming a non-existent subsystem (``proposal["unknown_consumes"]``) are dropped too.
     """
     path = Path(sub.source_path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -386,6 +418,13 @@ def _apply_proposal(sub, proposal: dict) -> None:
     raw["exposes"] = exposes
 
     consumes = list(raw.get("consumes") or [])
+    # Prune dangling edges (consumes a subsystem that doesn't exist) only when asked.
+    if prune_unknown and proposal.get("unknown_consumes"):
+        unknown = set(proposal["unknown_consumes"])
+        consumes = [
+            e for e in consumes
+            if not (isinstance(e, dict) and e.get("subsystem") in unknown)
+        ]
     # Drop stale interfaces from existing edges.
     stale_by_provider = {rc["subsystem"]: set(rc["interfaces"]) for rc in proposal["remove_consumes"]}
     for entry in consumes:
@@ -420,6 +459,8 @@ def _apply_proposal(sub, proposal: dict) -> None:
             consumes.append({"subsystem": prov})
     if consumes:
         raw["consumes"] = consumes
+    else:
+        raw.pop("consumes", None)  # pruned the last edge → drop the key, don't keep the stale one
 
     path.write_text(yaml.safe_dump(raw, sort_keys=False, default_flow_style=False), encoding="utf-8")
 

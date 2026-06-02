@@ -343,11 +343,14 @@ def _render_calibrate_human(payload: dict) -> str:
     s = payload.get("summary", {}) or {}
     verb = "applied" if payload.get("applied") else "proposed"
     subs = payload.get("subsystems", {}) or {}
-    lines = [
+    header = (
         f"calibrate: {verb} {s.get('added', 0)} add / {s.get('removed', 0)} remove / "
         f"{s.get('needs_review', 0)} needs-review across {len(subs)} subsystem(s) "
         f"(consumes +{s.get('consumes_added', 0)}/-{s.get('consumes_removed', 0)})"
-    ]
+    )
+    if s.get("consumes_unknown"):
+        header += f"; {s['consumes_unknown']} unknown consumes edge(s)"
+    lines = [header]
     if not payload.get("applied") and subs:
         lines.append("  (diff only — pass --apply to write)")
     for name in sorted(subs):
@@ -361,7 +364,12 @@ def _render_calibrate_human(payload: dict) -> str:
             bits.append("review: " + ", ".join(p["needs_review"]))
         if p.get("add_consumes"):
             bits.append("consumes+: " + ", ".join(c["subsystem"] for c in p["add_consumes"]))
+        if p.get("unknown_consumes"):
+            bits.append("consumes? " + ", ".join(p["unknown_consumes"]))
         lines.append(f"  {name}: " + " | ".join(bits) if bits else f"  {name}")
+    if s.get("consumes_unknown"):
+        hint = "pruned" if payload.get("applied") else "rename them, or re-run with --prune-unknown to remove"
+        lines.append(f"  (consumes? = consumes a subsystem that doesn't exist — {hint})")
     return "\n".join(lines)
 
 
