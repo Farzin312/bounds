@@ -118,6 +118,45 @@ def test_engine_full_clean(py_project):
     assert report.stats["files_total"] == 2
 
 
+def test_engine_surfaces_equal_specificity_path_overlap(tmp_path):
+    """Duplicate same-path subsystem ownership is a warning in normal validation, not hidden behind describe --full."""
+    _overlap_project(tmp_path)
+
+    report = engine.run(tmp_path, mode="full")
+    overlaps = [i for i in report.issues if i.code == errors.E_SUBSYSTEM_OVERLAP]
+    assert len(overlaps) == 1
+    assert overlaps[0].severity == "warning"
+    assert "aaa" in overlaps[0].message and "bbb" in overlaps[0].message
+
+
+def test_engine_quick_surfaces_equal_specificity_path_overlap(tmp_path):
+    """Quick validation must still surface ownership overlaps; daily agent checks need the same map-smell signal as full validation."""
+    _overlap_project(tmp_path)
+
+    report = engine.run(tmp_path, mode="quick")
+    overlaps = [i for i in report.issues if i.code == errors.E_SUBSYSTEM_OVERLAP]
+    assert len(overlaps) == 1
+    assert overlaps[0].severity == "warning"
+    assert report.ok is True  # advisory, but visible
+
+
+def _overlap_project(tmp_path):
+    """Two subsystems claiming the same directory at identical specificity."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: overlap\nlanguages: [python]\nsubsystems: [aaa, bbb]\n',
+        encoding="utf-8",
+    )
+    for name in ("aaa", "bbb"):
+        (cfg / "manifests" / f"{name}.yaml").write_text(
+            f"name: {name}\nrole: library\ncriticality: leaf\npaths: [pkg]\nexposes: []\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "shared.py").write_text("def shared():\n    pass\n", encoding="utf-8")
+
+
 def test_engine_cache_accelerates_second_run(py_project):
     """First run parses every file (0 cache hits); an unchanged second run parses none and hits the cache for all — content-hash reuse works."""
     first = engine.run(py_project, mode="full")

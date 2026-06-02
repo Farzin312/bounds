@@ -13,9 +13,9 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
-from .. import config
+from .. import config, errors
 from ..ignore import IgnoreMatcher, has_generated_marker
-from ..models import ExtractResult, SubsystemCompact
+from ..models import ExtractResult, Issue, SubsystemCompact
 from . import get_adapter, supported_extensions
 
 
@@ -276,6 +276,85 @@ def resolve_owners(
         if ignored:
             result = {rel: v for rel, v in result.items() if rel not in ignored}
     return result
+
+
+def _ownership_overlap_issues(
+    project_root: Path,
+    subsystems: dict[str, SubsystemCompact],
+    exts: set[str],
+    matcher: IgnoreMatcher | None = None,
+    repo: Path | None = None,
+    include_gitignored: bool = False,
+    *,
+    subsystem: str | None = None,
+    aggregate: bool = True,
+) -> list[Issue]:
+    """Equal-specificity ownership conflicts in the same file universe as validation.
+
+    Nested paths are valid: the deepest declaration wins. This reports only ties at the winning
+    specificity, where ownership falls back to alphabetical subsystem order. ``aggregate=True``
+    emits one warning per contender set so a broad duplicate path does not flood validation.
+    ``aggregate=False`` preserves the per-file diagnostics used by ``describe --full``.
+    """
+    scanned = resolve_owners(project_root, subsystems, exts, matcher, repo, include_gitignored)
+    claims: dict[str, dict[int, set[str]]] = {}
+    for name in sorted(subsystems):
+        sub = subsystems[name]
+        for abs_path in iter_subsystem_files(project_root, sub, exts):
+            rel = abs_path.relative_to(project_root).as_posix()
+            if rel not in scanned:
+                continue
+            spec = path_specificity(rel, sub.paths, sub.files)
+            claims.setdefault(rel, {}).setdefault(spec, set()).add(name)
+
+    grouped: dict[tuple[int, tuple[str, ...]], list[str]] = {}
+    per_file: list[tuple[str, int, tuple[str, ...]]] = []
+    for rel in sorted(claims):
+        by_spec = claims[rel]
+        top = max(by_spec)
+        contenders = tuple(sorted(by_spec[top]))
+        if len(contenders) < 2 or (subsystem is not None and subsystem not in contenders):
+            continue
+        if aggregate:
+            grouped.setdefault((top, contenders), []).append(rel)
+        else:
+            per_file.append((rel, top, contenders))
+
+    issues: list[Issue] = []
+    if aggregate:
+        for (_spec, contenders), rels in sorted(grouped.items()):
+            owner = subsystem or min(contenders)
+            others = [c for c in contenders if c != owner]
+            sample = ", ".join(rels[:3])
+            if len(rels) > 3:
+                sample += f", +{len(rels) - 3} more"
+            issues.append(Issue(
+                code=errors.E_SUBSYSTEM_OVERLAP,
+                severity=errors.SEVERITY[errors.E_SUBSYSTEM_OVERLAP],
+                message=(f"{len(rels)} file(s) are claimed at equal specificity by "
+                         f"{list(contenders)}; ownership is decided only by sorted-first name "
+                         f"({min(contenders)}). Sample: {sample}"),
+                subsystem=owner,
+                file=rels[0] if len(rels) == 1 else None,
+                fix=("narrow one subsystem path or move shared files to `files:` so a single "
+                     f"subsystem owns them (currently overlaps with {others})"),
+            ))
+        return issues
+
+    for rel, _spec, contenders in per_file:
+        owner = subsystem or min(contenders)
+        others = [c for c in contenders if c != owner]
+        issues.append(Issue(
+            code=errors.E_SUBSYSTEM_OVERLAP,
+            severity=errors.SEVERITY[errors.E_SUBSYSTEM_OVERLAP],
+            message=(f"'{rel}' is claimed at equal specificity by {list(contenders)}; "
+                     f"ownership is decided only by sorted-first name ({min(contenders)})"),
+            subsystem=owner,
+            file=rel,
+            fix=(f"narrow one path or move '{rel}' to `files:` so a single subsystem owns it "
+                 f"(currently overlaps with {others})"),
+        ))
+    return issues
 
 
 def _gitignore_filter(

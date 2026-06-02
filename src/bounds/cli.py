@@ -449,16 +449,50 @@ def overview_cmd(human: bool) -> None:
         counts = Counter(i.code for i in report.issues)
         cov = report.stats.get("coverage", {})
         mapping = cov.get("mapping") or {}
+        validation_errors = report.errors()
         validation = {
-            "ok": report.ok,
-            "errors": len(report.errors()),
+            "ok": not validation_errors,
+            "errors": len(validation_errors),
             "warnings": len(report.warnings()),
             "structural_drift": counts.get(errors.E_STRUCTURAL_DRIFT, 0),
             "boundary_violations": counts.get(errors.E_BOUNDARY_VIOLATION, 0),
+            "ownership_overlaps": counts.get(errors.E_SUBSYSTEM_OVERLAP, 0),
             "contract_gaps": counts.get(errors.E_CONTRACT_MISSING_EXPORT, 0),
             "stale_interfaces": counts.get(errors.E_STALE_INTERFACE, 0),
             "mapped_pct": mapping.get("mapped_pct", 0.0),
         }
+        next_steps: list[str] = []
+        mapped_pct = validation["mapped_pct"]
+        if mapped_pct < 100.0:
+            next_steps.append(
+                "Map the missing library source: run `bounds validate -H`, follow the "
+                "`E_COVERAGE_GAP` fix, then rerun `bounds validate`."
+            )
+        if validation["ownership_overlaps"]:
+            next_steps.append(
+                "Resolve duplicate ownership: run `bounds validate -H` for the overlapping "
+                "subsystems, then narrow one path or move shared files to `files:`."
+            )
+        if validation_errors:
+            next_steps.append(
+                "Refresh the generated model or fix the contract: run `bounds validate -H` "
+                "and address error-severity drift, missing exports, or boundary violations."
+            )
+        if cycle_issues:
+            next_steps.append("Break dependency cycles before treating impact results as complete.")
+        if schema_errors:
+            next_steps.append("Fix schema manifest errors before trusting schema/table answers.")
+        if not next_steps:
+            next_steps.append(
+                "Use `bounds list` → `bounds describe <name>` → `bounds impact <name>` to scope "
+                "changes, then `bounds validate --quick` after edits."
+            )
+        validation["trust_note"] = (
+            "Bounds is authoritative for tree-sitter-verified symbols in mapped source. "
+            "If mapped_pct is below 100, unmapped library source is outside the architecture map; "
+            "use Bounds to scope first, then inspect source where the map is incomplete."
+        )
+        validation["next_steps"] = next_steps
         # Informational doc/test linkage (tracked, never a blocking gap) — carried so the human
         # overview can re-render the same data the validate JSON exposes (JSON-first parity).
         for label in ("tests", "docs"):
@@ -475,10 +509,11 @@ def overview_cmd(human: bool) -> None:
             "cycles": [i.message for i in cycle_issues],
             "schema_issues": [i.to_dict() for i in schema_issues],
             "health": {
-                # ok is true only when nothing blocks: the validation pass is clean AND there
-                # are no graph cycles or schema errors (kept distinct so the human line and JSON
-                # still surface each signal independently).
-                "ok": report.ok and not cycle_issues and schema_errors == 0,
+                # ok is true only when the dashboard is actually clean: no error-severity
+                # validation issues, no graph cycles, and no schema errors. This is stricter
+                # than `report.ok`, which can stay true under enforce=off while still reporting
+                # real drift.
+                "ok": not validation_errors and not cycle_issues and schema_errors == 0,
                 "schema_errors": schema_errors,
                 "cycles": len(cycle_issues),
                 "validation": validation,

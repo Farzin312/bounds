@@ -268,8 +268,10 @@ def _render_list_human(payload: dict) -> str:
 def _render_overview_human(payload: dict) -> str:
     """Render `bounds overview`: a health line + counts; the full edge list stays in the JSON."""
     h = payload.get("health", {}) or {}
-    status = "ok" if h.get("ok") else "needs attention"
     v = h.get("validation", {}) or {}
+    status = "ok" if h.get("ok") else "needs attention"
+    if h.get("ok") and v.get("warnings", 0):
+        status = "ok with warnings"
     lines = [
         f"{payload.get('project', '')}: {payload.get('subsystems', 0)} subsystems — {status}",
         f"  roles: {_kv_inline(payload.get('roles', {}))}",
@@ -277,7 +279,8 @@ def _render_overview_human(payload: dict) -> str:
         f"  cycles: {h.get('cycles', 0)}   schema errors: {h.get('schema_errors', 0)}"
         f"   dependency edges: {len(payload.get('edges', []))}",
         f"  validation: {v.get('errors', 0)} errors, {v.get('warnings', 0)} warnings"
-        f"   (drift: {v.get('structural_drift', 0)}, boundaries: {v.get('boundary_violations', 0)})"
+        f"   (drift: {v.get('structural_drift', 0)}, boundaries: {v.get('boundary_violations', 0)}, "
+        f"overlaps: {v.get('ownership_overlaps', 0)})"
         f"   mapped: {v.get('mapped_pct', 0.0)}%",
     ]
     # Informational doc/test linkage (tracked, never a gap) — one short line each, only when present.
@@ -286,6 +289,10 @@ def _render_overview_human(payload: dict) -> str:
         if bucket:
             lines.append(f"  {label}: {bucket.get('linked', 0)} linked / "
                          f"{bucket.get('unlinked', 0)} unlinked")
+    if v.get("trust_note"):
+        lines.append(f"  trust: {v['trust_note']}")
+    for step in v.get("next_steps", []) or []:
+        lines.append(f"  next: {step}")
     for cyc in payload.get("cycles", []) or []:
         lines.append(f"  cycle: {cyc}")
     return "\n".join(lines)

@@ -629,7 +629,7 @@ def test_human_renderers_are_clean_summaries(monkeypatch, py_project):
     lst = _invoke(monkeypatch, py_project, ["list", "--human"]).output
     assert "subsystem" in lst and not lst.lstrip().startswith("{")  # a summary, not JSON
     ov = _invoke(monkeypatch, py_project, ["overview", "--human"]).output
-    assert "roles:" in ov and "dependency edges" in ov
+    assert "roles:" in ov and "dependency edges" in ov and "trust:" in ov and "next:" in ov
     im = _invoke(monkeypatch, py_project, ["impact", "models", "--human"]).output
     assert "blast radius" in im and "consumers" in im
     cal = _invoke(monkeypatch, py_project, ["calibrate", "--human"]).output

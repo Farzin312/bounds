@@ -115,10 +115,10 @@ entry, not a one-off — add it here, with a test, in the same change.
 
 ### BOUNDS-009 — `overview` reports `health.ok=true` while `validate` reports errors
 - **Severity / Status:** low / **Fixed**
-- **Found:** 2026-06-01 via benchmark (date-fns ok=true with 948 validate errors; lodash).
+- **Found:** 2026-06-01 via benchmark (date-fns ok=true with 948 validate errors; lodash). Residual found 2026-06-02 while testing a large TypeScript backend: `overview` still read `ok` with error-severity validation issues when `enforce=off`.
 - **Root cause:** `overview` health only counted schema errors + cycles, not drift/boundary.
-- **Fix:** `gen9-correctness-mapping-100pct` — `overview_cmd` folds a real validation pass (`validate_engine.run(..., persist=False)`, reusing the content-hash cache, spinner-wrapped) into `health.ok` so it is true only when validate is clean AND there are no cycles/schema errors. The JSON gains `health.validation` (errors/warnings/drift/boundary/contract/stale + `mapped_pct`); the human view renders the same line. Off the `--quick` budget path.
-- **Test:** `tests/cli/test_cli.py::test_overview_health_reflects_drift`, `::test_overview_health_clean_when_no_drift`.
+- **Fix:** `gen9-correctness-mapping-100pct` — `overview_cmd` folds a real validation pass (`validate_engine.run(..., persist=False)`, reusing the content-hash cache, spinner-wrapped) into `health.ok`. The 2026-06-02 hardening made `health.ok` depend on zero error-severity validation issues, not `ValidationReport.ok`, because `report.ok` intentionally stays true under `enforce=off`. The JSON gains `health.validation` (errors/warnings/drift/boundary/ownership-overlap/contract/stale + `mapped_pct`); the human view renders the same line. Off the `--quick` budget path.
+- **Test:** `tests/cli/test_cli.py::test_overview_health_reflects_drift`, `::test_overview_health_reflects_error_severity_drift_even_when_enforce_off`, `::test_overview_health_clean_when_no_drift`.
 
 ### BOUNDS-010 — `describe` JSON omits the file list its `--human`/`--full` view shows
 - **Severity / Status:** low / **Fixed**
@@ -147,7 +147,7 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Severity / Status:** medium / **Fixed**
 - **Found:** 2026-06-01 via benchmark (0/13 supported repos validated clean after a fresh discover; calibrate didn't converge).
 - **Status detail:** BOUNDS-001/002/008/012/015/016 together collapse the issue counts on a *fresh* discover (no calibrate). Re-measured 2026-06-01 on `gen9-correctness-mapping-100pct` (tiktoken; `init → discover --apply → validate`, all `ok: True`):
-  - **click** 206→**3** (2 boundary + 1 coverage-gap; 0 drift) — note BOUNDS-015 was required to hold this: it had silently regressed to 479 (476 test-case drifts) after BOUNDS-014.
+  - **click** 206→**1** (coverage-gap only; 0 drift, 0 boundary) — note BOUNDS-015 was required to hold this: it had silently regressed to 479 (476 test-case drifts) after BOUNDS-014. BOUNDS-018 removed the final false boundary errors from tests importing private internals.
   - **requests** 146→**6** · **flask** 314→**19** · **express** 53→**1** · **axios** 191→**59** · **zod** 3,025→**155**.
   The library-source mapping is 100% on well-factored repos (click, axios) and is reported honestly with a fix hint elsewhere. **Residual (genuine, mostly info-severity):** auto-drawn boundary edges (axios 37, flask 5), TS cross-module re-export `kind: unknown` (advisory), and app-local Next.js component exports (BOUNDS-016 residual). All non-blocking.
 - **Fix:** **Fixed** — the floods (orphan, test-case, framework) are eliminated; remaining issues are genuine or advisory. Convergence numbers above are the current honest baseline.
@@ -165,7 +165,7 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Found:** 2026-06-01 via post-fix OSS re-measurement (click showed **476** structural-drift issues on a fresh `discover → validate`, contradicting the documented `206→3`).
 - **Symptom:** every `test_*` function / `Test*` class in a test subsystem produced an info-severity `E_STRUCTURAL_DRIFT` ("subsystem 'tests' exports 'test_…' which is not declared in exposes") — hundreds per repo — flooding `validate` output (click 476, every repo with a tests dir affected). `ok` stayed `true` (info severity) but the noise re-created exactly what BOUNDS-014 removed.
 - **Root cause:** asymmetry introduced by BOUNDS-014. Discover *excludes* test cases from `exposes`, but `validate.checks.check_structural_drift`'s "undeclared public surface" branch still compared the full exported set (which includes `test_*`) against the (test-case-free) `exposes`, flagging each test case. The prior session measured BOUNDS-014 by manifest size, not by re-running `validate`, so the drift regression slipped in.
-- **Fix:** `gen9-correctness-mapping-100pct` — `check_structural_drift` now excludes test cases symmetrically, using the shared `scan.is_test_file`/`scan.is_test_symbol` predicates (the same ones discover uses), gated on the file actually being a test file (a `test_*`-named symbol in non-test source still flags). Verified: click structural-drift **476→0** (fresh `discover → validate`: 479→3 issues, all genuine: 2 boundary + 1 coverage), chalk unaffected.
+- **Fix:** `gen9-correctness-mapping-100pct` — `check_structural_drift` now excludes test cases symmetrically, using the shared `scan.is_test_file`/`scan.is_test_symbol` predicates (the same ones discover uses), gated on the file actually being a test file (a `test_*`-named symbol in non-test source still flags). Verified: click structural-drift **476→0**; later BOUNDS-018 removed the remaining test-private-import boundary false positives, leaving fresh `discover → validate` at 1 issue (`E_COVERAGE_GAP` only).
 - **Test:** `tests/validate/test_checks.py::test_drift_excludes_test_cases_from_undeclared_export_noise`, `::test_drift_test_named_symbol_in_non_test_file_still_flags`.
 
 ### BOUNDS-016 — Next.js framework-entry exports flood `E_STRUCTURAL_DRIFT` (undeclared-export noise)
@@ -176,6 +176,32 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Fix:** `gen9-correctness-mapping-100pct` — `scan.is_framework_entry_file(rel)` recognizes a Next.js special file (`page`/`layout`/`loading`/`error`/`route`/`middleware`/… ) **only** when it sits under an `app/` or `pages/` segment (so an ordinary `lib/route.ts` is never mistaken for a route entry). Such a file's exports are excluded symmetrically from discover's `_exposes_for` and from `check_structural_drift`'s undeclared-surface branch. Verified: zod 166→155 issues (the framework-callback drifts gone).
 - **Residual (by design):** app-local **component** exports in ordinary `.tsx` files (e.g. `BlogCard`) are real module exports and still surface as info-drift; silencing them would risk hiding a genuine surface. A user curates `exposes` or `.boundsignore`s a bundled site.
 - **Test:** `tests/validate/test_checks.py::test_drift_excludes_nextjs_framework_entry_exports`, `::test_drift_route_file_outside_app_dir_still_flags`.
+
+### BOUNDS-017 — duplicate same-path subsystem ownership is too hidden
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-02 while testing Bounds on a large TypeScript backend (two generated subsystems claimed the same source directory; only `describe --full` surfaced overlap warnings).
+- **Symptom:** `validate` and `overview` could show massive drift on a losing duplicate subsystem without explaining the underlying ownership conflict. Users had to guess which subsystem to inspect with `describe --full`.
+- **Root cause:** `E_SUBSYSTEM_OVERLAP` diagnostics lived in `describe.subsystem_overlaps` only. The validation engine used the same most-specific-path-wins owner map, but did not report equal-specificity ties in the normal health path.
+- **Fix:** equal-specificity overlap detection moved beside `extract.scan.resolve_owners` as private validation plumbing. `describe --full` still gets per-file diagnostics; `validate` gets aggregated warnings so broad duplicate paths do not flood output; `overview` reports `ownership_overlaps` in the validation summary.
+- **Test:** `tests/validate/test_engine.py::test_engine_surfaces_equal_specificity_path_overlap`, `tests/validate/test_engine.py::test_engine_quick_surfaces_equal_specificity_path_overlap`, `tests/cli/test_cli.py::test_overview_counts_ownership_overlaps`.
+
+### BOUNDS-018 — test files importing internals trigger false production boundary errors
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-02 via `benchmarks/oss_bench.py` on a fresh temp clone of `pallets/click`.
+- **Affected:** `validate`, `overview`, benchmark health on repos where tests intentionally import private implementation symbols.
+- **Symptom:** fresh `bounds init --root && bounds discover --apply && bounds validate` on Click reported 2 `E_BOUNDARY_VIOLATION` errors because `tests/test_parser.py` imported `_OptionParser` and `tests/test_stream_lifecycle.py` imported `_NamedTextIOWrapper`. The model looked broken immediately after discover even though tests are allowed to exercise internals.
+- **Root cause:** `check_boundary` applied production public-API boundary rules to files recognized as tests. Bounds already treats tests separately for coverage and structural drift, but boundary compliance did not share that rule.
+- **Fix:** `check_boundary` now skips files matched by the shared `is_test_file` predicate. Tests still contribute ownership, dependency, and coverage signals; they no longer turn private test imports into production boundary failures. Verified on Click: fresh validation errors **2→0**, boundary violations **2→0**, leaving only the honest `E_COVERAGE_GAP` warning.
+- **Test:** `tests/validate/test_checks.py::test_boundary_allows_test_files_to_import_internals`.
+
+### BOUNDS-019 — `discover --apply` can create duplicate manifests in already-bounded repos
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-02 while dogfooding Bounds on its own repo after adding benchmark tests.
+- **Affected:** `bounds discover --apply` on repos that already have a curated `.bounds/` model.
+- **Symptom:** re-running discover proposed alternate generated subsystems over files already owned by existing manifests, including test directories already linked through `tests:`. Keeping those files would make the architecture model larger and less trustworthy instead of improving coverage.
+- **Root cause:** discovery grouped every supported source file from scratch, while `_write` merged candidates into existing `root.yaml`. That made `discover` act like a second bootstrap pass instead of a gap-filling pass.
+- **Fix:** when a Bounds model already exists, `discover` loads it, resolves current source ownership, resolves linked tests, filters those files out of candidate discovery, and extracts existing-owned files only for import resolution. It now adds only unmapped source; if there is none, it writes nothing and points users to `bounds calibrate` for drift reconciliation.
+- **Test:** `tests/discover/test_discover.py::test_discover_existing_model_does_not_create_duplicate_subsystems`, `::test_discover_existing_model_adds_only_unmapped_source`.
 
 ---
 

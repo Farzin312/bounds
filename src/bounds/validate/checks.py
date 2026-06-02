@@ -229,7 +229,7 @@ def _candidate_stems(
         for _ in range(max(leading - 1, 0)):
             up = posixpath.dirname(up)
         # The two relative-import dialects disagree on what a "." means in `rest`, and conflating
-        # them silently drops most TS edges (the spex_backend 63/93 `consumed_by 0` bug):
+        # them silently drops most TS edges in large backends:
         #   * TS/JS — `rest` is already a filesystem path ("./auth.service" -> rest "/auth.service").
         #     Dots belong to the *filename* (`auth.service.ts`); splitting them yields the bogus
         #     stem `.../auth/service`, which never matches. A TS specifier always has a slash after
@@ -365,6 +365,8 @@ def check_boundary(ctx: CheckContext) -> list[Issue]:
     aliases = ctx.ts_aliases()
     for name in sorted(ctx.subsystems):
         for rel in ctx.files_of(name):
+            if is_test_file(rel):
+                continue
             result = ctx.extracts[rel]
             for imp in result.imports:
                 target = resolve_import(rel, imp.module, known, suffix_index, aliases)

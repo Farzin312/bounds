@@ -242,9 +242,11 @@ def test_overview(sample_project, monkeypatch):
     assert data["cycles"] == []
     # overview now folds a real validation pass into health (BOUNDS-009).
     assert data["health"]["validation"]["ok"] is True
+    assert "trust_note" in data["health"]["validation"]
+    assert data["health"]["validation"]["next_steps"]
 
 
-def _drifted_project(root):
+def _drifted_project(root, *, enforce: str = "on"):
     """Write a 2-subsystem python project under enforce=on with one blocking contract drift.
 
     ``models`` declares a ``Missing`` export that does not exist in source, so a full
@@ -252,7 +254,7 @@ def _drifted_project(root):
     """
     (root / ".bounds" / "manifests").mkdir(parents=True)
     (root / ".bounds" / "root.yaml").write_text(
-        'version: "1"\nproject: drift\nlanguages: [python]\nenforce: "on"\n'
+        f'version: "1"\nproject: drift\nlanguages: [python]\nenforce: "{enforce}"\n'
         "subsystems: [models, svc]\n",
         encoding="utf-8",
     )
@@ -295,6 +297,24 @@ def test_overview_health_reflects_drift(tmp_path, monkeypatch):
     assert val.exit_code == 1  # blocked, not fatal
 
 
+def test_overview_health_reflects_error_severity_drift_even_when_enforce_off(tmp_path, monkeypatch):
+    """A dashboard is not healthy when full validation reports error-severity drift, even if enforce=off would not block."""
+    root = tmp_path / "proj"
+    _drifted_project(root, enforce="off")
+    monkeypatch.chdir(root)
+
+    overview = CliRunner().invoke(main, ["overview"])
+    assert overview.exit_code == 0
+    health = _json(overview)["health"]
+    assert health["ok"] is False
+    assert health["validation"]["ok"] is False
+    assert health["validation"]["errors"] >= 1
+
+    val = CliRunner().invoke(main, ["validate"])
+    assert val.exit_code == 0
+    assert _json(val)["ok"] is True  # enforce=off is advisory, but overview must still be honest.
+
+
 def test_overview_health_clean_when_no_drift(py_project, monkeypatch):
     """The BOUNDS-009 fold's clean side: a no-drift project keeps health.ok=true (the validate fold isn't a false alarm)."""
     # A clean project (enforce=off, source matches contracts) stays health.ok=true.
@@ -304,6 +324,59 @@ def test_overview_health_clean_when_no_drift(py_project, monkeypatch):
     health = _json(result)["health"]
     assert health["ok"] is True
     assert health["validation"]["ok"] is True
+    assert "bounds list" in health["validation"]["next_steps"][0]
+
+
+def test_overview_guides_partial_mapping_to_coverage_fix(tmp_path, monkeypatch):
+    """Overview must explain that a partial map is useful but incomplete, with the coverage fix path."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: partial\nlanguages: [python]\nsubsystems: [app]\n',
+        encoding="utf-8",
+    )
+    (cfg / "manifests" / "app.yaml").write_text(
+        "name: app\nrole: library\ncriticality: core\npaths: [app]\n"
+        "exposes:\n  - { name: run, kind: function }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
+    (tmp_path / "unmapped").mkdir()
+    (tmp_path / "unmapped" / "extra.py").write_text("def extra():\n    return True\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["overview"])
+    assert result.exit_code == 0
+    validation = _json(result)["health"]["validation"]
+    assert validation["mapped_pct"] < 100
+    assert "outside the architecture map" in validation["trust_note"]
+    assert any("E_COVERAGE_GAP" in step for step in validation["next_steps"])
+
+
+def test_overview_counts_ownership_overlaps(tmp_path, monkeypatch):
+    """Overview must expose duplicate same-path ownership in its normal health summary, not bury it behind describe --full."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: overlap\nlanguages: [python]\nsubsystems: [aaa, bbb]\n',
+        encoding="utf-8",
+    )
+    for name in ("aaa", "bbb"):
+        (cfg / "manifests" / f"{name}.yaml").write_text(
+            f"name: {name}\nrole: library\ncriticality: leaf\npaths: [pkg]\nexposes: []\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "shared.py").write_text("def shared():\n    pass\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["overview"])
+    assert result.exit_code == 0
+    validation = _json(result)["health"]["validation"]
+    assert validation["ownership_overlaps"] == 1
+    assert validation["warnings"] >= 1
+    assert any("Resolve duplicate ownership" in step for step in validation["next_steps"])
 
 
 def test_validate_fatal_after_dry_run_discover_exits_2(tmp_path, git_init, monkeypatch):

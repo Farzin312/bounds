@@ -3,8 +3,8 @@
 
 `oss_run.py` measures two repos and prints a markdown table. This is the per-repo engine behind a
 larger cross-language sweep: given one already-cloned repo, it runs the full Bounds pipeline
-(`init` -> `discover --apply` -> `list`/`describe`/`impact`/`overview`/`validate`) and emits ONE
-JSON object capturing both:
+(`list` before setup -> `init` -> `discover --apply` ->
+`list`/`describe`/`impact`/`overview`/`validate`) and emits ONE JSON object capturing both:
 
   (a) token economics — orient-on-whole-repo and learn-one-subsystem cost via Bounds vs source, plus
       the full per-subsystem `describe` distribution (min/median/max) so the spread is honest, and
@@ -55,6 +55,17 @@ def _run(args: list[str], cwd: Path) -> tuple[str, str, int, float]:
     return proc.stdout, proc.stderr, proc.returncode, time.perf_counter() - t0
 
 
+def _error_payload(stdout: str) -> dict:
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    err = data.get("error")
+    return err if isinstance(err, dict) else {}
+
+
 def _source_tokens(root: Path, name: str, count) -> int:
     text = "".join(p.read_text(encoding="utf-8", errors="ignore")
                    for p in manifest_source_files(root, name))
@@ -97,8 +108,26 @@ def measure(root: Path, name: str, lang: str, count) -> dict:
     result: dict = {"name": name, "lang": lang, "root": str(root), "errors": [], "notes": []}
     result.update(_file_coverage(root))
 
+    # --- without Bounds: the command should fail loud and tell users how to recover ---
+    pre_out, pre_err, pre_rc, pre_t = _run(["list"], root)
+    result["without_bounds_list_rc"] = pre_rc
+    result["without_bounds_list_sec"] = round(pre_t, 3)
+    pre_error = _error_payload(pre_out)
+    if pre_error:
+        result["without_bounds_error_code"] = pre_error.get("code")
+        result["without_bounds_error_message"] = pre_error.get("message")
+        result["without_bounds_error_fix"] = pre_error.get("fix")
+    elif pre_rc == 0:
+        result["notes"].append("preflight list succeeded before init; repo already had .bounds")
+    else:
+        result["errors"].append(f"preflight list emitted non-JSON failure (rc={pre_rc}): {pre_err.strip()[:200]}")
+
     # --- init + discover (the bootstrap; capture crashes/latency) ---
     _, init_err, init_rc, init_t = _run(["init", "--root"], root)
+    result["init_rc"] = init_rc
+    result["init_sec"] = round(init_t, 3)
+    if init_rc != 0:
+        result["errors"].append(f"init exited {init_rc}: {init_err.strip()[:200]}")
     out, disc_err, disc_rc, disc_t = _run(["discover", "--apply"], root)
     result["discover_rc"] = disc_rc
     result["discover_sec"] = round(disc_t, 3)
@@ -175,6 +204,14 @@ def measure(root: Path, name: str, lang: str, count) -> dict:
         result["overview_health_ok"] = bool(health.get("ok"))
         result["cycles"] = _as_int(health.get("cycles", len(ov.get("cycles", []) or [])))
         result["schema_issues"] = len(ov.get("schema_issues", []) or [])
+        validation = health.get("validation", {}) if isinstance(health, dict) else {}
+        if isinstance(validation, dict):
+            result["overview_validation_errors"] = _as_int(validation.get("errors"))
+            result["overview_validation_warnings"] = _as_int(validation.get("warnings"))
+            result["overview_structural_drift"] = _as_int(validation.get("structural_drift"))
+            result["overview_boundary_violations"] = _as_int(validation.get("boundary_violations"))
+            result["overview_ownership_overlaps"] = _as_int(validation.get("ownership_overlaps"))
+            result["overview_mapped_pct"] = validation.get("mapped_pct")
     except json.JSONDecodeError:
         result["errors"].append("overview emitted non-JSON")
 
@@ -186,10 +223,17 @@ def measure(root: Path, name: str, lang: str, count) -> dict:
         val = json.loads(val_out)
         issues = val.get("issues", []) if isinstance(val, dict) else []
         result["validate_issue_count"] = len(issues)
+        result["validate_error_count"] = sum(
+            1 for i in issues if isinstance(i, dict) and i.get("severity") == "error"
+        )
+        result["validate_warning_count"] = sum(
+            1 for i in issues if isinstance(i, dict) and i.get("severity") == "warning"
+        )
         # Codes give a fingerprint of WHAT drifts immediately after discover (ideally nothing).
         codes = sorted({i.get("code", "?") for i in issues if isinstance(i, dict)})
         result["validate_codes"] = codes[:12]
         result["validate_clean_on_fresh_discover"] = (len(issues) == 0)
+        result["validate_error_clean_on_fresh_discover"] = (result["validate_error_count"] == 0)
     except json.JSONDecodeError:
         result["errors"].append("validate emitted non-JSON")
 

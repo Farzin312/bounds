@@ -21,7 +21,8 @@ benchmarks/
   results/
     claude-baseline.md        # first entry: Claude / tiktoken-estimate baseline
     oss-token-economics.md    # cross-repo (click, axios) numbers + capability head-to-head
-    <agent>-<model>.md        # your submission
+    <agent>-<model>.md        # per-agent submissions
+    oss-fresh-discover-trust.md # first-run OSS trust/recovery benchmark
 ```
 
 ## Why there are no hardware specs
@@ -148,3 +149,4 @@ own. State your tokenizer.
 |------------|-------|-------|-----------|
 | [`claude-baseline.md`](results/claude-baseline.md) | Claude Code | Claude (Opus) | char/4 estimate |
 | [`oss-token-economics.md`](results/oss-token-economics.md) | Claude Code | Claude (Opus 4.8) | char/4 estimate |
+| [`oss-fresh-discover-trust.md`](results/oss-fresh-discover-trust.md) | CLI harness | N/A | tiktoken cl100k_base |

@@ -87,9 +87,12 @@ def test_discover_apply_writes_manifests(tmp_path):
     auth_manifest = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR / "auth.yaml"
     assert auth_manifest.is_file()
 
-    # Re-running --apply skips existing manifests rather than clobbering.
+    # Re-running --apply on a fully bounded repo does not re-propose duplicate manifests.
     again = run_discover(tmp_path, apply=True)
-    assert any("auth.yaml" in s for s in again["skipped"])
+    assert again["candidates"] == []
+    assert again["written"] == []
+    assert again["skipped"] == []
+    assert "no unmapped supported source" in again["notice"]
 
 
 def test_discover_namespace_tag(tmp_path):
@@ -157,7 +160,7 @@ def test_discover_overwrites_hardcoded_python_default_for_ts(tmp_path):
 def test_discover_folds_module_subparts_into_parent(tmp_path):
     """A NestJS-shaped module folds dto/ and services/ subdirs into one `auth` subsystem (path src/auth), not three fragments."""
     # A NestJS-shaped module (auth.module.ts directly + dto/ and services/ subdirs) becomes ONE
-    # `auth` subsystem, not auth + auth-dto + auth-services (the spex_backend over-fragmentation).
+    # `auth` subsystem, not auth + auth-dto + auth-services (over-fragmentation).
     (tmp_path / ".bounds").mkdir()
     auth = tmp_path / "src" / "auth"
     (auth / "dto").mkdir(parents=True)
@@ -227,6 +230,78 @@ def test_discover_apply_preserves_custom_root_keys(tmp_path):
     assert "auth" in root_doc["subsystems"]  # discovery still merged its finds
 
 
+def test_discover_existing_model_does_not_create_duplicate_subsystems(tmp_path):
+    """On an already-bounded repo, discover targets unmapped source only; it must not create alternate manifests over owned files."""
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        yaml.safe_dump({"version": "1", "project": "proj", "languages": ["python"], "subsystems": ["app"]}),
+        encoding="utf-8",
+    )
+    (cfg / config.MANIFESTS_DIR / "app.yaml").write_text(
+        "name: app\nrole: library\ncriticality: core\npaths: [src/app]\n"
+        "exposes:\n  - { name: run, kind: function }\n"
+        "tests:\n  - tests/app\n",
+        encoding="utf-8",
+    )
+    app = tmp_path / "src" / "app"
+    app.mkdir(parents=True)
+    (app / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
+    tests = tmp_path / "tests" / "app"
+    tests.mkdir(parents=True)
+    for i in range(3):
+        (tests / f"test_app_{i}.py").write_text("def test_run():\n    assert True\n", encoding="utf-8")
+
+    dry = run_discover(tmp_path)
+    assert [c for c in dry["candidates"] if not c["dropped"]] == []
+    assert "no unmapped supported source" in dry["notice"]
+
+    applied = run_discover(tmp_path, apply=True)
+    assert applied["written"] == []
+    assert applied["skipped"] == []
+    assert not (cfg / config.MANIFESTS_DIR / "tests-app.yaml").exists()
+    root_doc = yaml.safe_load((cfg / config.ROOT_FILE).read_text())
+    assert root_doc["subsystems"] == ["app"]
+
+
+def test_discover_existing_model_adds_only_unmapped_source(tmp_path):
+    """Partial discovery may add a new subsystem, but imports to existing subsystems stay wired."""
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        yaml.safe_dump({"version": "1", "project": "proj", "languages": ["python"], "subsystems": ["app"]}),
+        encoding="utf-8",
+    )
+    (cfg / config.MANIFESTS_DIR / "app.yaml").write_text(
+        "name: app\nrole: library\ncriticality: core\npaths: [src/app]\n"
+        "exposes:\n  - { name: run, kind: function }\n",
+        encoding="utf-8",
+    )
+    app = tmp_path / "src" / "app"
+    extra = tmp_path / "src" / "extra"
+    app.mkdir(parents=True)
+    extra.mkdir(parents=True)
+    (app / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
+    (extra / "feature.py").write_text(
+        "from ..app.main import run\n\n"
+        "def feature():\n    return run()\n",
+        encoding="utf-8",
+    )
+    for i in range(4):
+        (extra / f"mod{i}.py").write_text(f"def helper{i}():\n    return True\n", encoding="utf-8")
+
+    dry = run_discover(tmp_path)
+    kept = [c for c in dry["candidates"] if not c["dropped"]]
+    assert [c["name"] for c in kept] == ["extra"]
+    assert kept[0]["consumes"] == ["app"]
+
+    applied = run_discover(tmp_path, apply=True)
+    assert f"{config.BOUNDS_DIR}/{config.MANIFESTS_DIR}/extra.yaml" in applied["written"]
+    assert not (cfg / config.MANIFESTS_DIR / "app.yaml.yaml").exists()
+    root_doc = yaml.safe_load((cfg / config.ROOT_FILE).read_text())
+    assert root_doc["subsystems"] == ["app", "extra"]
+
+
 def test_discover_merge_into(tmp_path):
     """An explicit merges= directive folds multiple paths into one named subsystem ('core'), suppressing the per-dir candidates."""
     _project(tmp_path)
@@ -284,11 +359,11 @@ def test_discover_apply_zero_written_emits_notice(tmp_path):
     first = run_discover(tmp_path, apply=True)
     assert "notice" not in first  # real manifests were written -> no confusing notice
 
-    again = run_discover(tmp_path, apply=True)  # all candidates already exist
-    assert again["written"] == [f"{config.BOUNDS_DIR}/{config.ROOT_FILE}"]  # only root re-merged
-    assert again["skipped"]  # the per-candidate manifests were skipped
+    again = run_discover(tmp_path, apply=True)  # all source is already owned
+    assert again["written"] == []
+    assert again["skipped"] == []
     assert "notice" in again
-    assert "0 new manifests" in again["notice"]
+    assert "no unmapped supported source" in again["notice"]
     assert "calibrate" in again["notice"]  # points the user at the reconcile path
 
 

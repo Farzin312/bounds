@@ -108,6 +108,18 @@ def run(
                 file_owner.pop(rel, None)
             skipped_gitignored = len(ignored)
 
+    issues.extend(
+        scan._ownership_overlap_issues(
+            project_root,
+            subsystems,
+            exts,
+            matcher,
+            repo,
+            include_gitignored,
+            aggregate=True,
+        )
+    )
+
     state = cache_store.load_state(project_root)
     was_cold = len(state.files) == 0
 

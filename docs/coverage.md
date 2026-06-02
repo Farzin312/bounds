@@ -7,9 +7,9 @@ coverage signal and how a human *or an AI* closes a gap.
 
 ## The signal
 
-`bounds validate` and `bounds discover` report mapping coverage over the repo's **library source
-code** (docs/config/assets are excluded so they can't dilute the number; **test files are excluded
-too** and tracked in their own bucket — see *Docs & tests* below):
+`bounds validate`, `bounds discover`, and `bounds overview` report mapping coverage over the repo's
+**library source code** (docs/config/assets are excluded so they can't dilute the number; **test
+files are excluded too** and tracked in their own bucket — see *Docs & tests* below):
 
 ```jsonc
 // bounds validate  →  stats.coverage.mapping
@@ -34,6 +34,11 @@ When `files_unmapped > 0`, `validate` emits one **loud, non-blocking** `E_COVERA
 below. It is a **warning, not an error**: an incomplete map is honest, not a CI failure on its own
 (you opt into stricter gates — see *CI* below). **The gap fires only on unmapped non-test library
 source** — a repo's tests can never drag the % down or be flagged.
+
+`bounds overview` carries the same signal in `health.validation.mapped_pct`, plus a `trust_note` and
+`next_steps`. This is the agent-facing rule: Bounds is authoritative for verified symbols in mapped
+source; if `mapped_pct < 100`, use Bounds to scope first, then follow the `E_COVERAGE_GAP` fix or
+inspect source where the map is incomplete.
 
 Two kinds of gap, two fixes:
 
@@ -110,6 +115,10 @@ parse. Either way the format is the same and the result is verifiable.
 
 4. **Verify:** `bounds validate` — coverage should rise and the manifest should be drift-free. Re-run
    until `mapped_pct` is where you want it.
+
+`bounds discover --apply` is safe to rerun on an existing Bounds repo: it only proposes source that
+is not already owned by current manifests (and not already linked as tests). If it reports no
+unmapped supported source, use `bounds calibrate` rather than keeping duplicate generated manifests.
 
 **For AI agents filling a gap:** read the format above and the existing `.bounds/manifests/*.yaml` as
 examples, author the missing manifest(s), add the names to `root.yaml`, then run `bounds validate`

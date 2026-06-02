@@ -9,7 +9,7 @@ named subsystem; ``--namespace <ns>`` tags every candidate.
 
 Heuristic (deterministic, zero LLM):
 
-1. Walk the repo for supported source files (honouring ignore dirs + ``.boundsignore``).
+1. Walk the repo for supported non-test source files (honouring ignore dirs + ``.boundsignore``).
 2. A **candidate** is any directory holding direct source files; score by direct-file count
    (high ≥5, medium 3-4, low <3 — low candidates are dropped unless merged). A directory
    whose files are predominantly SQL/Prisma schema (a migration set) is always kept,
@@ -31,7 +31,7 @@ from pathlib import Path
 import yaml
 
 from . import config, errors, gitutil, tsconfig
-from .extract import adapter_for_language
+from .extract import adapter_for_language, supported_extensions
 from .extract.scan import (
     extract_file,
     is_framework_entry_file,
@@ -40,9 +40,11 @@ from .extract.scan import (
     iter_repo_source,
     mapping_coverage,
     resolve_doc_owners,
+    resolve_owners,
     resolve_test_owners,
 )
 from .ignore import IgnoreMatcher, load_matcher
+from .manifest import loader as manifest_loader
 from .models import SubsystemCompact
 from .validate.checks import index_extracts, resolve_import
 from .validate.schema import SCHEMA_LANGUAGES, schema_catalog
@@ -64,22 +66,76 @@ def run_discover(
     ignored = gitutil.gitignored(project_root, sources)
     if ignored:
         sources = [rel for rel in sources if rel not in ignored]
+    sources = [rel for rel in sources if not is_test_file(rel)]
+
+    repo = gitutil.repo_root(project_root) or project_root
+    existing_root = None
+    existing_subs: dict[str, SubsystemCompact] = {}
+    existing_owner_map: dict[str, tuple[str, Path]] = {}
+    existing_owned: set[str] = set()
+    existing_tests: set[str] = set()
+    try:
+        existing_root, existing_subs, _existing_issues = manifest_loader.load_all(project_root)
+    except errors.BoundsError as exc:
+        if exc.code != errors.E_MANIFEST_NOT_FOUND:
+            raise
+    if existing_subs:
+        existing_owner_map = resolve_owners(project_root, existing_subs, supported_extensions(), matcher, repo)
+        existing_owned = set(existing_owner_map)
+        existing_tests = set(resolve_test_owners(project_root, existing_subs, matcher, repo))
+        sources = [
+            rel for rel in sources
+            if rel not in existing_owned and rel not in existing_tests
+        ]
+
     if not sources:
+        if existing_subs:
+            coverage = mapping_coverage(
+                project_root,
+                existing_owned,
+                matcher,
+                repo=repo,
+                subsystems=existing_subs,
+            )
+            return {
+                "mode": "discover",
+                "applied": apply,
+                "root": {
+                    "version": config.SCHEMA_VERSION,
+                    "project": project_root.resolve().name,
+                    "languages": list(existing_root.languages) if existing_root else [],
+                    "subsystems": sorted(existing_subs),
+                },
+                "candidates": [],
+                "coverage": coverage,
+                "written": [],
+                "skipped": [],
+                "notice": (
+                    "no unmapped supported source found; existing Bounds manifests already own "
+                    "the discoverable source. Run `bounds calibrate` to reconcile drift."
+                ),
+            }
         raise errors.BoundsError(
             errors.E_USAGE,
             "no supported source files found to discover",
-            fix="run from a project root containing .py/.ts/.js sources, "
+            fix="run from a project root containing non-test .py/.ts/.js sources, "
             "or check your .boundsignore / .gitignore",
         )
 
     # Map each source file to its candidate subsystem (merges win over directory grouping).
     merges = merges or []
     file_to_candidate, candidate_files = _group(sources, merges)
+    file_owner_for_imports = {
+        **{rel: owner for rel, (owner, _path) in existing_owner_map.items()},
+        **file_to_candidate,
+    }
 
-    # Extract every file once; record owners + exported symbols + imports + generated flag.
+    # Extract every candidate file once; include existing-owned files too so imports from newly
+    # discovered source can resolve to already-materialized subsystems without creating duplicates.
+    extract_sources = sorted(set(sources) | existing_owned)
     extracts: dict = {}
     generated: set[str] = set()
-    for rel in sources:
+    for rel in extract_sources:
         result, is_gen = extract_file(project_root, rel)
         if is_gen:
             generated.add(rel)
@@ -96,7 +152,7 @@ def run_discover(
             continue
         for imp in result.imports:
             target = resolve_import(rel, imp.module, known_noext, suffix_index, aliases)
-            tgt_owner = file_to_candidate.get(target) if target else None
+            tgt_owner = file_owner_for_imports.get(target) if target else None
             if tgt_owner and tgt_owner != owner:
                 consumes[owner].add(tgt_owner)
     consumed_by: dict[str, int] = {c: 0 for c in candidate_files}
@@ -146,9 +202,10 @@ def run_discover(
     # `consumes: <name>` for a subsystem discover never materializes would make `validate` raise a
     # self-inflicted E_UNRESOLVED_REFERENCE on a fresh run. Only edges between kept subsystems stand.
     kept_set = set(kept)
+    materialized_set = kept_set | set(existing_subs)
     for cand in candidates:
         if cand.get("consumes"):
-            cand["consumes"] = [c for c in cand["consumes"] if c in kept_set]
+            cand["consumes"] = [c for c in cand["consumes"] if c in materialized_set]
 
     # Auto-link tests (and docs) by convention so a fresh discover already maps them — the user does
     # very little. Conservative: only convention-confident files, collapsed to directory globs when a
@@ -177,15 +234,13 @@ def run_discover(
     # files are excluded from the source denominator and reported in their own bucket (subsystems
     # passed so the doc/test linkage buckets reflect the discovered subsystems' paths).
     owned = {rel for rel, cand in file_to_candidate.items() if cand in kept_set}
-    cov_subs = {
+    cov_subs = dict(existing_subs)
+    cov_subs.update({
         c["name"]: SubsystemCompact(name=c["name"], paths=list(c.get("paths") or []),
                                     tests=list(c.get("tests") or []), docs=list(c.get("docs") or []))
         for c in candidates if not c.get("dropped")
-    }
-    coverage = mapping_coverage(
-        project_root, owned, matcher,
-        repo=gitutil.repo_root(project_root) or project_root, subsystems=cov_subs,
-    )
+    })
+    coverage = mapping_coverage(project_root, owned | existing_owned, matcher, repo=repo, subsystems=cov_subs)
 
     result = {
         "mode": "discover",
@@ -438,7 +493,8 @@ def _collapse_link_paths(files: list[str], owners: dict[str, str | None], owner:
     for d in sorted(files_by_dir):
         siblings = all_by_dir.get(d, [])
         clean = all(o == owner for _rel, o in siblings)
-        if clean and d not in ("", "."):
+        owner_named_dir = PurePosixPath(d).name == owner
+        if clean and owner_named_dir and d not in ("", "."):
             out.append(d)  # whole directory maps to this owner — collapse to the dir glob
         else:
             out.extend(files_by_dir[d])  # mixed/owner-shared dir — list files individually

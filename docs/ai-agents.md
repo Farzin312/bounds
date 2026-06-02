@@ -9,9 +9,11 @@
 ## The universal instruction
 
 Bounds is a plain CLI that emits JSON, so **any agent that can run a shell command can use it
-today**. The instruction is the same regardless of agent:
+today**. It is not a Claude-only or Codex-only workflow; the generated native files are conveniences
+for tools that have a command/skill format, while the underlying contract is just CLI commands. The
+instruction is the same regardless of agent:
 
-> Start with `bounds list`, then prefer `bounds describe <name>` over reading raw source or
+> Start with `bounds list`, then prefer `bounds describe <name>` before reading source or
 > migration history to understand architecture. Use `bounds impact <name>` before changing a
 > subsystem interface or table. Output is JSON by default — parse it. Run `bounds validate --quick`
 > after edits and treat a non-`fresh` `validation_status` as a signal to update the manifests.
@@ -33,15 +35,27 @@ The contract Bounds writes leads with this mapping so the agent knows exactly wh
 
 Bounds **writes these instructions** into the config files agents already read, but it **cannot
 prevent** an agent from ignoring them or reading raw files directly. It works *with* cooperating
-agents — lowering the cost of the right behavior rather than blocking the wrong one. The CI gate is
+agents — lowering the cost of the right behavior rather than blocking the wrong one. The hard rule is
+to avoid raw `.bounds` artifacts; source files are still appropriate once Bounds has scoped the
+subsystem you need to edit. The CI gate is
 the one **hard** enforcement point, and it runs in your pipeline, not in the agent. For the enforced
 loop (pre-commit hooks + CI), see [./team-workflow.md](./team-workflow.md).
+
+Agents should also know the boundary of the tool. Bounds is a map, not execution or review: it can
+show owners, exports, table surfaces, drift, and blast radius; it cannot prove runtime behavior,
+business correctness, performance, or security. Use it before broad source search and after edits,
+then still read the scoped implementation files and run the relevant tests.
+
+For partial maps, use `bounds overview` first. Its `health.validation.trust_note` and `next_steps`
+tell you whether the map is fully covered, which gaps remain, and whether to regenerate, resolve
+duplicate ownership, or inspect source outside the mapped area. Do not present an unmapped area as
+verified architecture.
 
 > **No auto-loading — wiring is one explicit command.** There is **no** plugin that auto-detects a
 > project's `.bounds/` directory; nothing auto-loads it (by design — see the binary-cache note below).
 > The supported path is to run `bounds agent --sync` **once** per repo: it writes an instruction file
 > that each coding agent already reads (see the table below), telling the agent to query `bounds
-> describe` / `bounds list` instead of reading raw source — and, for most agents, a native command or
+> describe` / `bounds list` before broad source reading — and, for most agents, a native command or
 > auto-triggering skill so the agent can *invoke* Bounds, not just be told to (see
 > [Native commands & skills](#native-commands--skills-not-just-a-pointer)). (Run bare `bounds agent`
 > first if you just want to see which agents are present — it is read-only and writes nothing.) Native
@@ -139,8 +153,8 @@ happened:
 ## Native commands & skills (not just a pointer)
 
 The `AGENTS.md` contract and the per-agent pointer files are the **instruction** layer: they tell a
-cooperating agent to reach for `bounds describe` / `bounds list` / `bounds impact` instead of reading
-raw files. But an instruction the agent has to remember to follow is weaker than a command it can
+cooperating agent to reach for `bounds describe` / `bounds list` / `bounds impact` before broad source
+reading, and to avoid raw `.bounds` files. But an instruction the agent has to remember to follow is weaker than a command it can
 *invoke* — or a skill that *fires on its own* at the right moment. So `bounds agent --sync` also
 generates, for each agent that supports one, a **native, invokable command or auto-triggering skill**
 in that tool's own format and location:

@@ -203,6 +203,27 @@ def test_boundary_allows_exposed_import():
     assert check_boundary(_ctx(subs, extracts, owner)) == []
 
 
+def test_boundary_allows_test_files_to_import_internals():
+    """Tests may exercise internals without turning a fresh discover into production boundary errors."""
+    subs = {
+        "library": Sub(name="library", exposes=[Interface("public")]),
+        "tests": Sub(name="tests", paths=["tests"], consumes=[Consumes("library")]),
+    }
+    extracts = {
+        "src/library.py": ExtractResult(
+            "src/library.py", "python",
+            [Symbol("public", "function", 1, True), Symbol("_private", "function", 2, True)],
+        ),
+        "tests/test_library.py": ExtractResult(
+            "tests/test_library.py", "python",
+            [],
+            [ImportRef("../src/library", ["_private"], 1)],
+        ),
+    }
+    owner = {"src/library.py": "library", "tests/test_library.py": "tests"}
+    assert check_boundary(_ctx(subs, extracts, owner)) == []
+
+
 # ===========================================================================
 # Check 3 — contract compliance
 # ===========================================================================
