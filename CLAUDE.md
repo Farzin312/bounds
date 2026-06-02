@@ -68,9 +68,13 @@ GitHub is the single source of truth. To prevent staleness and ensure `pipx upgr
 `extract/` tree-sitter adapters (`registry.get_adapter` dispatches by extension;
 `registry.is_language_file` = the one "is this file language X?" check, never hardcode an extension
 list; `scan.py` = the **single home** for fs→extraction helpers — `walk_supported` (the one recursive
-source walk) / `iter_subsystem_files`/`iter_repo_source`/`extract_file`/`strip_ext`/`in_default_ignores`
-+ `read_source_bytes`/`is_oversized` (the one size-guard+read mechanism; engine vs `extract_file`
-differ only in policy), shared by engine + describe + discover/calibrate; never copy a walk;
+source walk; pass `exts=None` to walk *every* file) / `iter_subsystem_files`/`iter_repo_source`/
+`extract_file`/`strip_ext`/`in_default_ignores` + `read_source_bytes`/`is_oversized` (the one
+size-guard+read mechanism; engine vs `extract_file` differ only in policy) + `resolve_owners` (the one
+file→subsystem ownership map — **most-specific declared path/file wins**, `path_specificity` ranks it;
+shared by engine + extract_project so validate/where/impact/calibrate never disagree) + `mapping_coverage`
+(the one source-coverage metric: mapped % + by-language unmapped breakdown, gitignore-aware, gated off
+`--quick`), shared by engine + describe + discover/calibrate; never copy a walk or an owner-assignment;
 `base.canonical_columns` = the one schema column dedup/sort; `rawquery.py` = opt-in, advisory raw-SQL
 table refs) · `cache/store.py` SQLite `cache.db` (+ migration/partial-read/inspect) ·
 `validate/{engine,propagation,checks,schema}` (`checks.resolve_import`/`build_suffix_index` = the one

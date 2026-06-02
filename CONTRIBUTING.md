@@ -81,7 +81,13 @@ fixed in the same PR, not deferred.
 declared as (or part of) a subsystem in `.bounds/manifests/`. New functionality is a new module with
 a clear boundary — not a grab-bag appended to `cli.py` or `engine.py`. `cli.py` is wiring only;
 command logic lives in its own module (see `discover.py`, `calibrate.py`, `agentsync.py`,
-`ciconfig.py`). If you can't name the subsystem a file belongs to, it isn't scoped yet.
+`ciconfig.py`). Cross-cutting subpackages already exist where a concern has several pieces:
+`extract/`, `validate/`, `manifest/`, `cache/`. If you can't name the subsystem a file belongs to, it
+isn't scoped yet. **Split to scale:** when a single-concern file outgrows its boundary (roughly
+~800+ lines of *distinct* sub-concerns, not just length), promote it to a subpackage with a
+re-exporting `__init__.py` so the public API is unchanged — current candidates are `agentsync.py`
+(registry vs templates vs sync/detect) and `output.py` (per-command renderers). Do that as its own
+focused PR, never mixed with a behavior change.
 
 **2. The repo dogfoods itself — keep it green.** Bounds models its own architecture in `.bounds/`.
 After any change to `src/bounds/**`, run `bounds validate` (and `bounds calibrate` to see what
