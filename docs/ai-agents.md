@@ -41,6 +41,14 @@ subsystem you need to edit. The CI gate is
 the one **hard** enforcement point, and it runs in your pipeline, not in the agent. For the enforced
 loop (pre-commit hooks + CI), see [./team-workflow.md](./team-workflow.md).
 
+Once manifests exist, an agent can wire that gate itself in one command: `bounds ci --install --github`
+(or `--gitlab`) generates the CI config that runs `bounds preflight --ci` on every PR — the hard
+enforcement of the contract, where agent compliance is only advisory. When the agent makes an
+*intentional* surface change, that is not drift to fight: it updates the manifest, runs `bounds
+calibrate --dump-baseline`, and commits the refreshed `.bounds/drift-baseline.json` so the gate fails
+only on *new*, unintended drift. (This is exactly what the generated `AGENTS.md` contract tells the
+agent — see [AGENTS.md is the canonical contract](#agentsmd-is-the-canonical-contract).)
+
 Agents should also know the boundary of the tool. Bounds is a map, not execution or review: it can
 show owners, exports, table surfaces, drift, and blast radius; it cannot prove runtime behavior,
 business correctness, performance, or security. Use it before broad source search and after edits,

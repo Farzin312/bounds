@@ -897,34 +897,76 @@ def _prompt_agent_selection(available: list[str], detected: set[str]) -> set[str
 # ===========================================================================
 @main.command("ci", short_help="Install drift/boundary gates in CI")
 @click.option("--install", "do_install", is_flag=True, default=False,
-              help="Generate CI config for the detected systems.")
-@click.option("--action", "want_action", is_flag=True, default=False, help="GitHub Action only.")
-@click.option("--precommit", "want_precommit", is_flag=True, default=False, help="pre-commit hook only.")
-@click.option("--gitlab", "want_gitlab", is_flag=True, default=False, help="GitLab CI only.")
-@click.option("--all", "want_all", is_flag=True, default=False, help="All CI targets.")
+              help="Generate CI config for the selected (or auto-detected) provider.")
+@click.option("--github", "want_github", is_flag=True, default=False,
+              help="Install the GitHub Actions workflow (.github/workflows/bounds.yml).")
+# --action is the deprecated former name for --github; kept as a hidden alias for
+# back-compat so existing scripts/docs don't break. Prefer --github.
+@click.option("--action", "want_action_alias", is_flag=True, default=False, hidden=True)
+@click.option("--gitlab", "want_gitlab", is_flag=True, default=False,
+              help="Install the GitLab CI job (.gitlab-ci.yml).")
+@click.option("--precommit", "want_precommit", is_flag=True, default=False,
+              help="Install the local pre-commit hook (.pre-commit-config.yaml). Opt-in; orthogonal to provider.")
+@click.option("--all", "want_all", is_flag=True, default=False,
+              help="Install all three targets (GitHub + GitLab + pre-commit).")
 @_human
-def ci_cmd(do_install: bool, want_action: bool, want_precommit: bool, want_gitlab: bool,
-           want_all: bool, human: bool) -> None:
-    """Install drift/boundary gates so the agent workflow is enforced in CI."""
+def ci_cmd(do_install: bool, want_github: bool, want_action_alias: bool, want_gitlab: bool,
+           want_precommit: bool, want_all: bool, human: bool) -> None:
+    """Install drift/boundary gates so the agent workflow is enforced in CI.
+
+    Pick a provider: ``--github`` or ``--gitlab`` (add ``--precommit`` for a local hook,
+    or ``--all`` for everything). With no provider flag, Bounds auto-detects the one CI
+    host this repo already uses; if it can't tell (no or both markers), it asks you to
+    pick instead of installing all three.
+    """
     human = _interactive_human(human)  # interactive setup action: announce in a terminal
 
     def go() -> None:
         if not do_install:
             raise errors.BoundsError(
                 errors.E_USAGE, "ci needs --install",
-                fix="run 'bounds ci --install' (optionally --action/--precommit/--gitlab/--all)",
+                fix="run 'bounds ci --install' (pick --github/--gitlab, add --precommit, or --all)",
             )
-        targets: set[str] = set()
-        if want_action:
-            targets.add("action")
-        if want_precommit:
-            targets.add("precommit")
-        if want_gitlab:
-            targets.add("gitlab")
-        if want_all:
-            targets = set()  # empty => all
+
+        want_github_eff = want_github or want_action_alias  # --action is the legacy alias
         root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
+
+        # Resolve the FINAL explicit target set here; run_ci_install never expands an
+        # empty/missing selection to "all" — so a stray host config is never dumped.
+        targets: set[str] = set()
+        detected: list[str] = []
+        if want_all:
+            targets = set(ciconfig.ALL_TARGETS)
+        else:
+            if want_github_eff:
+                targets.add("action")
+            if want_gitlab:
+                targets.add("gitlab")
+            if want_precommit:
+                targets.add("precommit")
+            # No explicit provider chosen (precommit-only is fine and stays as-is) → try
+            # to auto-detect the single provider this repo uses.
+            no_provider_chosen = not (want_github_eff or want_gitlab)
+            if no_provider_chosen and not want_precommit:
+                found = ciconfig.detect_ci_provider(root)
+                detected = sorted(found)
+                if len(found) == 1:
+                    targets |= found
+                else:
+                    # Zero or both markers: ambiguous. Guide the user to choose rather
+                    # than silently installing all three (the old footgun).
+                    raise errors.BoundsError(
+                        errors.E_USAGE,
+                        "Couldn't determine your CI provider"
+                        + (f" (detected markers for: {', '.join(detected)})" if detected else " (no CI markers found)")
+                        + ".",
+                        fix="Pass --github or --gitlab (add --precommit for a local hook, "
+                            "or --all for everything).",
+                    )
+
         payload = ciconfig.run_ci_install(root, targets=targets)
+        if detected:
+            payload["detected"] = detected  # which provider auto-detect picked
         output.emit(payload, human)
 
     _run(human, go)

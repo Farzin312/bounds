@@ -59,10 +59,33 @@ Every `describe` and `validate` payload carries a machine-readable `validation_s
 Everything above works by convention until you wire it into the pipeline. Agent compliance is **advisory** — Bounds can suggest the right behavior but cannot force it — so the one hard enforcement point is CI. Install it:
 
 ```bash
-bounds ci --install        # generates a GitHub Action + pre-commit hook (and GitLab job)
+bounds ci --install --github     # GitHub Actions workflow (use --gitlab for GitLab CI)
+bounds ci --install --precommit  # add a local pre-commit hook too (optional)
 ```
 
-This generates a `bounds preflight --ci` GitHub Action (idempotent, path-gated, with cache reuse keyed on your manifests) and a local `bounds validate --quick --ci` pre-commit hook. Now the freshness rule is a failing check, not a habit you hope people keep. (`[skip bounds]` in a commit message is the documented escape hatch for the rare emergency.)
+Pick your CI host with `--github` or `--gitlab` (add `--precommit` for a local hook, or `--all` for everything). With no provider flag, `bounds ci --install` auto-detects the one host your repo already uses (a `.github/` dir → GitHub; a `.gitlab-ci.yml` → GitLab) and installs only that — so a GitHub repo never gets a stray `.gitlab-ci.yml`. If it can't tell, it asks you to pick instead of guessing.
+
+`--github` generates a `bounds preflight --ci` GitHub Action (idempotent, path-gated, with cache reuse keyed on your manifests); `--precommit` adds a local `bounds validate --quick --ci` hook. Each file lands at its canonical, host-mandated path (`.github/workflows/bounds.yml`, `.gitlab-ci.yml`, `.pre-commit-config.yaml`) and install is non-destructive — an existing pipeline keeps its jobs and the bounds entry is appended. Now the freshness rule is a failing check, not a habit you hope people keep. (`[skip bounds]` in a commit message is the documented escape hatch for the rare emergency.)
+
+> **Today the generated config installs Bounds from git** (`pipx`/`pip install "git+https://github.com/Farzin312/bounds.git"`) because the `bounds-cli` PyPI package isn't published yet — so a committed pipeline works out of the box. When `bounds-cli` lands on PyPI the install line switches to it (the generated file records that intent in a comment).
+
+### The four jobs CI does for you
+
+The generated config wires up more than a single check. Each line in it maps to a distinct use case:
+
+1. **Pre-PR gate.** `bounds preflight --ci` runs the full structural validation on every PR and **blocks the merge** on any blocking issue — drift, boundary violations, broken contracts, dependency cycles. This is the hard enforcement point.
+2. **Incremental drift on every commit.** The optional `--precommit` hook runs `bounds validate --quick --ci` locally — git-diff incremental, sub-200ms — so an author catches drift at commit time, long before the PR gate.
+3. **A drift baseline for *intentional* contract changes** (see below) — so a deliberate rewrite is a re-baseline commit, not a red build.
+4. **Provider choice** — `--github`, `--gitlab`, `--precommit`, or `--all`; with no flag, Bounds auto-detects the one host your repo uses. The install is non-destructive (it appends to an existing pipeline) and every file lands at its host-mandated path.
+
+### The drift baseline: intentional changes are not failures
+
+A subsystem's public surface *should* change over time — that's healthy. The gate must fail on the drift you didn't mean, while letting a deliberate rewrite through. That's what `bounds calibrate --check` and the committed `.bounds/drift-baseline.json` are for:
+
+- **`bounds calibrate --check`** (the freshness step in the generated CI config) compares the *current* manifest-vs-source drift against the baseline and **fails only on NEW drift above it** — never writes. The generated step is `bounds calibrate --check || true` so it's non-blocking until you commit a baseline and trust the signal; drop the `|| true` to make new drift fail the build.
+- **`bounds calibrate --dump-baseline`** records the current drift as *accepted* in `.bounds/drift-baseline.json`. When you intentionally change a contract (and update its manifest in the same PR), re-run `--dump-baseline` and commit the updated baseline. The change becomes a deliberate, reviewable re-baseline commit rather than a surprise red build.
+
+So the rule is: **unintended drift fails CI; an intentional surface change is a re-baseline you commit on purpose.** That keeps the gate honest without punishing legitimate evolution.
 
 ## The AI agent's definition of done
 

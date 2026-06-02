@@ -91,23 +91,26 @@ violations and drift into a failing check with a fix suggestion — a toggle, no
 follows.
 
 ```bash
-bounds ci --install         # generate a GitHub Action / pre-commit hook / GitLab job
+bounds ci --install --github   # GitHub Actions workflow (or --gitlab for GitLab CI)
 ```
 
-`bounds ci --install` generates ready-to-commit, idempotent, path-gated gate config:
+`bounds ci --install` generates ready-to-commit, idempotent, path-gated gate config. **Pick your
+provider** — Bounds installs only what you choose (or auto-detects the one host your repo uses if you
+pass no flag), never a stray config for a host you don't use:
 
-- **`.github/workflows/bounds.yml`** runs `bounds preflight --ci` and caches the warm extraction
-  cache keyed on `root.yaml` + the manifests.
-- **`.pre-commit-config.yaml`** adds a local `bounds validate --quick --ci` hook.
-- **`.gitlab-ci.yml`** is the GitLab equivalent.
+- **`.github/workflows/bounds.yml`** (`--github`) runs `bounds preflight --ci` and caches the warm
+  extraction cache keyed on `root.yaml` + the manifests.
+- **`.gitlab-ci.yml`** (`--gitlab`) is the GitLab equivalent.
+- **`.pre-commit-config.yaml`** (`--precommit`) adds a local `bounds validate --quick --ci` hook.
 
-Use `--action` / `--precommit` / `--gitlab` / `--all` to pick targets.
+Use `--github` / `--gitlab` / `--precommit` / `--all` to pick targets (each file lands at its canonical,
+host-mandated path; install is non-destructive and appends to an existing pipeline).
 
 ### Walkthrough
 
 Your team keeps accidentally importing across a boundary that's supposed to stay decoupled:
 
-1. `bounds ci --install --action` drops `.github/workflows/bounds.yml` into the repo. Commit it.
+1. `bounds ci --install --github` drops `.github/workflows/bounds.yml` into the repo. Commit it.
 2. A teammate opens a PR that adds a cross-boundary dependency `auth → billing` that no manifest
    declares.
 3. The CI job runs `bounds preflight --ci` and fails the check, naming the undeclared edge and
@@ -118,6 +121,23 @@ Your team keeps accidentally importing across a boundary that's supposed to stay
 This is the one **hard** enforcement point in Bounds. Everything an agent does is advisory — the CI
 gate is the only place a violation actually blocks a merge, and it runs in your pipeline, not inside
 the agent. Putting `[skip bounds]` in a commit message is the documented escape hatch.
+
+### The two other CI jobs the same config does
+
+Beyond the pre-PR gate, one `bounds ci --install` wires up two more workflows:
+
+- **Incremental drift on every commit** — add `--precommit` (or `--all`) and Bounds installs a local
+  `bounds validate --quick --ci` hook (git-diff incremental, sub-200ms) so an author catches drift the
+  moment it happens, not at PR time.
+- **A drift baseline for *intentional* changes** — the generated config also runs `bounds calibrate
+  --check`, which fails only on **NEW** drift above the committed `.bounds/drift-baseline.json`. A
+  contract you deliberately rewrote isn't a red build: update its manifest, run `bounds calibrate
+  --dump-baseline` to record the change as accepted, and commit the baseline. Unintended drift still
+  fails; a deliberate surface change is a reviewable re-baseline commit.
+
+(Today the generated config installs Bounds from git — `pipx`/`pip install
+"git+https://github.com/Farzin312/bounds.git"` — so a committed pipeline works immediately; it switches
+to the `bounds-cli` PyPI package once that's published.)
 
 ---
 

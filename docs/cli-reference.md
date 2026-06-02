@@ -58,7 +58,7 @@ tests, and review still decide implementation correctness.
 | `bounds discover` | Auto-generate candidate manifests from un-bounded non-test source, then link convention-matched docs/tests to those source subsystems. Tests/docs are coverage evidence, not generated architecture boundaries by default. On a repo that already has `.bounds/`, discovery targets only currently unmapped non-test source, so it adds coverage without creating duplicate alternate subsystems over owned files or linked tests; use `bounds calibrate` to reconcile drift in existing manifests. `--apply`, `--namespace <ns>`, `--merge-into 'name=p1,p2'` |
 | `bounds calibrate` | Reconcile manifests vs tree-sitter reality (ADD / REMOVE / NEEDS_REVIEW / `consumes` fixes). `--apply`, `--subsystem <n>`, `--check` (CI freshness gate: exits non-zero on NEW drift above the committed baseline, never writes), `--dump-baseline` (record current drift as accepted in `.bounds/drift-baseline.json`) |
 | `bounds agent` | Wire Bounds into eight coding agents so they query `list`/`describe`/`impact` before broad source search. Bare `bounds agent` is read-only `--detect` — lists which agents this repo has (always safe to run). `--sync` wires the canonical `AGENTS.md` + each agent's config, and generates each tool's **native command/skill** so it can act on Bounds directly: an auto-trigger skill for Claude (`.claude/skills/bounds/SKILL.md`, plus a `.claude/commands/bounds.md` command) and Codex (`.agents/skills/bounds/SKILL.md`); a command for Gemini (`.gemini/commands/bounds.toml`), OpenCode (`.opencode/commands/bounds.md`), and Cursor (`.cursor/commands/bounds.md`); a prompt for Copilot (`.github/prompts/bounds.prompt.md`); a workflow for Windsurf (`.windsurf/workflows/bounds.md`). Aider gets only its `.aider.conf.yml` config pointer (no committable command mechanism). `--check` verifies the wiring is current. Interactive `--sync` (in a terminal, no tool flags) prompts which tools to wire (pre-checked = detected) instead of writing all eight; `--all` or per-agent flags (`--claude`/`--codex`/…) skip the prompt; piped/CI runs wire all. The canonical `AGENTS.md` is always written. Pass at most one mode flag |
-| `bounds ci` | Generate CI gate config to enforce the agent workflow. `--install`, `--action`, `--precommit`, `--gitlab`, `--all` |
+| `bounds ci` | Generate CI gate config to enforce the agent workflow. `--install` plus a provider: `--github` (GitHub Actions; `--action` is the deprecated alias), `--gitlab` (GitLab CI), `--precommit` (local hook), `--all`. With no provider flag it auto-detects the one CI host your repo uses |
 | `bounds cache` | Manage the binary `.bounds/cache.db`. `--inspect`, `--prune`, `--migrate` |
 | `bounds upgrade` | Opt-in self-upgrade through pipx. Defaults to GitHub `main`; `--ref <tag-or-branch>`, `--local <path>`, and `--dry-run` are available |
 | `bounds upgrade-check` | Opt-in: ask the GitHub Releases API whether a newer Bounds release exists. Returns `status` (`up_to_date`\|`outdated`\|`dev_build`\|`no_release`\|`unreachable`) + `needs_upgrade` as the machine verdict, plus `current`, `latest`, `outdated`, `is_dev_build`, `checked`, `fix`, `note`. Networked and off the structural path; fails soft when offline and always exits `0` |
@@ -81,15 +81,51 @@ Both take file-selection and output toggles (all default off):
 
 ## CI gates in one command
 
-`bounds ci --install` generates ready-to-commit gate config (idempotent, path-gated):
+`bounds ci --install` generates ready-to-commit gate config (idempotent, path-gated). **Pick your
+provider** — Bounds installs only what you choose, never a stray config for a host you don't use:
 
-- **`.github/workflows/bounds.yml`** — runs `bounds preflight --ci`, and uses `actions/cache@v4`
-  keyed on `root.yaml` + the manifests so a fresh branch reuses main's warm cache.
-- **`.pre-commit-config.yaml`** — a local `bounds validate --quick --ci` hook.
-- **`.gitlab-ci.yml`** — the GitLab equivalent.
+```bash
+bounds ci --install --github     # GitHub Actions workflow
+bounds ci --install --gitlab     # GitLab CI job
+bounds ci --install --precommit  # local pre-commit hook (orthogonal to CI host)
+bounds ci --install --all        # all three
+```
 
-`--action` / `--precommit` / `--gitlab` / `--all` select targets. Putting `[skip bounds]` in a commit
-message is the documented skip convention.
+With **no provider flag**, `bounds ci --install` auto-detects the single CI host your repo already
+uses (GitHub if a `.github/` dir is present; GitLab if a `.gitlab-ci.yml` or `.gitlab/` is present)
+and installs only that one. If it can't tell — no markers, or both — it asks you to pick (`--github`
+or `--gitlab`) rather than guessing. `--precommit` alone installs just the local hook.
+
+The targets, each at its **canonical, non-relocatable path** (the host mandates the location):
+
+- **`.github/workflows/bounds.yml`** (`--github`) — runs `bounds preflight --ci`, and uses
+  `actions/cache@v4` keyed on `root.yaml` + the manifests so a fresh branch reuses main's warm cache.
+  The `.github/workflows/` directory is created if absent.
+- **`.gitlab-ci.yml`** (`--gitlab`) — the GitLab equivalent (root file, required there).
+- **`.pre-commit-config.yaml`** (`--precommit`) — a local `bounds validate --quick --ci` hook (root file).
+
+Install is **non-destructive**: an existing `.gitlab-ci.yml` or `.pre-commit-config.yaml` keeps all your
+jobs/hooks — the bounds entry is appended, and a re-run is a no-op (reported as `skipped`). The legacy
+`--action` flag is a hidden alias of `--github`. Putting `[skip bounds]` in a commit message is the
+documented skip convention.
+
+**The generated config installs Bounds from git** (`pipx`/`pip install
+"git+https://github.com/Farzin312/bounds.git"`) so a committed pipeline works **today** — the
+`bounds-cli` PyPI package isn't published yet. The generated file carries a comment recording the
+switch to the PyPI name once it's published.
+
+**The two gate steps.** Each remote-CI config runs two commands:
+
+- `bounds calibrate --check` — the **drift-baseline** step. It fails only on *new* drift above the
+  committed `.bounds/drift-baseline.json` (and never writes), so an **intentional** contract change is
+  not a red build: update the manifest, run `bounds calibrate --dump-baseline` to record the new state
+  as accepted, and commit the baseline. It is generated non-blocking (`|| true`) until you commit a
+  baseline and trust the signal — drop the `|| true` to enforce.
+- `bounds preflight --ci` — the strict **pre-PR gate**: the full 7-check structural validation, which
+  blocks the merge on any blocking issue (drift, boundary violations, broken contracts, cycles).
+
+The optional `--precommit` hook adds the third workflow: `bounds validate --quick --ci` on every local
+commit (sub-200ms incremental drift), so an author catches drift before it ever reaches the PR.
 
 CI is the **one hard enforcement point** — it runs in your pipeline, not in the agent. See
 [./team-workflow.md](./team-workflow.md) for the enforced loop.

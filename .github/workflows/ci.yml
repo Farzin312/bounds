@@ -61,10 +61,40 @@ jobs:
       - name: Self-test (validate Bounds on Bounds)
         run: bounds validate --quick
 
+  # Repo-health gates that let Bounds scale without regression while staying flexible for
+  # intentional contract changes. Runs once (ubuntu/3.12) alongside the test matrix.
+  self-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[dev]
+      - name: Determinism (byte-stable JSON output)
+        run: |
+          bounds list > "$RUNNER_TEMP/a.json"
+          bounds list > "$RUNNER_TEMP/b.json"
+          diff "$RUNNER_TEMP/a.json" "$RUNNER_TEMP/b.json"
+      - name: No architectural errors (boundary / contract / cycles)
+        run: |
+          bounds validate | python -c "import sys, json; errs=[i for i in json.load(sys.stdin).get('issues', []) if i.get('severity') == 'error']; print(f'{len(errs)} error-severity issue(s)'); sys.exit(1 if errs else 0)"
+      - name: Drift gate (new drift above the committed baseline fails; re-baseline is intentional)
+        run: bounds calibrate --check
+      - name: Benchmark smoke (coverage + token economics run clean)
+        run: |
+          make benchmark > /dev/null
+          python -c "import benchmarks._lib, benchmarks.oss_bench, benchmarks.oss_features, benchmarks.oss_report"
+
   all-tests-pass:
-    needs: [lint, test]
+    needs: [lint, test, self-checks]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - run: |
-          if [[ "${{ needs.lint.result }}" != "success" || "${{ needs.test.result }}" != "success" ]]; then exit 1; fi
+          if [[ "${{ needs.lint.result }}" != "success" || "${{ needs.test.result }}" != "success" || "${{ needs.self-checks.result }}" != "success" ]]; then exit 1; fi

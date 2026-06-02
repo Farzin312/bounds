@@ -1,5 +1,5 @@
 <!-- BOUNDS:START -->
-<!-- BOUNDS:GENERATED v=2026.6.24 h=bda66b52 -->
+<!-- BOUNDS:GENERATED v=2026.6.24 h=8703a7b2 -->
 > Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agentsync.py`) instead.
 
 ## Bounds — architecture contract for agents
@@ -21,6 +21,10 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 3. `bounds impact <name>` before changing an interface or a migration.
 4. If `bounds overview` reports partial coverage, overlaps, cycles, or validation errors, follow `health.validation.next_steps` before trusting that part of the map.
 5. `bounds validate --quick` after edits; fix drift before broadening context.
+
+### Enforcement (CI is the hard gate, not agent goodwill)
+- After manifests exist, wire the gate once: `bounds ci --install --github` (or `--gitlab`) generates the CI config that runs `bounds preflight --ci` on every PR. This — not agent compliance — is the hard enforcement of the contract.
+- An **intentional** surface change is not drift to fight: update the manifest, then re-baseline with `bounds calibrate --dump-baseline` and commit `.bounds/drift-baseline.json`. `bounds calibrate --check` then fails only on NEW drift above that baseline.
 
 ### Output
 - JSON by default — parse it. Add `-H`/`--human` for a readable view of the same data.

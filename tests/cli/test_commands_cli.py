@@ -323,7 +323,19 @@ def test_agent_rejects_multiple_modes(monkeypatch, py_project):
 
 
 def test_ci_install_cli(monkeypatch, py_project):
-    """ci --install --action scaffolds a real .github/workflows/bounds.yml and lists it in created — the CI gate is generated, not just described."""
+    """ci --install --github scaffolds a real .github/workflows/bounds.yml and lists it in created, and writes NO .gitlab-ci.yml — picking a provider installs only that provider's config, not a kitchen-sink of all three."""
+    res = _invoke(monkeypatch, py_project, ["ci", "--install", "--github"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert any("bounds.yml" in p for p in data["created"])
+    assert (py_project / ".github" / "workflows" / "bounds.yml").is_file()
+    # Picking GitHub must NOT drop a stray GitLab config (the old footgun).
+    assert not (py_project / ".gitlab-ci.yml").exists()
+    assert not (py_project / ".pre-commit-config.yaml").exists()
+
+
+def test_ci_install_action_alias_still_works(monkeypatch, py_project):
+    """The deprecated --action flag remains a hidden alias of --github (back-compat) — existing scripts keep installing the GitHub workflow."""
     res = _invoke(monkeypatch, py_project, ["ci", "--install", "--action"])
     assert res.exit_code == 0
     data = json.loads(res.output)
@@ -331,8 +343,66 @@ def test_ci_install_cli(monkeypatch, py_project):
     assert (py_project / ".github" / "workflows" / "bounds.yml").is_file()
 
 
+def test_ci_autodetect_github_installs_only_github(monkeypatch, py_project):
+    """With no provider flag, a `.github/` marker auto-selects GitHub only — the result reports `detected: [action]` and writes no GitLab/pre-commit config."""
+    (py_project / ".github").mkdir(exist_ok=True)
+    res = _invoke(monkeypatch, py_project, ["ci", "--install"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["detected"] == ["action"]
+    assert data["targets"] == ["action"]
+    assert (py_project / ".github" / "workflows" / "bounds.yml").is_file()
+    assert not (py_project / ".gitlab-ci.yml").exists()
+    assert not (py_project / ".pre-commit-config.yaml").exists()
+
+
+def test_ci_autodetect_gitlab_installs_only_gitlab(monkeypatch, tmp_path):
+    """With no provider flag, a root `.gitlab-ci.yml` marker auto-selects GitLab only — no GitHub workflow is created."""
+    (tmp_path / ".gitlab-ci.yml").write_text("stages: [test]\n", encoding="utf-8")
+    res = _invoke(monkeypatch, tmp_path, ["ci", "--install"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["detected"] == ["gitlab"]
+    assert data["targets"] == ["gitlab"]
+    assert (tmp_path / ".gitlab-ci.yml").exists()
+    assert not (tmp_path / ".github" / "workflows" / "bounds.yml").exists()
+
+
+def test_ci_autodetect_ambiguous_asks_to_pick(monkeypatch, tmp_path):
+    """No CI markers (or both) → friendly E_USAGE "pick a provider" (exit 2) and NOTHING is written — never silently install all three."""
+    res = _invoke(monkeypatch, tmp_path, ["ci", "--install"])
+    assert res.exit_code == 2
+    assert "--github" in res.output and "--gitlab" in res.output
+    assert not (tmp_path / ".github" / "workflows" / "bounds.yml").exists()
+    assert not (tmp_path / ".gitlab-ci.yml").exists()
+    assert not (tmp_path / ".pre-commit-config.yaml").exists()
+
+
+def test_ci_all_installs_three(monkeypatch, tmp_path):
+    """--all is the explicit escape hatch: it installs all three targets regardless of detection."""
+    res = _invoke(monkeypatch, tmp_path, ["ci", "--install", "--all"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["targets"] == ["action", "gitlab", "precommit"]
+    assert (tmp_path / ".github" / "workflows" / "bounds.yml").is_file()
+    assert (tmp_path / ".gitlab-ci.yml").exists()
+    assert (tmp_path / ".pre-commit-config.yaml").exists()
+
+
+def test_ci_precommit_only(monkeypatch, tmp_path):
+    """--precommit alone (no provider) installs just the local hook — a valid local gate independent of CI host; no auto-detect, no provider config dumped."""
+    res = _invoke(monkeypatch, tmp_path, ["ci", "--install", "--precommit"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["targets"] == ["precommit"]
+    assert "detected" not in data  # provider detection is skipped when precommit is explicit
+    assert (tmp_path / ".pre-commit-config.yaml").exists()
+    assert not (tmp_path / ".github" / "workflows" / "bounds.yml").exists()
+    assert not (tmp_path / ".gitlab-ci.yml").exists()
+
+
 def test_ci_needs_install(monkeypatch, py_project):
-    """Bare ci with no action flag is a usage error (exit 2) — it must not write workflow files without an explicit --install."""
+    """Bare ci with no install flag is a usage error (exit 2) — it must not write workflow files without an explicit --install."""
     res = _invoke(monkeypatch, py_project, ["ci"])
     assert res.exit_code == 2
 

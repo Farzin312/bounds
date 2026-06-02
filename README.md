@@ -68,7 +68,7 @@ tree-sitter to validate them against your real source, in both directions.
 - **Give agents a small verified contract instead of source** — one cheap CLI call returns a tree-sitter-confirmed public surface (a few hundred tokens for a small subsystem on this repo; cost scales with how many symbols/tables it *exposes*, not how big it is), not a dozen files an agent has to read and guess at.
 - **Answer the database question an agent gets wrong by reading** — "what columns does `orders` have *now*, and is it row-level-security protected?" isn't in one file; it's a `CREATE` plus a dozen `ALTER`s across migrations. Bounds folds them into the current table + RLS-policy surface and a derived **RLS posture** (which tables are exposed *without* RLS). When a migration uses DDL it can't parse, `schema_coverage` says so — so an agent never reads a blind spot as "this doesn't exist."
 - **Show blast radius before a risky change** — `bounds impact` returns the transitive consumer set and the interfaces each one relies on, so you know the reach before you write the edit.
-- **Catch architecture drift in CI before it merges** — boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows.
+- **Catch architecture drift in CI before it merges** — `bounds ci --install --github|--gitlab|--precommit|--all` (auto-detects your host with no flag) wires a `bounds preflight --ci` gate so boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows. An *intentional* surface change is a deliberate re-baseline (`bounds calibrate --dump-baseline`), not a red build.
 
 See [docs/why-bounds.md](docs/why-bounds.md) for the full rationale.
 

@@ -10,6 +10,14 @@ Supported targets
 - ``precommit`` -> ``.pre-commit-config.yaml``      (pre-commit framework)
 - ``gitlab``    -> ``.gitlab-ci.yml``               (GitLab CI)
 
+These three destinations are fixed by their respective tools and cannot be relocated.
+Which targets are installed is an *explicit* choice resolved by the caller: the user
+picks a provider (``--github``/``--gitlab``), opts into the local hook (``--precommit``),
+asks for everything (``--all``), or — when no flag is given — ``detect_ci_provider``
+infers the single provider this repo already uses. There is no "empty means all"
+fallback: a missing/ambiguous selection is reported, never silently expanded to all
+three (that used to drop a stray GitLab config on GitHub-only repos, and vice versa).
+
 Two deliberate design choices, both about *which* Bounds command runs where:
 
 ``bounds preflight --ci`` in remote CI (action + gitlab)
@@ -57,13 +65,13 @@ from bounds import errors
 
 # Recognized targets. These are the canonical file destinations each CI host
 # mandates and cannot be relocated (GitHub Actions => .github/workflows/, GitLab
-# => root .gitlab-ci.yml, pre-commit => root .pre-commit-config.yaml).
-_ALL_TARGETS = ("action", "precommit", "gitlab")
+# => root .gitlab-ci.yml, pre-commit => root .pre-commit-config.yaml). Public so the
+# CLI can resolve the `--all` set without reaching into a private name.
+ALL_TARGETS = ("action", "precommit", "gitlab")
 
-# The two *remote-CI provider* targets (host-bound). `precommit` is deliberately
-# excluded: a local hook is orthogonal to which CI host you use, so it is never
-# auto-installed by provider detection — it is always opt-in.
-_PROVIDER_TARGETS = ("action", "gitlab")
+# Note: of the three, only `action`/`gitlab` are *remote-CI providers* (host-bound and
+# auto-detectable — see `detect_ci_provider`). `precommit` is a local hook, orthogonal
+# to which CI host you use, so it is never auto-installed — always opt-in via --precommit.
 
 # Relative paths (POSIX) each target writes to, under the project root. These are
 # fixed by each tool and must NOT be changed (relocation breaks the host).
@@ -96,7 +104,9 @@ jobs:
         with:
           path: .bounds/cache.db
           key: bounds-${{ hashFiles('.bounds/root.yaml', '.bounds/manifests/**') }}
-      - run: pipx install bounds-cli
+      # Installs from git (works today; GitHub runners preinstall pipx).
+      # switch to `bounds-cli` (pipx) once published to PyPI.
+      - run: pipx install "git+https://github.com/Farzin312/bounds.git"
       # Freshness gate: flag NEW manifest-vs-source drift above the committed baseline.
       # Non-blocking by default (|| true) until you commit a baseline and trust the signal;
       # drop the `|| true` to make new drift fail the build.
@@ -127,10 +137,11 @@ _GITLAB_JOB = {
         "rules": [{"changes": ["src/**/*", ".bounds/**/*"]}],
         # The python:3.12-slim image has pip but NOT pipx; running as root, `pip install`
         # puts the `bounds` console script on PATH (/usr/local/bin), so use pip here (the
-        # GitHub Actions job uses pipx, which its runners preinstall). Always `bounds-cli` —
-        # the bare `bounds` name on PyPI is an unrelated package.
+        # GitHub Actions job uses pipx, which its runners preinstall). Installs from git
+        # (works today); switch to `bounds-cli` (pip) once published to PyPI — the bare
+        # `bounds` name on PyPI is an unrelated package.
         "script": [
-            "pip install bounds-cli",
+            'pip install "git+https://github.com/Farzin312/bounds.git"',
             "bounds calibrate --check || true",  # freshness gate; drop `|| true` to enforce
             "bounds preflight --ci",
         ],
@@ -232,13 +243,43 @@ _INSTALLERS = {
 }
 
 
+def detect_ci_provider(project_root: Path) -> set[str]:
+    """Detect which remote-CI provider(s) this repo already uses, from filesystem markers.
+
+    Returns a subset of ``{"action", "gitlab"}`` — never ``precommit`` (a local hook is
+    orthogonal to the CI host and is always opt-in, never auto-detected). Detection is
+    purely filesystem-based (``gitutil`` exposes no remote-URL helper) and fail-soft:
+
+    - ``action`` (GitHub Actions) when ``<root>/.github`` is a directory;
+    - ``gitlab`` (GitLab CI) when ``<root>/.gitlab-ci.yml`` exists or ``<root>/.gitlab``
+      is a directory.
+
+    Zero or two markers means the provider is ambiguous; the caller decides what to do
+    (this function never guesses — it just reports the markers it found).
+    """
+    root = Path(project_root)
+    detected: set[str] = set()
+    if (root / ".github").is_dir():
+        detected.add("action")
+    if (root / ".gitlab-ci.yml").exists() or (root / ".gitlab").is_dir():
+        detected.add("gitlab")
+    return detected
+
+
 def run_ci_install(project_root: Path, *, targets: set[str]) -> dict:
     """Scaffold CI gate config for the requested ``targets`` under ``project_root``.
 
-    ``targets`` is a subset of ``{"action", "precommit", "gitlab"}``; an empty set
-    means "all three". For each target, the relevant file is created (or, where the
-    format allows, appended to) unless it is already configured for Bounds — in which
-    case the target is reported as skipped (the operation is idempotent).
+    ``targets`` MUST be an explicit, non-empty subset of
+    ``{"action", "precommit", "gitlab"}`` — the caller (``cli.ci_cmd``) is responsible
+    for resolving the final target set (from explicit flags, ``--all``, or provider
+    auto-detection) before calling here. An empty set is a usage error: this function
+    never falls back to "install all three", so a missing selection can never silently
+    dump a stray CI config for a host you don't use.
+
+    For each target, the relevant file is created (or, where the format allows, appended
+    to) unless it is already configured for Bounds — in which case the target is reported
+    as skipped (the operation is idempotent). Installs are non-destructive: existing user
+    jobs/hooks are preserved and the bounds entry is appended, never overwriting.
 
     Returns a JSON-serializable dict::
 
@@ -247,16 +288,22 @@ def run_ci_install(project_root: Path, *, targets: set[str]) -> dict:
     All lists are sorted; paths are POSIX-form and repo-relative.
     """
     if not targets:
-        requested = list(_ALL_TARGETS)
-    else:
-        unknown = sorted(targets - set(_ALL_TARGETS))
-        if unknown:
-            raise errors.BoundsError(
-                errors.E_USAGE,
-                f"Unknown CI target(s): {', '.join(unknown)}.",
-                fix=f"Choose from: {', '.join(_ALL_TARGETS)}.",
-            )
-        requested = sorted(targets)
+        raise errors.BoundsError(
+            errors.E_USAGE,
+            "No CI target selected.",
+            fix=(
+                "Pass --github or --gitlab (add --precommit for a local hook, "
+                "or --all for everything)."
+            ),
+        )
+    unknown = sorted(targets - set(ALL_TARGETS))
+    if unknown:
+        raise errors.BoundsError(
+            errors.E_USAGE,
+            f"Unknown CI target(s): {', '.join(unknown)}.",
+            fix=f"Choose from: {', '.join(ALL_TARGETS)}.",
+        )
+    requested = sorted(targets)
 
     root = Path(project_root)
     created: list[str] = []

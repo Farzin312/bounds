@@ -13,8 +13,8 @@ def _read(path):
 
 
 def test_all_targets_creates_three_files(tmp_path):
-    """Default (empty targets) must install all three CI gates (action/gitlab/precommit) with sorted `created`/`targets` lists — byte-stable output across runs (determinism)."""
-    result = ciconfig.run_ci_install(tmp_path, targets=set())
+    """An explicit all-three target set must install all CI gates (action/gitlab/precommit) with sorted `created`/`targets` lists — byte-stable output across runs (determinism). This is the `--all` escape hatch, never an empty-set default."""
+    result = ciconfig.run_ci_install(tmp_path, targets=set(ciconfig.ALL_TARGETS))
 
     action = tmp_path / ".github/workflows/bounds.yml"
     precommit = tmp_path / ".pre-commit-config.yaml"
@@ -30,8 +30,50 @@ def test_all_targets_creates_three_files(tmp_path):
     assert result["targets"] == ["action", "gitlab", "precommit"]
 
 
+def test_empty_targets_raises_never_dumps_all(tmp_path):
+    """An empty target set must raise BoundsError E_USAGE and write nothing — `run_ci_install` never falls back to "install all three", so a missing selection can't silently drop a stray host config (the old GitHub-gets-a-GitLab-file footgun)."""
+    with pytest.raises(errors.BoundsError) as exc:
+        ciconfig.run_ci_install(tmp_path, targets=set())
+    assert exc.value.code == errors.E_USAGE
+    assert not (tmp_path / ".github/workflows/bounds.yml").exists()
+    assert not (tmp_path / ".gitlab-ci.yml").exists()
+    assert not (tmp_path / ".pre-commit-config.yaml").exists()
+
+
+def test_detect_ci_provider_github(tmp_path):
+    """A `.github/` directory marks the repo as GitHub Actions — detection returns only {action}, never gitlab and never the orthogonal precommit hook."""
+    (tmp_path / ".github").mkdir()
+    assert ciconfig.detect_ci_provider(tmp_path) == {"action"}
+
+
+def test_detect_ci_provider_gitlab(tmp_path):
+    """A root `.gitlab-ci.yml` (or `.gitlab/` dir) marks the repo as GitLab CI — detection returns only {gitlab}."""
+    (tmp_path / ".gitlab-ci.yml").write_text("stages: [test]\n", encoding="utf-8")
+    assert ciconfig.detect_ci_provider(tmp_path) == {"gitlab"}
+    other = tmp_path / "viadir"
+    other.mkdir()
+    (other / ".gitlab").mkdir()
+    assert ciconfig.detect_ci_provider(other) == {"gitlab"}
+
+
+def test_detect_ci_provider_none_and_both(tmp_path):
+    """No markers → empty set; both markers → {action, gitlab} (ambiguous). detect never guesses or includes precommit — it just reports the markers it found."""
+    assert ciconfig.detect_ci_provider(tmp_path) == set()
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".gitlab-ci.yml").write_text("stages: [test]\n", encoding="utf-8")
+    assert ciconfig.detect_ci_provider(tmp_path) == {"action", "gitlab"}
+
+
+def test_github_workflows_dir_created_when_absent(tmp_path):
+    """Installing the action target into a repo with no `.github/workflows/` must create the directory tree (parents=True) and write the workflow — folder creation is part of the install, not a precondition."""
+    assert not (tmp_path / ".github").exists()
+    result = ciconfig.run_ci_install(tmp_path, targets={"action"})
+    assert result["created"] == [".github/workflows/bounds.yml"]
+    assert (tmp_path / ".github" / "workflows" / "bounds.yml").is_file()
+
+
 def test_action_cache_key_and_preflight(tmp_path):
-    """The GitHub Action must key its cache on manifests/root (not the branch), run calibrate --check then preflight --ci, and install `bounds-cli` via pipx — never the squatted bare `bounds` PyPI name."""
+    """The GitHub Action must key its cache on manifests/root (not the branch), run calibrate --check then preflight --ci, and install from the git ref via pipx (works today; PyPI publish pending) — never the squatted bare `bounds` PyPI name."""
     ciconfig.run_ci_install(tmp_path, targets={"action"})
     text = _read(tmp_path / ".github/workflows/bounds.yml")
 
@@ -41,10 +83,13 @@ def test_action_cache_key_and_preflight(tmp_path):
     # Remote CI runs the freshness gate then the strict gate.
     assert "bounds calibrate --check" in text
     assert "bounds preflight --ci" in text
-    # Installs the correctly-named package via pipx (GitHub runners ship pipx); never the
-    # squatted bare `bounds` PyPI name.
-    assert "pipx install bounds-cli" in text
+    # Installs from the git ref via pipx (works today — bounds-cli is not on PyPI yet;
+    # GitHub runners ship pipx). Never the squatted bare `bounds` PyPI name.
+    assert 'pipx install "git+https://github.com/Farzin312/bounds.git"' in text
     assert "pipx install bounds\n" not in text and "pipx install bounds " not in text
+    assert "pipx install bounds-cli" not in text  # PyPI name not used until published
+    # Intent to switch once published is recorded.
+    assert "once published to PyPI" in text
     # Skip convention is documented.
     assert "[skip bounds]" in text
 
@@ -62,7 +107,7 @@ def test_precommit_uses_quick_gate(tmp_path):
 
 
 def test_gitlab_job_uses_preflight(tmp_path):
-    """The GitLab job must run preflight --ci on src/.bounds changes and install `bounds-cli` via pip (the slim image lacks pipx) — never pipx and never the bare squatted `bounds` package."""
+    """The GitLab job must run preflight --ci on src/.bounds changes and install from the git ref via pip (the slim image lacks pipx; works today — PyPI publish pending) — never pipx and never the bare squatted `bounds` package."""
     ciconfig.run_ci_install(tmp_path, targets={"gitlab"})
     data = yaml.safe_load(_read(tmp_path / ".gitlab-ci.yml"))
 
@@ -70,20 +115,25 @@ def test_gitlab_job_uses_preflight(tmp_path):
     assert data["bounds"]["image"] == "python:3.12-slim"
     assert "bounds preflight --ci" in data["bounds"]["script"]
     assert data["bounds"]["rules"] == [{"changes": ["src/**/*", ".bounds/**/*"]}]
-    # The slim image has pip but NOT pipx; use pip with the correct package name so the
-    # `bounds` console script lands on PATH before the gate steps run.
-    assert "pip install bounds-cli" in data["bounds"]["script"]
+    # The slim image has pip but NOT pipx; install from the git ref (works today — bounds-cli
+    # is not on PyPI yet) so the `bounds` console script lands on PATH before the gate steps run.
+    assert (
+        'pip install "git+https://github.com/Farzin312/bounds.git"'
+        in data["bounds"]["script"]
+    )
     assert not any("pipx" in step for step in data["bounds"]["script"])
-    # Never the bare squatted `bounds` package as its own step (only `bounds-cli`).
+    # Never the bare squatted `bounds` package, and not the PyPI name until published.
     assert not any(step == "pip install bounds" for step in data["bounds"]["script"])
+    assert not any("bounds-cli" in step for step in data["bounds"]["script"])
 
 
 def test_idempotent_rerun_reports_skipped(tmp_path):
     """A second install must create nothing and report all three files (sorted) in `skipped` — re-running the installer is idempotent and never duplicates or clobbers CI config."""
-    first = ciconfig.run_ci_install(tmp_path, targets=set())
+    targets = set(ciconfig.ALL_TARGETS)
+    first = ciconfig.run_ci_install(tmp_path, targets=targets)
     assert len(first["created"]) == 3
 
-    second = ciconfig.run_ci_install(tmp_path, targets=set())
+    second = ciconfig.run_ci_install(tmp_path, targets=targets)
     assert second["created"] == []
     assert second["skipped"] == sorted(
         [".github/workflows/bounds.yml", ".gitlab-ci.yml", ".pre-commit-config.yaml"]
