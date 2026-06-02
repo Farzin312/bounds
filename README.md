@@ -189,9 +189,9 @@ flowchart LR
   AI --> V
 ```
 
-- **Unowned but supported** (a Python/TS/JS/SQL/Prisma file in no subsystem) → add it to a manifest's
+- **Unowned but supported** (a Python/TS/JS/SQL/Prisma/shell file in no subsystem) → add it to a manifest's
   `paths:`. Deterministic, no AI needed; `mapped_pct` rises to 100%.
-- **Unsupported language** (shell/Go/Rust/Java — no adapter yet) → the `E_COVERAGE_GAP` fix hands the
+- **Unsupported language** (Go/Rust/Java — no adapter yet) → the `E_COVERAGE_GAP` fix hands the
   agent the `by_language` list and a concrete template manifest to copy; it authors `paths` + a
   hand-written `exposes` (+ `consumes`), then `bounds validate` confirms it clean. That **moves the
   file from `dark` to `declared`** — the gap closes even though Bounds can't parse it. Those
@@ -203,9 +203,9 @@ Bounds names exactly what it can't yet parse and hands an agent a template, inst
 quietly inflating the number. As language adapters ship, files move from `unsupported` to verified
 automatically and the number rises on its own.
 
-The full human-and-AI workflow is in **[docs/coverage.md](docs/coverage.md)**. On this (pure-Python)
-repo `bounds validate` reports **100% of supported-language source mapped** (36/36 non-test files) —
-Bounds dogfoods its own gate.
+The full human-and-AI workflow is in **[docs/coverage.md](docs/coverage.md)**. On this repo `bounds
+validate` reports **100% of supported-language source mapped** (38/38 non-test files) — Bounds
+dogfoods its own gate.
 
 ## Languages & platforms
 
@@ -233,7 +233,7 @@ end-to-end on [click](https://github.com/pallets/click) (Python) and
 [axios](https://github.com/axios/axios) (TypeScript); NestJS/Angular import shapes are covered by the
 resolver test matrix.
 
-Three honest tiers: **fully supported** (Python, TS/JS, SQL, Prisma — extracted *and* verified),
+Three honest tiers: **fully supported** (Python, TS/JS, SQL, Prisma, shell — extracted *and* verified),
 **partially supported** (a supported parser with a documented, self-reported gap — e.g. an
 unparseable Postgres DDL statement, flagged `E_SCHEMA_UNPARSED`, with the rest of the file still
 folded), and **unsupported** (Go, Rust, Java — no adapter yet, but **hand-mappable and durable**: a

@@ -10,9 +10,9 @@
 
 Bounds is honest about exactly how far it can take each language, in three tiers:
 
-- **Fully supported** — Python, TypeScript/JavaScript, SQL migrations, Prisma. Extracted **and
-  verified** by tree-sitter / a deterministic parser: `exposes` are confirmed (`verified: true`),
-  drift is caught, tables are folded.
+- **Fully supported** — Python, TypeScript/JavaScript, SQL migrations, Prisma, shell (bash).
+  Extracted **and verified** by tree-sitter / a deterministic parser: `exposes` are confirmed
+  (`verified: true`), drift is caught, tables are folded.
 - **Partially supported** — a *fully-supported* language with a **documented, self-reported gap**.
   Examples: SQL where some Postgres DDL is unparseable (`E_SCHEMA_UNPARSED`, the rest of the file
   still folds), or a TS/JS ORM/barrel construct the extractor doesn't recognize. Bounds maps what it
@@ -36,13 +36,14 @@ omission.
 | **TypeScript / JavaScript** | ESM/CommonJS imports and exports; ORM table declarations — Drizzle (`pgTable`/`sqliteTable`/`mysqlTable`), TypeORM (`@Entity`) (see gaps below) | Yes | Yes | **Implemented** |
 | **SQL** | DDL migrations: tables + columns (create/drop/rename), functions/RPCs, views, indexes, triggers, types, **policies + row-level security**; descends into `BEGIN; … COMMIT;` transactions; deterministic migration fold to the current surface (dropped policies/tables net out) | Table catalog + schema objects + RLS posture | Yes | **Implemented** |
 | **Prisma** | `model` blocks → tables (`@@map`/`@map` honored). No RLS concept (Prisma manages access in app code), so no policy/RLS surface | Table catalog | Yes | **Implemented** |
+| **Shell (bash)** | Top-level function definitions (both `name()` and `function name` forms) as the exported surface (`_name` is private); `source`/`.` of a literal path as imports. `.sh`/`.bash`/`.zsh` | Yes | Yes | **Implemented** |
 | **Go** | Functions, methods, exported symbols | Planned | Planned | Future (v0.2.0 target) |
 | **Rust** | `pub fn`, `pub struct`, `pub enum`, traits | Planned | Planned | Future (v0.2.0 target) |
 | **Java** | Classes, interfaces, public methods | Planned | Planned | Future (v0.3.0 target) |
 | **Fallback** | YAML-only metadata, no tree-sitter | No merge | Data integrity only | Only for files **explicitly declared** in a manifest |
 
-Python, TypeScript/JavaScript, SQL migrations, and Prisma schemas are verified today (Prisma via a
-deterministic block parser, the rest tree-sitter); Go, Rust, and Java are on the roadmap. The **fallback path is not a catch-all** — it only covers files a manifest **names
+Python, TypeScript/JavaScript, SQL migrations, Prisma schemas, and shell scripts are verified today
+(Prisma via a deterministic block parser, the rest tree-sitter); Go, Rust, and Java are on the roadmap. The **fallback path is not a catch-all** — it only covers files a manifest **names
 directly** (metadata is preserved, but there is no tree-sitter verification). Files in an unsupported
 language that are only **auto-discovered** (not declared in a manifest) are silently skipped rather
 than validated.

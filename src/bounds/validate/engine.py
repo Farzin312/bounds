@@ -394,7 +394,7 @@ def _coverage_gap_issue(mapping: dict, project_root: Path, subsystems: dict) -> 
     Fired only when a closeable gap remains. Two gap kinds, two moves (named separately because the
     right fix differs):
 
-      * **supported file in no subsystem** (we have an adapter — Python/TS/JS/SQL/Prisma): a
+      * **supported file in no subsystem** (we have an adapter — Python/TS/JS/SQL/Prisma/shell): a
         deterministic fix — add it to a subsystem's `paths:`.
       * **unsupported-language file no manifest claims** (`dark`, no adapter yet): author a manifest;
         the `exposes` you hand-write are DURABLE (calibrate routes them to needs_review, validate
@@ -418,7 +418,7 @@ def _coverage_gap_issue(mapping: dict, project_root: Path, subsystems: dict) -> 
     steps: list[str] = []
     if sup["unowned"]:
         steps.append(
-            "supported files (Python/TS/JS/SQL/Prisma) → add each to a subsystem's `paths:` "
+            "supported files (Python/TS/JS/SQL/Prisma/shell) → add each to a subsystem's `paths:` "
             "(`bounds init --subsystem <name>` scaffolds one) — deterministic, no AI"
         )
     if unsup["dark"]:

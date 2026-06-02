@@ -9,6 +9,8 @@ paths:
 exposes:
 - name: BOUNDS_DIR
   kind: const
+- name: SURFACE_BASELINE_FILE
+  kind: const
 - name: BUILTIN_CRITICALITY
   kind: const
 - name: BUILTIN_CRITICALITY_DEPTH

@@ -53,8 +53,8 @@ Two kinds of closeable gap, two fixes:
 
 | Gap | What it means | How to close it |
 |-----|---------------|-----------------|
-| **unowned supported** | Bounds *has* an adapter (Python/TS/JS/SQL/Prisma) but the file is in no subsystem's `paths` | add it to a manifest — deterministic, no AI needed; `mapped_pct` rises |
-| **dark unsupported** | no adapter yet (shell, Go, Rust, Java, …) and no manifest claims it | hand-author (or AI-author) a manifest in the format below — the file moves `dark → declared`, then verify |
+| **unowned supported** | Bounds *has* an adapter (Python/TS/JS/SQL/Prisma/shell) but the file is in no subsystem's `paths` | add it to a manifest — deterministic, no AI needed; `mapped_pct` rises |
+| **dark unsupported** | no adapter yet (Go, Rust, Java, …) and no manifest claims it | hand-author (or AI-author) a manifest in the format below — the file moves `dark → declared`, then verify |
 
 ### Unsupported-language exposes are durable
 
@@ -78,7 +78,7 @@ stale expose there is still proposed for removal and still flags drift.
 
 ### Keeping a hand-authored surface honest as the repo grows
 
-"Never auto-stripped" cuts both ways: if the unsupported file later changes (a renamed/removed shell
+"Never auto-stripped" cuts both ways: if the unsupported file later changes (a renamed/removed Go
 function), nothing *extracted* exists to prove the hand-authored `exposes` is now wrong. Bounds closes
 that lifecycle hole **deterministically, no LLM** — by content hash, not by parsing:
 
@@ -86,10 +86,10 @@ that lifecycle hole **deterministically, no LLM** — by content hash, not by pa
    it writes a committed `.bounds/surface-baseline.json` — a per-file content hash of every
    unsupported-language file your manifests own. (Committed, unlike the gitignored `cache.db`, so the
    signal works in CI and on a fresh clone. Pure-supported repos get no such file.)
-2. **Edit** happens over time — someone changes `deploy.sh`.
+2. **Edit** happens over time — someone changes `charge.go`.
 3. **`bounds validate`** (full / `preflight`, off the `--quick` path) compares the live files to that
    baseline and emits a non-blocking **`E_UNSUPPORTED_SURFACE_STALE`** warning naming the changed
-   subsystem + file: *"re-verify `scripts.exposes` against the changed file(s)."* This is the precise
+   subsystem + file: *"re-verify `payments.exposes` against the changed file(s)."* This is the precise
    moment an agent (or human) should re-read the file and patch the `exposes`.
 4. **Re-confirm** with `bounds calibrate --dump-baseline` once the exposes match again; the warning
    clears. New unsupported files that appear are a *coverage* concern (`dark`), not staleness, so

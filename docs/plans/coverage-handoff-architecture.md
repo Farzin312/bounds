@@ -1,6 +1,6 @@
 # Plan — Coverage truth + CLI↔agent↔human handoff (Option C)
 
-**Branch:** `plan/coverage-100-supported-split` · **Date:** 2026-06-02 · **Status:** Stages 1–4 implemented (see below); Stage 5 (adapters) is roadmap
+**Branch:** `plan/coverage-100-supported-split` · **Date:** 2026-06-02 · **Status:** Stages 1–5 + §4c/§4d implemented (see below); further adapters (Go/Rust/Java) are roadmap
 
 > One sentence: make Bounds map **100% of what it can parse deterministically**, hand the rest to an AI agent with a *contextual, token-lean* template, keep that hand-authored map **honest as the repo grows** (deterministic staleness detection, no LLM), and ground every marketing claim in that mechanically-true number — so the coverage signal, the agent handoff, and the growth story all tell the same truth.
 
@@ -24,9 +24,16 @@ into Stage 1. **544 tests pass.** Deltas from the original proposal below:
   schema change** (the §3.2/§5.2/§8 cache-digest plan is superseded). New module `surface.py`; the
   signal fires in `validate` (full/preflight), off the `--quick` path; opt-in (no baseline ⇒ no
   signal).
-- **Not yet done:** the JSON↔human parity nits (§4c: `schema_coverage.note` passthrough, clean
-  `validate -H` `mapped_pct` line) and the "two coverages" relabel (§4d) — small follow-ups. Stage 5
-  (language adapters, §6.1) is the roadmap.
+- **§4c/§4d — done.** Human parity: `validate -H` now shows a clean `source mapped: X% (M/N supported
+  files) — unsupported: D declared, K dark` line (no more brace-soup `coverage={…}` repr);
+  `schema_coverage.note` is surfaced verbatim; the two signals are relabeled "source mapped" vs
+  "schema parse coverage" so they can't be confused.
+- **Stage 5 — shell adapter shipped.** `extract/shell.py` (tree-sitter-bash): top-level function
+  definitions are the verified surface, `source`/`.` literal paths are imports. Shell moved from
+  unsupported → fully supported (so `.sh`/`.bash`/`.zsh` are extracted, counted, and drift-checked
+  like any language). Dogfood: this repo validates 100%; its one shell file (`install.sh`) stays
+  `.boundsignore`d as packaging tooling, so shell support is proven by the adapter + tests rather than
+  a mapped repo file. **Further adapters (Go → Rust → Java, §6.1) remain the roadmap.**
 
 ---
 

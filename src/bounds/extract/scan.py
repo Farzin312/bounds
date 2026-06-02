@@ -19,6 +19,7 @@ from ..models import ExtractResult, Issue, SubsystemCompact
 from . import content_hash, get_adapter, supported_extensions
 
 __all__ = [
+    "coverage_has_gap",
     "extract_file",
     "extract_project",
     "is_framework_entry_file",
@@ -30,6 +31,7 @@ __all__ = [
     "resolve_test_owners",
     "strip_ext",
     "subsystems_with_unsupported_source",
+    "unsupported_surface_files",
 ]
 
 

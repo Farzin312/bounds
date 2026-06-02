@@ -12,6 +12,7 @@ from pathlib import Path
 from .base import LanguageAdapter
 from .prisma import PrismaAdapter
 from .python import PythonAdapter
+from .shell import ShellAdapter
 from .sql import SqlAdapter
 from .typescript import TypeScriptAdapter
 
@@ -30,7 +31,7 @@ def _ensure_built() -> None:
         return
     by_ext: dict[str, LanguageAdapter] = {}
     by_lang: dict[str, LanguageAdapter] = {}
-    for adapter in (PythonAdapter(), TypeScriptAdapter(), SqlAdapter(), PrismaAdapter()):
+    for adapter in (PythonAdapter(), TypeScriptAdapter(), SqlAdapter(), PrismaAdapter(), ShellAdapter()):
         by_lang[adapter.language_name] = adapter
         for ext in adapter.extensions:
             by_ext[ext] = adapter

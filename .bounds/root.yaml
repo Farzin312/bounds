@@ -18,6 +18,7 @@ subsystems:
   - manifest
   - models
   - output
+  - surface
   - tsconfig
   - update_check
   - upgrade

@@ -1,0 +1,11 @@
+name: surface
+role: library
+criticality: leaf
+description: Committed unsupported-language surface baseline (.bounds/surface-baseline.json) plus the baseline-vs-current comparison backing E_UNSUPPORTED_SURFACE_STALE.
+paths:
+  - src/bounds/surface.py
+exposes:
+  - { name: load_baseline, kind: function }
+  - { name: write_baseline, kind: function }
+  - { name: stale_subsystems, kind: function }
+consumes: []
