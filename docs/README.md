@@ -12,6 +12,7 @@ command reference, and the deep dives on how Bounds works and why it pays off.
 ## Reference
 
 - [cli-reference.md](cli-reference.md) — every command, every flag, and the JSON/exit-code contract.
+- [coverage.md](coverage.md) — the mapping-coverage signal, what "aiming for 100%" means, and the human-or-AI workflow for closing a gap.
 - [ai-agents.md](ai-agents.md) — `bounds agent --sync`, the canonical `AGENTS.md` contract, and why agent compliance is advisory (CI is the only hard enforcement).
 - [languages-and-platforms.md](languages-and-platforms.md) — the language support matrix (Python + TS/JS + SQL + Prisma today) and cross-platform notes.
 - [install.md](install.md) — all install channels and their current status.

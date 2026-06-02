@@ -157,11 +157,43 @@ read source to understand *behavior*.)
 > you reach after a light curation pass, not a one-command guarantee on every repo. The
 > [cross-language report](benchmarks/results/oss-cross-language.md) documents this in full.
 
-**Contributors welcome:** run `python benchmarks/oss_bench.py --repo <path>` (token economics) and
-`python benchmarks/oss_features.py --repo <path>` (full-command matrix), or add your model/tokenizer's
-numbers via [`benchmarks/TEMPLATE.md`](benchmarks/TEMPLATE.md) — see
-[benchmarks/README.md](benchmarks/README.md). See [docs/token-economics.md](docs/token-economics.md)
-for the scaling argument and the context-rot effect.
+**Contributors welcome:** `make benchmark` reports this repo's own coverage + token economics, and
+`make oss-bench REPO=<path>` runs the full coverage + token + command-surface report on any cloned
+repo (one reproducible command, no hand-assembled tables). Add your model/tokenizer's numbers via
+[`benchmarks/TEMPLATE.md`](benchmarks/TEMPLATE.md) — see [benchmarks/README.md](benchmarks/README.md).
+See [docs/token-economics.md](docs/token-economics.md) for the scaling argument and the context-rot
+effect.
+
+## Mapping coverage — aiming for 100%, and closing gaps with an agent
+
+Bounds reports how much of your **library source** it actually mapped — deterministically, no LLM.
+`bounds validate` (`stats.coverage.mapping`), `bounds overview` (`health.validation.mapped_pct`), and
+`bounds discover` all carry the same signal: `mapped_pct`, the unmapped files, and a **by-language
+breakdown** of what's left — so a partial map is always *visible*, never silently half-dark. Tests and
+docs are tracked in their own buckets and never drag the number down.
+
+When `mapped_pct < 100` there are exactly two kinds of gap, and an agent can close either — with the
+CLI as the deterministic verifier:
+
+```mermaid
+flowchart LR
+  D["bounds discover --apply"] --> V{"bounds validate<br/>mapped_pct"}
+  V -->|"100%"| DONE["✓ fully mapped"]
+  V -->|"gap: unowned-supported"| S["add the file to a<br/>manifest's paths:"]
+  V -->|"gap: unsupported language"| AI["agent hand-authors a manifest<br/>from .bounds/manifests/*.yaml"]
+  S --> V
+  AI --> V
+```
+
+- **Unowned but supported** (a Python/TS/JS/SQL/Prisma file in no subsystem) → add it to a manifest's
+  `paths:`. Deterministic, no AI needed.
+- **Unsupported language** (Go/Rust/Java — no adapter yet) → hand the agent the `unmapped_by_language`
+  list and an existing `.bounds/manifests/*.yaml` as a template; it authors the missing manifest
+  (`paths` + `exposes` + `consumes`), then `bounds validate` confirms it clean. "100%" means 100% of
+  *supported-language* source — Bounds names exactly what it can't yet parse instead of guessing.
+
+The full human-and-AI workflow is in **[docs/coverage.md](docs/coverage.md)**. On this repo `bounds
+validate` reports **100% of source mapped** (36/36 non-test files) — Bounds dogfoods its own gate.
 
 ## Languages & platforms
 
@@ -203,6 +235,7 @@ roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
 
 **Reference**
 - [cli-reference.md](docs/cli-reference.md) — every command and flag.
+- [coverage.md](docs/coverage.md) — the mapping-coverage signal, aiming for 100%, and how a human or an agent closes a gap.
 - [ai-agents.md](docs/ai-agents.md) — `agent --sync`, the canonical contract, advisory compliance.
 - [languages-and-platforms.md](docs/languages-and-platforms.md) — language support matrix and cross-platform notes.
 - [install.md](docs/install.md) — all install channels and their current status.
