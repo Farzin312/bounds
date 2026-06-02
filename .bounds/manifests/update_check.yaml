@@ -1,0 +1,12 @@
+name: update_check
+role: library
+criticality: leaf
+description: Opt-in release-version check for `bounds upgrade-check` — a single outbound GitHub Releases request, deliberately off every structural path, that reports whether the installed CLI is stale. Fails soft in every degraded case; never raises, never changes an exit code.
+paths:
+  - src/bounds/update_check.py
+exposes:
+  - { name: NO_RELEASE, kind: const }
+  - { name: check, kind: function }
+consumes: []
+tests:
+  - tests/meta/test_update_check.py

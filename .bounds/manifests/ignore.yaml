@@ -1,0 +1,13 @@
+name: ignore
+role: library
+criticality: connector
+description: Project-specific exclusion (.boundsignore) loading/matching plus @generated-code detection — pure pathlib + re, deterministic, zero LLM.
+paths:
+  - src/bounds/ignore.py
+exposes:
+  - { name: IgnoreMatcher, kind: class }
+  - { name: has_generated_marker, kind: function }
+  - { name: is_generated, kind: function }
+  - { name: load_ignore_patterns, kind: function }
+  - { name: load_matcher, kind: function }
+consumes: []

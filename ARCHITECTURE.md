@@ -529,7 +529,7 @@ def _fold_subsystem_schema(subsystem, extracts, file_owner) -> dict[str, _TableS
     # apply create/drop/rename table and add/drop/rename column ops in that order -> current catalog.
 def schema_catalog(subsystem, extracts, file_owner) -> list[dict]
     # [{name, kind:"table", columns:[...], files:[...]}] for describe (bare table names).
-def _fold_subsystem_objects(subsystem, extracts, file_owner) -> _ObjectsFold
+def fold_subsystem_objects(subsystem, extracts, file_owner) -> _ObjectsFold
     # the non-table fold: functions/views/indexes/triggers/types DEDUP by (kind,name); policies and
     # RLS toggles are an ORDERED fold (create/alter/drop, enable/disable/force) like tables.
 def schema_objects(subsystem, extracts, file_owner) -> list[dict]

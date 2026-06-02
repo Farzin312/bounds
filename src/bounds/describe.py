@@ -21,7 +21,7 @@ from .manifest import loader as manifest_loader
 from .models import Issue, SubsystemCompact, ValidationReport
 from .validate import engine as validate_engine
 from .validate.schema import (
-    _fold_subsystem_objects,
+    fold_subsystem_objects,
     hash_schema_catalog,
     schema_catalog,
     schema_diagnostics,
@@ -166,7 +166,7 @@ def extract_owned(
     schema_hash = hash_schema_catalog(catalog) if catalog else ""  # reuse the fold above; don't re-fold
     # Fold the non-table surface ONCE and feed both readers (objects + posture), instead of
     # each re-folding (which would also re-run order_migrations).
-    objects_fold = _fold_subsystem_objects(sub.name, extracts, file_owner)
+    objects_fold = fold_subsystem_objects(sub.name, extracts, file_owner)
     objects = schema_objects(sub.name, extracts, file_owner, fold=objects_fold)
     diagnostics = [
         {"code": code, "message": message, "file": file}

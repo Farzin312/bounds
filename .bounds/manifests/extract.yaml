@@ -15,6 +15,7 @@ exposes:
   - { name: adapter_for_language, kind: function }
   - { name: is_test_file, kind: function }
   - { name: is_test_symbol, kind: function }
+  - { name: is_framework_entry_file, kind: function }
   - { name: mapping_coverage, kind: function }
   - { name: resolve_doc_owners, kind: function }
   - { name: resolve_test_owners, kind: function }

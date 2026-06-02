@@ -248,7 +248,7 @@ def _fold_policy(policies: dict[tuple[str, str], dict], sym, rel: str) -> None:
         entry["present"] = True
 
 
-def _fold_subsystem_objects(
+def fold_subsystem_objects(
     subsystem: str, extracts: dict[str, ExtractResult], file_owner: dict[str, str]
 ) -> _ObjectsFold:
     """Fold non-table DDL into the live surface, in deterministic migration + textual order.
@@ -296,7 +296,7 @@ def schema_objects(
     in to avoid re-folding.
     """
     if fold is None:
-        fold = _fold_subsystem_objects(subsystem, extracts, file_owner)
+        fold = fold_subsystem_objects(subsystem, extracts, file_owner)
     merged: dict[tuple[str, str], dict] = dict(fold.dedup)
     for entry in fold.policies.values():
         if entry["present"]:
@@ -336,7 +336,7 @@ def schema_rls_posture(
     already-built table fold + objects fold (describe holds both).
     """
     if fold is None:
-        fold = _fold_subsystem_objects(subsystem, extracts, file_owner)
+        fold = fold_subsystem_objects(subsystem, extracts, file_owner)
     # Posture is a Postgres-RLS concept. A schema that declares no RLS and no policies (a
     # Prisma schema, or plain SQL that never uses row-level security) has no posture to report
     # — emitting "every table unprotected" there would be a false alarm, so return nothing.

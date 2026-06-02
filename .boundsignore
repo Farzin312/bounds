@@ -7,6 +7,8 @@
 setup.py
 install.sh
 Formula/
+# Package-root version shim (2-line importlib.metadata __version__; no subsystem surface to model).
+src/bounds/__init__.py
 
 # Benchmark harness (measurement scripts, not library code)
 benchmarks/
