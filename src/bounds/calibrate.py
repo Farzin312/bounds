@@ -11,8 +11,10 @@ it. The reconciliation rules encode developer intent:
   another subsystem consumes it (then it's a real contract → flagged ``needs_review``, never
   auto-removed) or it is marked ``internal: true`` (deliberately private → exempt entirely).
 * A symbol tree-sitter exports but the manifest omits is proposed for **addition** — UNLESS its
-  file is ``@generated`` or the symbol is private (the adapter already drops ``_``-prefixed
-  Python names from the exported set; we double-guard).
+  file is generated (detected by a header marker; see :mod:`bounds.ignore`) or the symbol is
+  private (the adapter already drops ``_``-prefixed Python names from the exported set; we
+  double-guard). The marker token is intentionally not spelled out in this header — a source file
+  that literally contains it would otherwise be self-misdetected as generated.
 * A real cross-subsystem import not in ``consumes`` is proposed as a new ``consumes`` edge
   (direct imports only — never invent transitive deps). A declared ``consumes`` interface the
   provider doesn't expose is proposed for removal.
