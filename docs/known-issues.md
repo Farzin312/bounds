@@ -158,7 +158,7 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Symptom:** a test subsystem's `exposes` listed every `test_*` function / `Test*` class — symbols a test runner finds by convention, that nothing imports — bloating the manifest (and `describe` token cost) and misrepresenting them as a public surface.
 - **Root cause:** `discover._exposes_for` emitted every exported, non-private symbol regardless of whether the file was a test file.
 - **Fix:** `agent-plugins-aliases-benchmark` — `_exposes_for` excludes `test_*` functions and `Test*` classes in test files (`_is_test_file`/`_is_test_symbol`), keeping genuine helpers. Verified: click `tests.yaml` 818→70 lines (exposes 397→31).
-- **Test:** `tests/discover/test_discover.py::test_discover_excludes_test_cases_from_exposes`.
+- **Test:** `tests/discover/test_discover.py::test_discover_never_promotes_test_dirs_to_subsystems` (stronger guard: discover now links tests instead of creating generated test subsystems; see BOUNDS-020).
 
 ### BOUNDS-015 — test cases re-surfaced as `E_STRUCTURAL_DRIFT` "undeclared export" noise (BOUNDS-014 regression)
 - **Severity / Status:** medium / **Fixed**
@@ -202,6 +202,15 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Root cause:** discovery grouped every supported source file from scratch, while `_write` merged candidates into existing `root.yaml`. That made `discover` act like a second bootstrap pass instead of a gap-filling pass.
 - **Fix:** when a Bounds model already exists, `discover` loads it, resolves current source ownership, resolves linked tests, filters those files out of candidate discovery, and extracts existing-owned files only for import resolution. It now adds only unmapped source; if there is none, it writes nothing and points users to `bounds calibrate` for drift reconciliation.
 - **Test:** `tests/discover/test_discover.py::test_discover_existing_model_does_not_create_duplicate_subsystems`, `::test_discover_existing_model_adds_only_unmapped_source`.
+
+### BOUNDS-020 — `discover` can promote tests/docs into misleading architecture coverage
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-02 while dogfooding `bounds discover --apply` and auditing generated `.bounds/` output for open-source release quality.
+- **Affected:** `bounds discover`, fresh generated manifests, docs/tests coverage UX.
+- **Symptom:** high-volume `tests/` trees could become candidate subsystems, even though the rest of Bounds treats tests as coverage links for source subsystems. Separately, a single `tests/test_auth.py` or `docs/auth.md` could collapse to a broad `tests` or `docs` link, overclaiming future unrelated files.
+- **Root cause:** discovery grouped all supported files before applying the tests/docs ownership model, and link collapsing allowed any clean directory to become a glob regardless of whether that directory was actually named for the owning subsystem.
+- **Fix:** discovery now groups only non-test source into generated architecture manifests. Tests remain in the `tests` coverage bucket and are linked to source subsystems by explicit config or convention. Link collapsing is conservative: it collapses `tests/auth` or `docs/auth`, but keeps `tests/test_auth.py` and `docs/auth.md` file-scoped.
+- **Test:** `tests/discover/test_discover.py::test_discover_never_promotes_test_dirs_to_subsystems`, `::test_discover_top_level_test_file_links_without_overclaiming_tests_dir`, `::test_discover_docs_convention_links_file_without_overclaiming_docs_dir`, `::test_discover_existing_model_reports_unlinked_tests_without_candidates`.
 
 ---
 

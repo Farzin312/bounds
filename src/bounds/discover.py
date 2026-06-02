@@ -26,7 +26,7 @@ Calibrate shares the extraction engine to *reconcile* existing manifests; discov
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -34,13 +34,13 @@ from . import config, errors, gitutil, tsconfig
 from .extract import adapter_for_language, supported_extensions
 from .extract.scan import (
     extract_file,
+    extract_project,
     is_framework_entry_file,
     is_test_file,
     is_test_symbol,
     iter_repo_source,
     mapping_coverage,
     resolve_doc_owners,
-    resolve_owners,
     resolve_test_owners,
 )
 from .ignore import IgnoreMatcher, load_matcher
@@ -71,7 +71,9 @@ def run_discover(
     repo = gitutil.repo_root(project_root) or project_root
     existing_root = None
     existing_subs: dict[str, SubsystemCompact] = {}
-    existing_owner_map: dict[str, tuple[str, Path]] = {}
+    existing_file_owner: dict[str, str] = {}
+    existing_extracts: dict = {}
+    existing_generated: set[str] = set()
     existing_owned: set[str] = set()
     existing_tests: set[str] = set()
     try:
@@ -80,8 +82,10 @@ def run_discover(
         if exc.code != errors.E_MANIFEST_NOT_FOUND:
             raise
     if existing_subs:
-        existing_owner_map = resolve_owners(project_root, existing_subs, supported_extensions(), matcher, repo)
-        existing_owned = set(existing_owner_map)
+        existing_file_owner, existing_extracts, existing_generated = extract_project(
+            project_root, existing_subs, matcher
+        )
+        existing_owned = set(existing_file_owner)
         existing_tests = set(resolve_test_owners(project_root, existing_subs, matcher, repo))
         sources = [
             rel for rel in sources
@@ -126,15 +130,15 @@ def run_discover(
     merges = merges or []
     file_to_candidate, candidate_files = _group(sources, merges)
     file_owner_for_imports = {
-        **{rel: owner for rel, (owner, _path) in existing_owner_map.items()},
+        **existing_file_owner,
         **file_to_candidate,
     }
 
-    # Extract every candidate file once; include existing-owned files too so imports from newly
+    # Extract every candidate file once; include existing-owned extracts too so imports from newly
     # discovered source can resolve to already-materialized subsystems without creating duplicates.
-    extract_sources = sorted(set(sources) | existing_owned)
-    extracts: dict = {}
-    generated: set[str] = set()
+    extract_sources = sorted(set(sources))
+    extracts: dict = dict(existing_extracts)
+    generated: set[str] = set(existing_generated)
     for rel in extract_sources:
         result, is_gen = extract_file(project_root, rel)
         if is_gen:

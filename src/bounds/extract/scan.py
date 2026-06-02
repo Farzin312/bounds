@@ -522,7 +522,8 @@ def resolve_doc_owners(
 
       1. **explicit** — the most-specific subsystem whose ``docs:`` (then ``paths``/``files``)
          declares the file;
-      2. **convention** — ``docs/<name>.*`` or ``<name>.md`` whose stem == a subsystem name;
+      2. **convention** — ``docs/<name>/…``, ``docs/<name>.*``, or ``<name>.md`` whose name/stem
+         == a subsystem name;
       3. else **None** — unlinked.
 
     Docs are ALWAYS informational, never a coverage gap. Deterministic: most-specific wins, equal
@@ -542,8 +543,17 @@ def resolve_doc_owners(
 
 
 def _convention_doc_owner(rel: str, sub_names: set[str]) -> str | None:
-    """Convention-based owner for a doc file: ``docs/<name>.*`` or ``<name>.md`` whose stem is a
-    subsystem name. Returns None when the stem matches no subsystem."""
+    """Convention-based owner for a doc file.
+
+    ``docs/<name>/…`` maps to subsystem ``<name>``; otherwise ``docs/<name>.*`` or ``<name>.md``
+    maps by stem. Returns None when no directory segment or stem matches a subsystem.
+    """
+    parts = rel.split("/")
+    for i, part in enumerate(parts[:-1]):
+        if part == "docs" and i + 1 < len(parts) - 1:
+            area = parts[i + 1]
+            if area in sub_names:
+                return area
     stem = PurePosixPath(rel).stem
     if stem in sub_names:
         return stem

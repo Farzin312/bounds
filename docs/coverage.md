@@ -71,10 +71,14 @@ tests:                     # optional, authoritative
   - a test file directly under a subsystem's `paths`, or under `tests/<name>/`, `test/<name>/`,
     `__tests__/<name>/`, or named `test_<name>.py` / `<name>.test.ts` / `<name>.spec.ts`, links to a
     subsystem named `<name>`;
-  - a doc `docs/<name>.*` or `<name>.md` whose stem equals a subsystem name links to it.
+  - a doc under `docs/<name>/`, or `docs/<name>.*` / `<name>.md` whose stem equals a subsystem
+    name, links to it.
 - **`bounds discover` auto-populates `tests:`** (and `docs:`) from convention on a fresh run, so a new
-  repo already maps its tests with little or no hand-editing (a whole directory collapses to one glob
-  to keep manifests token-lean).
+  repo already maps its tests with little or no hand-editing. `discover` creates manifests for
+  architectural **non-test source** only; test and doc files are linked to those subsystems, not
+  promoted into their own generated subsystem manifests by default. Directory links collapse only
+  when the directory itself is subsystem-named (for example `tests/auth` or `docs/auth`), so a single
+  `docs/auth.md` or `tests/test_auth.py` never overclaims the whole `docs/` or `tests/` directory.
 
 **Tests and docs are tracked, never a blocking gap.** They are excluded from the source denominator
 (`mapped_pct` is over non-test library source) and reported only in the informational `tests`/`docs`
@@ -116,8 +120,9 @@ parse. Either way the format is the same and the result is verifiable.
 4. **Verify:** `bounds validate` — coverage should rise and the manifest should be drift-free. Re-run
    until `mapped_pct` is where you want it.
 
-`bounds discover --apply` is safe to rerun on an existing Bounds repo: it only proposes source that
-is not already owned by current manifests (and not already linked as tests). If it reports no
+`bounds discover --apply` is safe to rerun on an existing Bounds repo: it only proposes non-test
+source that is not already owned by current manifests. Existing linked or unlinked tests remain in
+the tests coverage bucket; they do not create generated manifests. If `discover --apply` reports no
 unmapped supported source, use `bounds calibrate` rather than keeping duplicate generated manifests.
 
 **For AI agents filling a gap:** read the format above and the existing `.bounds/manifests/*.yaml` as

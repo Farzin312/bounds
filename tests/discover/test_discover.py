@@ -112,25 +112,26 @@ def test_discover_writes_detected_languages(tmp_path):
     assert root_doc["languages"] == ["python"]
 
 
-def test_discover_excludes_test_cases_from_exposes(tmp_path):
-    """BOUNDS-014: a test runner finds `test_*` by convention — nothing imports them, so they are
-    not a public surface and must not bloat a test subsystem's `exposes`."""
-    tests = tmp_path / "tests"
-    tests.mkdir()
-    (tests / "test_thing.py").write_text(
-        "def test_one():\n    pass\n"
-        "def test_two():\n    pass\n"
-        "class TestSuite:\n    pass\n"
-        "def make_fixture():\n    return 1\n"  # a genuine helper — kept
-    )
-    for i in range(4):  # pad so the dir is kept as a candidate
-        (tests / f"test_pad{i}.py").write_text(f"def test_pad{i}():\n    pass\n")
+def test_discover_never_promotes_test_dirs_to_subsystems(tmp_path):
+    """BOUNDS-020: tests are linked evidence, not architecture subsystems created by discover."""
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    for i in range(5):
+        (auth / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    tests_auth = tmp_path / "tests" / "auth"
+    tests_auth.mkdir(parents=True)
+    for i in range(8):
+        (tests_auth / f"test_case_{i}.py").write_text(
+            "def test_case():\n    assert True\n"
+            "def make_fixture():\n    return 1\n"
+        )
+
     result = run_discover(tmp_path)
-    cand = next(c for c in result["candidates"] if not c["dropped"])
-    names = {e["name"] for e in cand["exposes"]}
-    assert "make_fixture" in names              # real helper kept
-    assert not any(n.startswith("test_") for n in names)  # no test_* functions
-    assert "TestSuite" not in names             # no Test* classes
+    names = {c["name"] for c in result["candidates"]}
+    assert names == {"auth"}
+    auth_cand = next(c for c in result["candidates"] if c["name"] == "auth" and not c["dropped"])
+    assert auth_cand["tests"] == ["tests/auth"]
+    assert {e["name"] for e in auth_cand["exposes"]} == {f"f{i}" for i in range(5)}
 
 
 def test_discover_overwrites_hardcoded_python_default_for_ts(tmp_path):
@@ -468,6 +469,52 @@ def test_discover_auto_populates_tests_by_convention(tmp_path):
     assert auth_cand["tests"] == ["tests/auth"]
 
 
+def test_discover_top_level_test_file_links_without_overclaiming_tests_dir(tmp_path):
+    """A single `tests/test_<name>.py` link stays file-scoped; discover must not claim all of `tests/`."""
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    for i in range(5):
+        (auth / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_auth.py").write_text("def test_auth():\n    assert True\n")
+
+    result = run_discover(tmp_path)
+    auth_cand = next(c for c in result["candidates"] if c["name"] == "auth" and not c["dropped"])
+    assert auth_cand["tests"] == ["tests/test_auth.py"]
+
+
+def test_discover_docs_convention_links_file_without_overclaiming_docs_dir(tmp_path):
+    """A top-level docs/<name>.md link stays file-scoped; discover must not claim all of `docs/`."""
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    for i in range(5):
+        (auth / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "auth.md").write_text("# Auth\n")
+
+    result = run_discover(tmp_path)
+    auth_cand = next(c for c in result["candidates"] if c["name"] == "auth" and not c["dropped"])
+    assert auth_cand["docs"] == ["docs/auth.md"]
+
+
+def test_discover_docs_named_dir_can_collapse_to_dir_link(tmp_path):
+    """docs/<name>/ can collapse when the directory basename is the owner and all docs inside map to it."""
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    for i in range(5):
+        (auth / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    docs = tmp_path / "docs" / "auth"
+    docs.mkdir(parents=True)
+    (docs / "overview.md").write_text("# Auth overview\n")
+    (docs / "api.md").write_text("# Auth API\n")
+
+    result = run_discover(tmp_path)
+    auth_cand = next(c for c in result["candidates"] if c["name"] == "auth" and not c["dropped"])
+    assert auth_cand["docs"] == ["docs/auth"]
+
+
 def test_discover_applied_manifest_carries_tests(tmp_path):
     """--apply writes the convention-linked `tests:` into the manifest, so a fresh discover produces
     a manifest that already maps source↔tests with no hand-editing."""
@@ -483,3 +530,31 @@ def test_discover_applied_manifest_carries_tests(tmp_path):
     man = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR / "billing.yaml"
     doc = yaml.safe_load(man.read_text())
     assert doc["tests"] == ["tests/billing"]
+
+
+def test_discover_existing_model_reports_unlinked_tests_without_candidates(tmp_path):
+    """Unlinked tests in an existing Bounds repo stay in coverage diagnostics, not generated manifests."""
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        yaml.safe_dump({"version": "1", "project": "proj", "languages": ["python"], "subsystems": ["app"]}),
+        encoding="utf-8",
+    )
+    (cfg / config.MANIFESTS_DIR / "app.yaml").write_text(
+        "name: app\nrole: library\ncriticality: core\npaths: [src/app]\n"
+        "exposes:\n  - { name: run, kind: function }\n",
+        encoding="utf-8",
+    )
+    app = tmp_path / "src" / "app"
+    app.mkdir(parents=True)
+    (app / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
+    misc = tmp_path / "tests" / "misc"
+    misc.mkdir(parents=True)
+    for i in range(6):
+        (misc / f"test_misc_{i}.py").write_text("def test_misc():\n    assert True\n", encoding="utf-8")
+
+    result = run_discover(tmp_path, apply=True)
+    assert result["candidates"] == []
+    assert result["written"] == []
+    assert result["coverage"]["tests"]["unlinked"] == 6
+    assert not (cfg / config.MANIFESTS_DIR / "misc.yaml").exists()
