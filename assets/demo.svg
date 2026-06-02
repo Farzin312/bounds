@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 404" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" role="img" aria-label="Terminal session: the Bounds CLI describing a subsystem's verified contract, folding Postgres migrations into the live table and row-level-security surface (and self-reporting what it could not parse), showing a change's blast radius, and validating for drift">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 424" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" role="img" aria-label="Terminal session: the Bounds CLI describing a subsystem's verified contract, folding Postgres migrations into the live table and row-level-security surface (and self-reporting what it could not parse), showing a change's blast radius, and validating for drift">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#0d1117"/>
@@ -13,7 +13,7 @@
     </style>
   </defs>
 
-  <rect width="760" height="404" rx="10" fill="url(#bg)"/>
+  <rect width="760" height="424" rx="10" fill="url(#bg)"/>
   <rect width="760" height="34" rx="10" fill="#161b22"/>
   <rect y="24" width="760" height="10" fill="#161b22"/>
   <circle cx="22" cy="17" r="6" fill="#ff5f56"/>

@@ -9,15 +9,11 @@
 
 **Give agents the map before they search. Catch drift in CI. Zero LLM on structural paths.**
 
+<br/>
+
 <img src="assets/demo.svg" alt="Terminal session: Bounds in four commands — discover manifests, describe a subsystem's verified contract, see a change's blast radius, validate for drift" width="760">
 
-**Bounds** turns each subsystem's intended boundary — its public surface, tables, and cross-module
-dependencies — into a tiny contract that AI agents can query before reading source. Then it uses
-**tree-sitter (zero LLM)** to verify that contract against your real code and **fail the build when
-the two diverge**.
-
-> *A code graph tells your agent what the code **is**; Bounds tells it what the code is **supposed
-> to be** — and fails the build when those diverge. Use a graph to explore, use Bounds to enforce.*
+<br/>
 
 [![CI](https://github.com/Farzin312/bounds/actions/workflows/ci.yml/badge.svg)](https://github.com/Farzin312/bounds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -31,6 +27,14 @@ the two diverge**.
 </div>
 
 ---
+
+**Bounds** turns each subsystem's intended boundary — its public surface, tables, and cross-module
+dependencies — into a tiny contract that AI agents can query before reading source. Then it uses
+**tree-sitter (zero LLM)** to verify that contract against your real code and **fail the build when
+the two diverge**.
+
+> *A code graph tells your agent what the code **is**; Bounds tells it what the code is **supposed
+> to be** — and fails the build when those diverge. Use a graph to explore, use Bounds to enforce.*
 
 > **Who it's for.** A team using coding agents on a mature codebase where "just read the repo" is
 > expensive and unreliable. Bounds gives agents a small verified map first, then gives reviewers and
