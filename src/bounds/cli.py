@@ -421,7 +421,9 @@ def preflight_cmd(include_ignored: bool, include_gitignored: bool, follow_symlin
                 include_ignored=include_ignored, include_gitignored=include_gitignored,
                 follow_symlinks=follow_symlinks, fail_on_unowned=fail_on_unowned,
             )
-        counts = Counter(i.code for i in report.issues)
+        counts: Counter = Counter()
+        for i in report.issues:
+            counts[i.code] += i.count  # sum magnitude (rolled-up issues carry count>1), not issue rows
         payload = report.to_dict()
         payload["checks"] = {
             "structural_drift": counts.get(errors.E_STRUCTURAL_DRIFT, 0),
@@ -467,7 +469,9 @@ def overview_cmd(human: bool) -> None:
         # cache); reuse its error counts + mapping coverage rather than re-walking the tree.
         with _progress("checking health..."):
             report = validate_engine.run(root, mode="full", persist=False)
-        counts = Counter(i.code for i in report.issues)
+        counts: Counter = Counter()
+        for i in report.issues:
+            counts[i.code] += i.count  # sum magnitude (rolled-up issues carry count>1), not issue rows
         cov = report.stats.get("coverage", {})
         mapping = cov.get("mapping") or {}
         validation_errors = report.errors()
