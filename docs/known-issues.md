@@ -212,6 +212,15 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Fix:** discovery now groups only non-test source into generated architecture manifests. Tests remain in the `tests` coverage bucket and are linked to source subsystems by explicit config or convention. Link collapsing is conservative: it collapses `tests/auth` or `docs/auth`, but keeps `tests/test_auth.py` and `docs/auth.md` file-scoped.
 - **Test:** `tests/discover/test_discover.py::test_discover_never_promotes_test_dirs_to_subsystems`, `::test_discover_top_level_test_file_links_without_overclaiming_tests_dir`, `::test_discover_docs_convention_links_file_without_overclaiming_docs_dir`, `::test_discover_existing_model_reports_unlinked_tests_without_candidates`.
 
+### BOUNDS-021 — `validate` structural-drift doesn't skip generated files (calibrate does)
+- **Severity / Status:** low / **Open** (tracked as a follow-up)
+- **Found:** 2026-06-02 via review of the generated-file handling across `validate` and `calibrate`.
+- **Affected:** `validate`/`preflight` structural-drift on a generated file owned by a subsystem whose generated exports aren't declared in `exposes`.
+- **Symptom:** `validate`'s structural-drift check does not skip generated files, while `calibrate` does (it omits generated-file symbols from proposed exposes). For a generated file owned by a subsystem with undeclared exports, this can produce advisory `E_STRUCTURAL_DRIFT` that `calibrate` won't auto-resolve.
+- **Root cause:** the drift check has no per-file generated signal at the point it compares the exported surface against `exposes`.
+- **Fix:** proposed — fixing it consistently requires caching a per-file generated flag (to avoid re-reading source on the `<200ms` quick path); tracked as a follow-up.
+- **Test:** (to be added with the fix).
+
 ---
 
 See also: [coverage.md](coverage.md) (the mapping-coverage metric + how to close a gap),
