@@ -30,6 +30,18 @@ cache.db
 cache.db-journal
 state.json
 """
+# The required ignore entries, derived from GITIGNORE_TEMPLATE so the append path (below) and the
+# template can't drift: any non-blank, non-comment line in the template is a required entry. When an
+# existing .bounds/.gitignore is found, only these that aren't already present as their own line are
+# appended — existing content is never reordered or rewritten.
+GITIGNORE_ENTRIES = tuple(
+    line.strip()
+    for line in GITIGNORE_TEMPLATE.splitlines()
+    if line.strip() and not line.lstrip().startswith("#")
+)
+# Section comment placed above appended entries (deterministic, no wall-clock) — only when at
+# least one entry is actually being added to an existing file.
+GITIGNORE_APPEND_HEADER = "# Added by Bounds — regenerable cache artifacts"
 # Committed drift baseline for `calibrate --check`: the set of manifest-vs-source
 # discrepancies that already exist on the main branch. The check flags only NEW drift
 # above this baseline, so a PR is never blocked by pre-existing rot it didn't introduce.
@@ -52,8 +64,10 @@ SCHEMA_VERSION = "1"
 # Bump whenever extraction OUTPUT changes for unchanged source (new/changed adapter symbols),
 # so every existing binary cache.db is treated as version-mismatched and rebuilt rather than
 # serving stale symbols. v2: SQL adapter recovers transaction-wrapped DDL + folds policies/RLS
-# and canonicalises table names (see extract/sql.py, validate/schema.py).
-STATE_VERSION = "2"
+# and canonicalises table names (see extract/sql.py, validate/schema.py). v3: PythonAdapter honours
+# a literal `__all__` for the export surface and resolves same-file Django-model inheritance
+# transitively (see extract/python.py).
+STATE_VERSION = "3"
 
 # The documented command to refresh a stale git/pipx install. Surfaced by `upgrade-check`
 # and embedded in the generated agent contract; kept here as the single source so the two
@@ -130,7 +144,10 @@ DEFAULT_IGNORES = {
 # prisma) are *mappable*; the rest are *unsupported today* and surface as a loud coverage gap. Only
 # code extensions belong here — docs/config/assets are deliberately excluded so they don't dilute %.
 KNOWN_SOURCE_EXTS = {
-    ".py": "python", ".pyi": "python",
+    # .pyi (stub files) is deliberately excluded: it has no symbol surface to map (type-only
+    # declarations, no implementation), and PythonAdapter has no .pyi adapter — counting it would
+    # make stubs read as mappable-but-unmapped and understate coverage.
+    ".py": "python",
     ".ts": "typescript", ".tsx": "typescript", ".mts": "typescript", ".cts": "typescript",
     ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
     ".sql": "sql", ".prisma": "prisma",
@@ -208,15 +225,38 @@ def uses_legacy_layout(project_root) -> bool:
 
 
 def ensure_bounds_gitignore(bounds_dir) -> bool:
-    """Idempotently write ``<bounds_dir>/.gitignore`` with the regenerable-cache entries.
+    """Idempotently ensure ``<bounds_dir>/.gitignore`` ignores the regenerable-cache entries.
 
-    Returns ``True`` if the file was created, ``False`` if it already existed (left untouched).
+    Never destroys or rewrites existing content. If the file is absent it is created from
+    ``GITIGNORE_TEMPLATE``; if it exists, every existing line is preserved byte-for-byte and only
+    the ``GITIGNORE_ENTRIES`` that aren't already present as their own line (whole-line match,
+    ignoring surrounding whitespace; a commented ``# cache.db`` does NOT count) are appended under
+    a single section comment. Returns ``True`` if the file was created or anything was appended,
+    ``False`` if no change was needed.
+
     The single seam both ``init --root`` and ``discover --apply`` use so the .bounds/ cache
     (binary, regenerable) is never accidentally committed and the two paths can't diverge.
     """
     path = Path(bounds_dir) / GITIGNORE_FILE
-    if path.exists():
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(GITIGNORE_TEMPLATE, encoding="utf-8")
+        return True
+
+    existing = path.read_text(encoding="utf-8")
+    # Whole-line presence check: a line is "present" only as its own uncommented entry, so a
+    # commented `# cache.db` does not satisfy the requirement.
+    present = {line.strip() for line in existing.splitlines()}
+    missing = [entry for entry in GITIGNORE_ENTRIES if entry not in present]
+    if not missing:
         return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(GITIGNORE_TEMPLATE, encoding="utf-8")
+
+    # Append cleanly: guarantee a trailing newline before our section so we never glue onto a
+    # missing-EOL last line, then add the header + each missing entry.
+    appended = existing
+    if appended and not appended.endswith("\n"):
+        appended += "\n"
+    appended += "\n" + GITIGNORE_APPEND_HEADER + "\n"
+    appended += "".join(entry + "\n" for entry in missing)
+    path.write_text(appended, encoding="utf-8")
     return True

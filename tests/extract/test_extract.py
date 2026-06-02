@@ -178,6 +178,103 @@ def test_orm_plain_class_stays_class():
     assert _py_kinds(b"class Foo(Bar):\n    pass\n")["Foo"] == "class"
 
 
+# ---- Python __all__ export gating (Tier 4) ----
+def _py_exported(src: bytes) -> dict[str, bool]:
+    res = get_adapter("m.py").extract("m.py", src)
+    return {s.name: s.exported for s in res.symbols}
+
+
+def test_python_all_restricts_export_surface():
+    """A literal __all__ is the authoritative public surface: only its members are exported, and a non-listed public-cased name is exported=False even without a leading underscore — honouring the author's explicit choice over the underscore heuristic."""
+    src = b'''__all__ = ["public_a", "PublicClass"]
+
+def public_a():
+    pass
+
+def public_b():
+    pass
+
+class PublicClass:
+    pass
+'''
+    exported = _py_exported(src)
+    assert exported["public_a"] is True
+    assert exported["PublicClass"] is True
+    assert exported["public_b"] is False  # public-cased but omitted from __all__ => private
+
+
+def test_python_all_can_export_underscore_name():
+    """A leading-underscore name listed in __all__ is public — __all__ overrides the underscore convention (the author deliberately exported it)."""
+    src = b'__all__ = ["_internal"]\n\ndef _internal():\n    pass\n\ndef helper():\n    pass\n'
+    exported = _py_exported(src)
+    assert exported["_internal"] is True       # listed => public despite the underscore
+    assert exported["helper"] is False         # not listed => private
+
+
+def test_python_no_all_keeps_underscore_rule():
+    """With no __all__ the leading-underscore convention still governs exports — the existing default is preserved for the (common) modules that don't declare one."""
+    src = b"def public_fn():\n    pass\n\ndef _private():\n    pass\n"
+    exported = _py_exported(src)
+    assert exported["public_fn"] is True
+    assert exported["_private"] is False
+
+
+def test_python_all_tuple_form():
+    """The tuple form __all__ = ("a",) is recognised like the list form — both are common literal spellings."""
+    src = b'__all__ = ("kept",)\n\ndef kept():\n    pass\n\ndef dropped():\n    pass\n'
+    exported = _py_exported(src)
+    assert exported["kept"] is True
+    assert exported["dropped"] is False
+
+
+def test_python_dynamic_all_falls_back_to_underscore_rule():
+    """A non-literal __all__ (built dynamically) is not statically knowable, so extraction falls back to the underscore rule rather than guessing — zero-LLM, static-only, fail-soft."""
+    src = b'__all__ = _base + ["x"]\n\ndef public_fn():\n    pass\n\ndef _private():\n    pass\n'
+    exported = _py_exported(src)
+    assert exported["public_fn"] is True   # fell back to underscore rule
+    assert exported["_private"] is False
+
+
+# ---- Python same-file Django inheritance (Tier 4) ----
+def test_orm_django_same_file_inheritance_is_a_table():
+    """A model inheriting from a Django base defined IN THE SAME FILE is recognised as a table — real Django codebases use a project AbstractBase(models.Model) that concrete models extend."""
+    src = b'''from django.db import models
+
+class AbstractBase(models.Model):
+    class Meta:
+        abstract = True
+
+class Order(AbstractBase):
+    pass
+'''
+    res = get_adapter("models.py").extract("models.py", src)
+    kinds = {s.name if s.kind != "table" else s.metadata.get("model"): s.kind for s in res.symbols}
+    # AbstractBase is abstract -> not a table; Order inherits Django-ness transitively -> table.
+    assert kinds["AbstractBase"] == "class"
+    assert kinds["Order"] == "table"
+    tables = {s.metadata.get("model"): s.name for s in res.symbols if s.kind == "table"}
+    assert tables == {"Order": "Order"}
+
+
+def test_orm_django_cross_file_base_is_not_a_table():
+    """A base class merely IMPORTED from another file is NOT resolved — same-file-only inheritance keeps extraction per-file cacheable; the subclass stays a plain class, never a phantom table."""
+    src = b'''from .common import AbstractBase
+
+class Order(AbstractBase):
+    pass
+'''
+    res = get_adapter("models.py").extract("models.py", src)
+    assert {s.name: s.kind for s in res.symbols}["Order"] == "class"
+    assert [s for s in res.symbols if s.kind == "table"] == []
+
+
+def test_orm_django_inheritance_cycle_does_not_crash():
+    """A pathological inheritance cycle with no real Model root must not hang or crash extraction (fixpoint converges) — fail-soft on degenerate input."""
+    src = b"class A(B):\n    pass\n\nclass B(A):\n    pass\n"
+    res = get_adapter("m.py").extract("m.py", src)
+    assert {s.name: s.kind for s in res.symbols} == {"A": "class", "B": "class"}
+
+
 def test_orm_typeorm_entity_object_name_form():
     """TypeORM's @Entity({ name: "accounts" }) options-object form must yield the declared table name, like the positional @Entity("accounts") form — both spellings are real."""
     src = b'@Entity({ name: "accounts" })\nexport class Account {}\n'

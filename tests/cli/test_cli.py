@@ -509,6 +509,86 @@ def test_init_root_gitignore_idempotent(tmp_path, monkeypatch):
     assert gi.read_text(encoding="utf-8") == first_body  # unchanged, not duplicated
 
 
+def test_ensure_gitignore_creates_with_all_entries_when_absent(tmp_path):
+    """Absent .bounds/.gitignore -> created from the template with all required entries, returns True."""
+    from bounds import config
+
+    bounds_dir = tmp_path / config.BOUNDS_DIR
+    assert config.ensure_bounds_gitignore(bounds_dir) is True
+    gi = bounds_dir / config.GITIGNORE_FILE
+    assert gi.is_file()
+    present = {line.strip() for line in gi.read_text(encoding="utf-8").splitlines()}
+    for entry in config.GITIGNORE_ENTRIES:
+        assert entry in present
+
+
+def test_ensure_gitignore_appends_to_unrelated_content_without_rewriting(tmp_path):
+    """Existing user content (a comment + *.log) is preserved byte-for-byte while the 3 entries are appended, no dupes."""
+    from bounds import config
+
+    bounds_dir = tmp_path / config.BOUNDS_DIR
+    bounds_dir.mkdir(parents=True)
+    gi = bounds_dir / config.GITIGNORE_FILE
+    user_body = "# my own ignores\n*.log\n"
+    gi.write_text(user_body, encoding="utf-8")
+
+    assert config.ensure_bounds_gitignore(bounds_dir) is True
+    after = gi.read_text(encoding="utf-8")
+    # User content survives unchanged at the head of the file.
+    assert after.startswith(user_body)
+    lines = [line.strip() for line in after.splitlines()]
+    assert "# my own ignores" in lines
+    assert "*.log" in lines
+    for entry in config.GITIGNORE_ENTRIES:
+        assert lines.count(entry) == 1  # present exactly once, never duplicated
+
+
+def test_ensure_gitignore_noop_when_all_entries_present(tmp_path):
+    """A file already containing all 3 entries -> returns False and is byte-unchanged (no dupes)."""
+    from bounds import config
+
+    bounds_dir = tmp_path / config.BOUNDS_DIR
+    bounds_dir.mkdir(parents=True)
+    gi = bounds_dir / config.GITIGNORE_FILE
+    body = "node_modules/\n" + "".join(e + "\n" for e in config.GITIGNORE_ENTRIES)
+    gi.write_text(body, encoding="utf-8")
+
+    assert config.ensure_bounds_gitignore(bounds_dir) is False
+    assert gi.read_text(encoding="utf-8") == body  # byte-for-byte unchanged
+
+
+def test_ensure_gitignore_commented_entry_does_not_count_as_present(tmp_path):
+    """Only cache.db present (others absent, one as a comment) -> the missing entries are appended, cache.db not duplicated, returns True."""
+    from bounds import config
+
+    bounds_dir = tmp_path / config.BOUNDS_DIR
+    bounds_dir.mkdir(parents=True)
+    gi = bounds_dir / config.GITIGNORE_FILE
+    # `# state.json` is commented out -> must NOT count as present, so it gets appended.
+    gi.write_text("cache.db\n# state.json\n", encoding="utf-8")
+
+    assert config.ensure_bounds_gitignore(bounds_dir) is True
+    lines = [line.strip() for line in gi.read_text(encoding="utf-8").splitlines()]
+    for entry in config.GITIGNORE_ENTRIES:
+        assert lines.count(entry) == 1  # each required entry present exactly once
+    assert "# state.json" in lines  # the commented line is preserved, not removed
+
+
+def test_ensure_gitignore_idempotent_second_call_is_noop(tmp_path):
+    """Two consecutive calls on a pre-existing file: second returns False and leaves the file unchanged from after the first."""
+    from bounds import config
+
+    bounds_dir = tmp_path / config.BOUNDS_DIR
+    bounds_dir.mkdir(parents=True)
+    gi = bounds_dir / config.GITIGNORE_FILE
+    gi.write_text("# user header\n*.tmp\n", encoding="utf-8")
+
+    assert config.ensure_bounds_gitignore(bounds_dir) is True
+    after_first = gi.read_text(encoding="utf-8")
+    assert config.ensure_bounds_gitignore(bounds_dir) is False
+    assert gi.read_text(encoding="utf-8") == after_first  # no further change, no duplication
+
+
 def test_run_guard_converts_unexpected_exception_to_json_error(tmp_path, monkeypatch):
     """A non-BoundsError raised in a command body becomes a generic JSON error (E_INTERNAL, exit 2), never a raw traceback."""
     monkeypatch.chdir(tmp_path)

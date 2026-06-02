@@ -583,11 +583,18 @@ def _infer_criticality(consumed_by: int) -> str:
 
 
 def _exposes_for(files: list[str], extracts: dict, generated: set[str]) -> list[dict]:
-    """Every exported, non-private symbol across a candidate's files, verified by tree-sitter.
+    """Every exported symbol across a candidate's files, verified by tree-sitter.
 
     Test cases (``test_*`` functions / ``Test*`` classes in a test file) are excluded: a test runner
     discovers them by naming convention, nothing *imports* them, so listing all of them as a public
     surface is wrong and bloats the manifest (a 400-test dir would yield an 800-line `exposes`).
+
+    The public surface is exactly ``sym.exported`` as the adapter computed it — so discover and
+    validate agree by construction. For Python that means a literal ``__all__`` is honoured (only its
+    members are exposed; a leading-underscore name listed in ``__all__`` IS public, and a public-cased
+    name omitted from ``__all__`` is NOT); when ``__all__`` is absent the underscore rule applies.
+    We must NOT re-filter on a leading underscore here — that would drop a deliberately-``__all__``-ed
+    ``_name`` and desync the two surfaces.
     """
     seen: dict[str, dict] = {}
     for rel in files:
@@ -597,7 +604,7 @@ def _exposes_for(files: list[str], extracts: dict, generated: set[str]) -> list[
             continue  # a Next.js page/layout/route entry — framework-invoked, not a consumable API
         is_test = is_test_file(rel)
         for sym in extracts[rel].symbols:
-            if not sym.exported or sym.name.startswith("_"):
+            if not sym.exported:
                 continue
             if is_test and is_test_symbol(sym.name, sym.kind):
                 continue  # a test case is not a consumable interface

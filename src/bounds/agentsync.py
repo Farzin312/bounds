@@ -539,6 +539,18 @@ _AGENT_ARTIFACTS: dict[str, tuple[_Artifact, ...]] = {
     ),
 }
 
+# Bounds-owned artifact paths that were RENAMED after we already shipped them, so repos synced
+# by an older bounds carry a stale orphan at the old path. These are regenerable (the *correct*
+# paths are written in the `_AGENT_ARTIFACTS` loop of this same sync), so a re-sync self-cleans
+# the orphan — the same self-clean pattern as the legacy state.json in `cache.store.save_state`.
+# Each here is provably NOT a current artifact path: opencode's singular `command/` was renamed to
+# the plural `commands/`, and codex's `.codex/skills/` was renamed to the shared `.agents/skills/`
+# spec location — so removing these can never delete a file this sync just wrote.
+_LEGACY_ARTIFACTS: tuple[str, ...] = (
+    ".opencode/command/bounds.md",   # -> .opencode/commands/bounds.md (plural; see _AGENT_ARTIFACTS)
+    ".codex/skills/bounds/SKILL.md",  # -> .agents/skills/bounds/SKILL.md (open Agent Skills spec)
+)
+
 
 # ---------------------------------------------------------------------------
 # mode = sync
@@ -600,6 +612,26 @@ def _sync(root: Path, selected: list[str]) -> dict:
                 prefix=art.front, dedicated=True,
             )
             buckets.record(outcome, Path(art.path).as_posix())
+
+    # 4. Self-clean renamed orphans. The artifacts above already wrote the *current* paths; now
+    #    remove any stale file left at a prior (renamed) bounds-owned path so a re-sync migrates
+    #    cleanly. Only these exact paths are ever touched, and none collides with a current
+    #    artifact (see `_LEGACY_ARTIFACTS`), so this can't delete what we just wrote. Fail-soft:
+    #    cleanup never raises. An emptied parent dir is removed too, but only if empty — we never
+    #    recursively delete a dir that still holds other files.
+    for rel in _LEGACY_ARTIFACTS:
+        legacy = root / Path(rel)
+        if legacy.is_file():
+            try:
+                legacy.unlink()
+            except OSError:
+                pass
+            try:
+                parent = legacy.parent
+                if not any(parent.iterdir()):
+                    parent.rmdir()
+            except OSError:
+                pass
 
     return {
         "created": sorted(buckets.created),
