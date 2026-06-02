@@ -1,8 +1,34 @@
 # Plan — Coverage truth + CLI↔agent↔human handoff (Option C)
 
-**Branch:** `plan/coverage-100-supported-split` · **Date:** 2026-06-02 · **Status:** proposal, pre-implementation
+**Branch:** `plan/coverage-100-supported-split` · **Date:** 2026-06-02 · **Status:** Stages 1–4 implemented (see below); Stage 5 (adapters) is roadmap
 
 > One sentence: make Bounds map **100% of what it can parse deterministically**, hand the rest to an AI agent with a *contextual, token-lean* template, keep that hand-authored map **honest as the repo grows** (deterministic staleness detection, no LLM), and ground every marketing claim in that mechanically-true number — so the coverage signal, the agent handoff, and the growth story all tell the same truth.
+
+## Implementation status (2026-06-02)
+
+Stages 1, 2, and 4 are implemented, tested, and reviewed (PASS) on this branch; Stage 3 was folded
+into Stage 1. **544 tests pass.** Deltas from the original proposal below:
+
+- **Stage 1 — `558a9b1`.** Supported-only `mapped_pct` + `declared`/`dark` split + shared
+  `scan.coverage_has_gap`. *Delta:* kept `mapped_pct` top-level (single headline) rather than only
+  nested; the gap `fix` carries a numbered procedure + concrete `template_ref` (this absorbed **Stage
+  3** — no always-on config bloat, one short AGENTS.md/skill nudge points at the contextual fix).
+- **Stage 2 — `f62ce8a`.** Undeclared-export info-drift rolls up to one issue per subsystem with a new
+  `Issue.count` field (serialized only when >1). *Delta vs "drop info-fix":* kept a single shared
+  fix; overview tallies sum `i.count` so `structural_drift` magnitude is preserved. Only the
+  info branch rolls; error/warning drift stays per-item.
+- **Stage 4 — `4031bae`.** `E_UNSUPPORTED_SURFACE_STALE` via a per-file content-hash digest. **Design
+  change (important):** the digest lives in a **committed `.bounds/surface-baseline.json`** (written by
+  `calibrate --dump-baseline`), NOT the cache — because `cache.db` is gitignored, so a cache-based
+  baseline would be empty in CI / on a fresh clone. Consequence: **no `STATE_VERSION` bump, no cache
+  schema change** (the §3.2/§5.2/§8 cache-digest plan is superseded). New module `surface.py`; the
+  signal fires in `validate` (full/preflight), off the `--quick` path; opt-in (no baseline ⇒ no
+  signal).
+- **Not yet done:** the JSON↔human parity nits (§4c: `schema_coverage.note` passthrough, clean
+  `validate -H` `mapped_pct` line) and the "two coverages" relabel (§4d) — small follow-ups. Stage 5
+  (language adapters, §6.1) is the roadmap.
+
+---
 
 This plan is the synthesis of a code-grounded audit (citations inline). It is deliberately broader than the original "fix the %" ask, because the audit found the metric is one of **five** connected gaps in the CLI → agent → human handoff. They share a root cause and must be fixed together or they re-diverge.
 
