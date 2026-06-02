@@ -14,6 +14,7 @@ _ROOT_YAML = ('version: "1"\nproject: x\nlanguages: [python]\n'
 
 
 def test_guide_fresh_project_all_todo(tmp_path):
+    """A fresh project shows all four setup steps (init/discover/agents/ci) undone, with next pointing at the first one — the state-aware onboarding contract."""
     payload = guide.run_guide(tmp_path)
     assert payload["mode"] == "guide"
     assert payload["complete"] is False
@@ -24,6 +25,7 @@ def test_guide_fresh_project_all_todo(tmp_path):
 
 
 def test_guide_after_init_points_to_discover(tmp_path):
+    """guide reads on-disk state: with root.yaml present but no subsystems mapped, init is done and next advances to `discover --apply`."""
     (tmp_path / ".bounds").mkdir()
     (tmp_path / ".bounds" / "root.yaml").write_text(_ROOT_YAML, encoding="utf-8")
     (tmp_path / ".bounds" / "manifests").mkdir()
@@ -35,6 +37,7 @@ def test_guide_after_init_points_to_discover(tmp_path):
 
 
 def test_guide_detects_ci_gate(tmp_path):
+    """guide marks the ci step done when a .github/workflows/bounds.yml gate exists — it detects real setup, not just self-reported progress."""
     (tmp_path / ".bounds").mkdir()
     workflows = tmp_path / ".github" / "workflows"
     workflows.mkdir(parents=True)
@@ -44,6 +47,7 @@ def test_guide_detects_ci_gate(tmp_path):
 
 
 def test_guide_detects_ci_in_precommit(tmp_path):
+    """guide also counts a pre-commit hook (bounds-preflight in .pre-commit-config.yaml) as the ci gate — the gate need not be a GitHub workflow."""
     (tmp_path / ".pre-commit-config.yaml").write_text(
         "repos:\n  - repo: local\n    hooks:\n      - id: bounds-preflight\n", encoding="utf-8")
     ci_step = next(s for s in guide.run_guide(tmp_path)["steps"] if s["id"] == "ci")
@@ -51,6 +55,7 @@ def test_guide_detects_ci_in_precommit(tmp_path):
 
 
 def test_guide_cli_is_json_when_piped(tmp_path, monkeypatch):
+    """When piped (non-TTY), guide emits the JSON contract (mode/steps/daily) by default — agents get JSON, never the prose checklist."""
     monkeypatch.chdir(tmp_path)
     res = CliRunner().invoke(main, ["guide"])  # CliRunner is non-TTY → JSON
     assert res.exit_code == 0

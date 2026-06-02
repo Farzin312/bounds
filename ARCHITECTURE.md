@@ -246,10 +246,23 @@ class ValidationReport:
     issues: list[Issue] = []
     stats: dict = {}               # {files_total, files_parsed, cache_hits, subsystems, dirty, propagated,
                                    #  enforce, skipped_*, unowned, entry_points, coverage, duration_ms}
-                                   # coverage: {files_owned, unresolved_local_imports, extraction_failures}
+                                   # coverage: {files_owned, unresolved_local_imports, extraction_failures,
+                                   #            mapping}
                                    # — an honest signal that boundary checking is not as complete as a clean
                                    #   report implies (unresolved_local_imports is measured in boundary modes:
                                    #   full/preflight/audit; quick reports 0).
+                                   # coverage.mapping (full modes only; omitted on --quick):
+                                   #   {files_source_total, files_mapped, files_unmapped, mapped_pct,
+                                   #    unmapped_unowned_supported, unmapped_unsupported_language,
+                                   #    unmapped_by_language, unsupported_languages,
+                                   #    tests:{total,linked,unlinked,unlinked_sample},
+                                   #    docs: {total,linked,unlinked,unlinked_sample}}
+                                   #   NOTE: test files are EXCLUDED from the source denominator
+                                   #   (files_source_total / mapped_pct count non-test library source
+                                   #   only) and tracked in the tests bucket — a repo's tests can never
+                                   #   drag mapped_pct down or be flagged E_COVERAGE_GAP. Docs (.md/.mdx/
+                                   #   .rst) are informational. Linkage = explicit manifest docs:/tests:
+                                   #   (most-specific wins) then convention; see §5.
 ```
 
 `status` semantics:
@@ -633,7 +646,7 @@ def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
     #   claude   → .claude/skills/bounds/SKILL.md (auto-trigger) + .claude/commands/bounds.md
     #   codex    → .codex/skills/bounds/SKILL.md (auto-trigger)
     #   gemini   → .gemini/commands/bounds.toml
-    #   opencode → .opencode/command/bounds.md
+    #   opencode → .opencode/commands/bounds.md
     #   copilot  → .github/prompts/bounds.prompt.md
     #   cursor   → .cursor/commands/bounds.md
     #   windsurf → .windsurf/workflows/bounds.md
@@ -725,7 +738,13 @@ exposes:
   - { name: _registry_cache, kind: variable, internal: true }   # exempt from calibration
 consumes:
   - { subsystem: models, via: models, interfaces: [Symbol, ImportRef, ExtractResult] }
+tests:                          # optional — test files that cover this subsystem (file/dir/glob, posix)
+  - tests/extract
+docs:                           # optional — doc files that document this subsystem (file/dir/glob)
+  - docs/languages-and-platforms.md
 ```
+
+**Optional `docs:` / `tests:` (linkage).** Both are lists of repo-relative posix path strings (a file, a directory, or a simple glob — same shape as `paths`/`files`), linking the documentation and test files that cover a subsystem. They are **human-curated and authoritative**, and convention auto-detection supplements them (explicit always wins, most-specific via `path_specificity`): a test file under a subsystem's `paths`, a `tests/<area>/…` segment, or a `test_<area>.py` / `<area>.test.ts` filename maps to the subsystem named `<area>`; a doc maps by `docs/<name>.*` / `<name>.md` stem. `bounds discover` auto-populates them by convention (collapsed to directory globs where one dir maps cleanly). Resolved by `scan.resolve_test_owners` / `resolve_doc_owners`; surfaced in `validate`/`overview` coverage (§3) and in `describe --full`. Linkage is informational — never a blocking gate.
 
 ---
 
@@ -745,7 +764,7 @@ consumes:
 
 ## 7. The 7 checks (logic)
 
-1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files plus any surviving tables from the subsystem's SQL/Prisma schema fold. Declared-but-missing → drift (`error`); a column-granular expose (`users.email`) is resolved against the fold (table exposed **and** column still present), so a dropped column drifts in both the exposes and consumes directions. Undeclared-but-exported (a symbol/table in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (bidirectional drift; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). The `info` severity never blocks, so exit codes are unchanged. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
+1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files plus any surviving tables from the subsystem's SQL/Prisma schema fold. Declared-but-missing → drift (`error`); a column-granular expose (`users.email`) is resolved against the fold (table exposed **and** column still present), so a dropped column drifts in both the exposes and consumes directions. Undeclared-but-exported (a symbol/table in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (bidirectional drift; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). Two classes are excluded from this undeclared-export direction, symmetrically with `discover._exposes_for` (so a fresh discover→validate doesn't re-flood): **test cases** (`test_*` / `Test*` in a test file — `scan.is_test_symbol`+`is_test_file`) and **Next.js framework-entry exports** (a `page`/`layout`/`route`/… file under `app/`|`pages/` — `scan.is_framework_entry_file`), since both are framework-/runner-invoked by convention, not a consumable surface. The `info` severity never blocks, so exit codes are unchanged. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
 2. **Boundary compliance** (`E_BOUNDARY_VIOLATION`, error): for each import in subsystem A resolving to a file owned by subsystem B, the imported names must all be in B's `exposes`. Importing a non-exposed (internal) symbol → violation. Resolution (`checks.resolve_import`): match import `module` against B's file paths via exact-stem, package `/index`/`/__init__`, then a trailing-segment suffix fallback. Relative imports handle both dialects — a TS `./auth.service` keeps the dotted filename (never split into `auth/service`), a Python `..models` treats the dots as separators. For a bare specifier from a TS/JS file the project's `tsconfig.json` `baseUrl`/`paths` aliases (loaded via `tsconfig.load`, threaded as `CheckContext.ts_aliases()`) are tried first, so an aliased import like `@/common` resolves. Fix: "import only B's exposed interfaces, or add `<name>` to B.exposes".
 3. **Contract compliance** (`E_CONTRACT_MISSING_EXPORT`, error): for each `consumes` entry, every listed interface must appear in the provider's `exposes`. For schema contracts, `table.column` is valid only when `table` is exposed and the deterministic SQL fold still contains `column`. Missing → contract break. Fix: "provider `<B>` does not expose `<iface>`; update consumer or provider".
 4. **Cross-subsystem impact** (`E_STALE_INTERFACE`, error/stale): a provider's `structure_hash` changed (it's in `dirty`) and it has consumers (`consumed_by`) → those consumer interfaces may be stale. Emits one issue per affected consumer. Fix: "re-validate consumer `<C>`; provider `<B>` interface surface changed".
@@ -771,6 +790,8 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_CYCLE_DETECTED` | error | circular subsystem dependency |
 | `E_ORPHAN_EXPORT` | warning | exposed interface consumed by no one |
 | `E_UNRESOLVED_REFERENCE` | warning | forward ref to unknown subsystem/interface |
+| `E_COVERAGE_GAP` | warning | repo source files mapped to no subsystem (or an unsupported language); reports mapped % of **non-test library source** + the concrete fix. Test/doc files are tracked in their own buckets and never counted as a gap |
+| `E_SUBSYSTEM_OVERLAP` | warning | two subsystems declare the identical path/file at equal specificity, so ownership rides on the sorted-first tie-break; surfaced by `describe` (advisory) |
 | `E_UNOWNED_FILE` | error / warning | tracked source file owned by no subsystem (`--fail-on-unowned`); a `root.entry_points` match degrades to a non-blocking warning |
 | `E_EXTERNAL_SYMLINK` | warning | a scanned path resolves outside the project via a symlink (skipped unless `--follow-symlinks`) |
 | `E_MANIFEST_NOT_FOUND` | fatal | no `.bounds/` (or legacy `.compact/`) found |
@@ -809,9 +830,14 @@ bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count,
                                        rls_posture?, schema_coverage?, schema_diagnostics?}
                                    # token-lean by default: the file roster, the (often huge) schema-object
                                    # list, the RLS posture table-name lists, AND the per-file schema_diagnostics
-                                   # are gated behind --full, which adds {files, schema_objects,
-                                   # rls_posture.*_tables, rls_posture.policy_count, schema_diagnostics}.
-                                   # The contract — exposes + tables(+columns) — is always full.
+                                   # are gated behind --full, which adds {files, docs, tests, overlaps?,
+                                   # schema_objects, rls_posture.*_tables, rls_posture.policy_count,
+                                   # schema_diagnostics}. The contract — exposes + tables(+columns) — is always full.
+                                   # docs/tests (--full): the doc + test files linked to this subsystem
+                                   #   (explicit docs:/tests: + convention), sorted. files == the owned source
+                                   #   roster (resolve_owners, agrees with validate — no double-count of a
+                                   #   nested child's file). overlaps? (--full, only when non-empty):
+                                   #   [E_SUBSYSTEM_OVERLAP Issue dicts] — genuine same-path ownership conflicts.
                                        # tables?: [{name, kind:"table", columns:[...], files:[...]}]  (bare table
                                        #   names — schema qualifier dropped so every op folds to one entry)
                                        # schema_object_counts?: {kind: n} for the LIVE non-table surface; --full
@@ -840,7 +866,12 @@ bounds validate [--quick|--mode M] [--enforce on|off|warn] [--base REF] [scan fl
                                    → ValidationReport.to_dict()
 bounds preflight [scan flags]      → ValidationReport (mode=preflight) + {checks: per-check counts}
 bounds overview                    → {project, subsystems, roles:{...}, criticality:{...}, edges, cycles,
-                                       schema_issues:[...], health:{ok, schema_errors, cycles}}
+                                       schema_issues:[...], health:{ok, schema_errors, cycles, validation}}
+                                       # health.ok is true ONLY when a real validation pass is clean AND there
+                                       # are no cycles/schema errors — overview folds validate_engine.run(full,
+                                       # persist=False) so it can't read "healthy" while validate would block.
+                                       # health.validation: {ok, errors, warnings, structural_drift,
+                                       #   boundary_violations, contract_gaps, stale_interfaces, mapped_pct}.
 bounds impact <name> [--verify]    → {subsystem, criticality, direct_consumers, transitive_consumers,
                                        blast_radius:int, basis:"declared-consumes",
                                        blast_radius_is_lower_bound:true, note, consumers:[{name,via,interfaces}]}
@@ -851,11 +882,16 @@ bounds impact <name> [--verify]    → {subsystem, criticality, direct_consumers
                                        # --verify adds undeclared_consumer_edges:[{consumer, files:[...]}] — real
                                        # importers of <name> with no declared consume (resolved import graph; off
                                        # the quick path). (E_SUBSYSTEM_NOT_FOUND if unknown)
-bounds where <symbol> [--prefix]   → {symbol, match:"exact"|"prefix", count,
+bounds where <symbol|path> [--prefix] → {symbol, match:"exact"|"prefix", count,
                                        results:[{symbol, kind, file, line, owning_subsystem, exposed}]}
                                        # locate a symbol's definition(s) + owning subsystem; all
                                        # collisions returned, sorted by (file,name,line,kind); fresh extraction
                                        # (never a stale cache); Python + TS. exposed = declared in owner.exposes
+                                   # A PATH-SHAPED arg (contains '/', or matches an existing repo-relative
+                                   # source file by posix compare) is a FILE lookup instead →
+                                   # {file, query_kind:"file", owning_subsystem, count,
+                                   #  results:[{symbol,kind,file,line,owning_subsystem,exposed}]} — the file's
+                                   # owner + every symbol it defines (so `where src/foo.py` is no longer empty).
 bounds init --root                 → scaffolds .bounds/root.yaml; → {created, skipped, bounds_dir}
 bounds init --subsystem <name> [--namespace NS]
                                    → scaffolds .bounds/manifests/<name>.yaml; → {created, skipped, hint, bounds_dir}

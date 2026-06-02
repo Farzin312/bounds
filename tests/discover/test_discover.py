@@ -42,6 +42,7 @@ def _project(tmp_path):
 
 
 def test_discover_proposes_candidates(tmp_path):
+    """Dry-run discover proposes both source dirs as kept candidates with confidence scored by file count (5 files -> high)."""
     _project(tmp_path)
     result = run_discover(tmp_path)
     assert result["mode"] == "discover"
@@ -53,6 +54,7 @@ def test_discover_proposes_candidates(tmp_path):
 
 
 def test_discover_exposes_are_verified_and_skip_private(tmp_path):
+    """Proposed exposes are public-only (no `_private`) and every one is tree-sitter-verified — discover never guesses a surface."""
     _project(tmp_path)
     result = run_discover(tmp_path)
     auth = next(c for c in result["candidates"] if c["name"] == "auth")
@@ -63,6 +65,7 @@ def test_discover_exposes_are_verified_and_skip_private(tmp_path):
 
 
 def test_discover_infers_consumes_edge(tmp_path):
+    """An import from auth->db is inferred as a consumes edge, and being consumed bumps db's criticality above leaf."""
     _project(tmp_path)
     result = run_discover(tmp_path)
     auth = next(c for c in result["candidates"] if c["name"] == "auth")
@@ -73,6 +76,7 @@ def test_discover_infers_consumes_edge(tmp_path):
 
 
 def test_discover_apply_writes_manifests(tmp_path):
+    """apply=True writes root.yaml + per-subsystem manifests, and a re-run skips existing files rather than clobbering edits."""
     _project(tmp_path)
     result = run_discover(tmp_path, apply=True)
     assert result["applied"] is True
@@ -89,6 +93,7 @@ def test_discover_apply_writes_manifests(tmp_path):
 
 
 def test_discover_namespace_tag(tmp_path):
+    """A namespace= arg tags every kept candidate with that namespace, so a monorepo slice can be grouped on discovery."""
     _project(tmp_path)
     result = run_discover(tmp_path, namespace="backend")
     kept = [c for c in result["candidates"] if not c["dropped"]]
@@ -150,6 +155,7 @@ def test_discover_overwrites_hardcoded_python_default_for_ts(tmp_path):
 
 
 def test_discover_folds_module_subparts_into_parent(tmp_path):
+    """A NestJS-shaped module folds dto/ and services/ subdirs into one `auth` subsystem (path src/auth), not three fragments."""
     # A NestJS-shaped module (auth.module.ts directly + dto/ and services/ subdirs) becomes ONE
     # `auth` subsystem, not auth + auth-dto + auth-services (the spex_backend over-fragmentation).
     (tmp_path / ".bounds").mkdir()
@@ -170,6 +176,7 @@ def test_discover_folds_module_subparts_into_parent(tmp_path):
 
 
 def test_discover_keeps_standalone_structural_dir(tmp_path):
+    """A structural-named dir (types/) with no candidate parent stays its own subsystem — folding never invents a parent."""
     # A structural-named dir whose parent is NOT a candidate (no sibling module files) is preserved
     # — folding never invents a parent or fuses unrelated trees.
     (tmp_path / ".bounds").mkdir()
@@ -183,6 +190,7 @@ def test_discover_keeps_standalone_structural_dir(tmp_path):
 
 
 def test_discover_disambiguates_colliding_basenames(tmp_path):
+    """Two dirs sharing a basename (a/utils, b/utils) get distinct path-derived names (a-utils/b-utils), never fused into one 'utils'."""
     # a/utils and b/utils must NOT fuse into one 'utils' subsystem.
     for tree in ("a", "b"):
         d = tmp_path / "src" / tree / "utils"
@@ -197,6 +205,7 @@ def test_discover_disambiguates_colliding_basenames(tmp_path):
 
 
 def test_discover_apply_preserves_custom_root_keys(tmp_path):
+    """discover --apply merges new finds without clobbering an existing root.yaml's custom roles/criticality (extensible-schema)."""
     # An existing root.yaml with custom roles must survive `discover --apply`.
     cfg = tmp_path / config.BOUNDS_DIR
     cfg.mkdir()
@@ -219,6 +228,7 @@ def test_discover_apply_preserves_custom_root_keys(tmp_path):
 
 
 def test_discover_merge_into(tmp_path):
+    """An explicit merges= directive folds multiple paths into one named subsystem ('core'), suppressing the per-dir candidates."""
     _project(tmp_path)
     # Fold both dirs into one subsystem named 'core'.
     result = run_discover(tmp_path, merges=[("core", ["src/db", "src/auth"])])
@@ -230,6 +240,7 @@ def test_discover_merge_into(tmp_path):
 # ---- .gitignore awareness (FIX) ----
 @requires_git
 def test_discover_skips_gitignored_paths(tmp_path):
+    """A gitignored dir (dist/) is excluded even from dropped candidates — discover honors .gitignore, never maps build artifacts."""
     # A gitignored build dir must not become a candidate subsystem.
     _git_init(tmp_path)
     _project(tmp_path)
@@ -247,6 +258,7 @@ def test_discover_skips_gitignored_paths(tmp_path):
 
 @requires_git
 def test_discover_does_not_skip_tracked_paths(tmp_path):
+    """Sanity counterpart to gitignore filtering: with no .gitignore, every real source dir is still discovered."""
     # Sanity: with no .gitignore, every real source dir is still discovered.
     _git_init(tmp_path)
     _project(tmp_path)
@@ -256,6 +268,7 @@ def test_discover_does_not_skip_tracked_paths(tmp_path):
 
 
 def test_discover_non_git_repo_still_works(tmp_path):
+    """Fail-soft: with no .git, gitignore filtering is skipped (not an error) and DEFAULT_IGNORES-based discovery still works."""
     # No .git here: gitignore filtering fails soft, DEFAULT_IGNORES behavior is unchanged.
     assert not (tmp_path / ".git").exists()
     _project(tmp_path)
@@ -266,6 +279,7 @@ def test_discover_non_git_repo_still_works(tmp_path):
 
 # ---- explicit "0 written / N skipped" signal (FIX) ----
 def test_discover_apply_zero_written_emits_notice(tmp_path):
+    """A re-apply that writes 0 new manifests emits a notice pointing at `calibrate`, so the user isn't silently confused by a no-op."""
     _project(tmp_path)
     first = run_discover(tmp_path, apply=True)
     assert "notice" not in first  # real manifests were written -> no confusing notice
@@ -279,6 +293,7 @@ def test_discover_apply_zero_written_emits_notice(tmp_path):
 
 
 def test_discover_dry_run_has_no_notice(tmp_path):
+    """A dry-run (no apply) emits no 'wrote/skipped' notice — the notice only describes actual writes, never a preview."""
     _project(tmp_path)
     result = run_discover(tmp_path)  # dry-run never claims to have written anything
     assert "notice" not in result
@@ -286,6 +301,7 @@ def test_discover_dry_run_has_no_notice(tmp_path):
 
 # ---- SQL/schema directory mapping (FIX) ----
 def test_discover_maps_sql_schema_dir_regardless_of_count(tmp_path):
+    """A migration dir is always kept and scored 'schema' (never count-dropped), with its folded table surface materialized."""
     # A migration set folds to one table surface, so it must be kept even when its file
     # count would otherwise score 'low' (here a single migration) AND when it is large.
     mig = tmp_path / "supabase" / "migrations"
@@ -304,6 +320,7 @@ def test_discover_maps_sql_schema_dir_regardless_of_count(tmp_path):
 
 
 def test_discover_large_schema_dir_not_dropped(tmp_path):
+    """A large migration dir (60 files, past the old >50 'low' cap) is still kept as schema with all 60 tables folded in."""
     mig = tmp_path / "db" / "migrations"
     mig.mkdir(parents=True)
     for i in range(60):  # well over the old >50 'low' cap
@@ -316,6 +333,7 @@ def test_discover_large_schema_dir_not_dropped(tmp_path):
 
 
 def test_schema_classification_falls_back_to_extension_when_extraction_fails(tmp_path):
+    """Fail-soft: when files yield no extract, schema is classified by extension (.sql majority), so a real migration dir isn't dropped."""
     # A .sql/.prisma file missing from `extracts` (e.g. oversized/unreadable/unparsable, which
     # yields no extract) must still count as schema via its extension — otherwise a real
     # migration dir could be misclassified and dropped, breaking the always-keep guarantee.
@@ -330,6 +348,7 @@ def test_schema_classification_falls_back_to_extension_when_extraction_fails(tmp
 
 
 def test_discover_maps_migration_dir_with_oversized_unextracted_file(tmp_path):
+    """End-to-end fail-soft: a migrations dir with an oversized (unextracted) .sql is still kept and scored schema."""
     # End-to-end: a migrations dir whose files don't all extract is still kept as schema.
     mig = tmp_path / "supa" / "migrations"
     mig.mkdir(parents=True)
@@ -343,6 +362,7 @@ def test_discover_maps_migration_dir_with_oversized_unextracted_file(tmp_path):
 
 
 def test_discover_large_code_dir_kept_not_silently_dropped(tmp_path):
+    """A large code dir (60 files) is kept and scored 'high', never silently dropped — discovery must not hide a repo's biggest surfaces."""
     # A legitimately large code directory (>50 files) is mapped, never silently dropped —
     # hiding a repo's biggest surfaces is the opposite of discovery's job.
     big = tmp_path / "src" / "components"
@@ -353,3 +373,38 @@ def test_discover_large_code_dir_kept_not_silently_dropped(tmp_path):
     comp = next((c for c in result["candidates"] if c["name"] == "components"), None)
     assert comp is not None and comp["dropped"] is False
     assert comp["score"] == "high"
+
+
+def test_discover_auto_populates_tests_by_convention(tmp_path):
+    """A fresh discover already links a subsystem's tests by convention (a mirrored tests/<name>/ dir
+    → subsystem <name>), so the user does very little — a directory glob is preferred over files."""
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    for i in range(5):  # 5 files → `auth` is a kept subsystem named exactly `auth`
+        (auth / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    tests_auth = tmp_path / "tests" / "auth"
+    tests_auth.mkdir(parents=True)
+    (tests_auth / "test_login.py").write_text("def test_login():\n    pass\n")  # 1 file → not its own subsystem
+    _git_init(tmp_path)
+    result = run_discover(tmp_path)
+    auth_cand = next(c for c in result["candidates"] if c["name"] == "auth" and not c["dropped"])
+    # tests/auth/ maps to `auth` by name-segment convention; the whole dir maps cleanly so it
+    # collapses to the dir glob (token-lean), not the individual file.
+    assert auth_cand["tests"] == ["tests/auth"]
+
+
+def test_discover_applied_manifest_carries_tests(tmp_path):
+    """--apply writes the convention-linked `tests:` into the manifest, so a fresh discover produces
+    a manifest that already maps source↔tests with no hand-editing."""
+    billing = tmp_path / "billing"
+    billing.mkdir()
+    for i in range(5):
+        (billing / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    tests_billing = tmp_path / "tests" / "billing"
+    tests_billing.mkdir(parents=True)
+    (tests_billing / "test_charge.py").write_text("def test_charge():\n    pass\n")
+    _git_init(tmp_path)
+    run_discover(tmp_path, apply=True)
+    man = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR / "billing.yaml"
+    doc = yaml.safe_load(man.read_text())
+    assert doc["tests"] == ["tests/billing"]

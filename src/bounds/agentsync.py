@@ -516,9 +516,10 @@ _AGENT_ARTIFACTS: dict[str, tuple[_Artifact, ...]] = {
     "codex": (_Artifact(".codex/skills/bounds/SKILL.md", _MARKDOWN, _SKILL_BODY, _skill_front()),),
     # Gemini: TOML custom command -> /bounds.
     "gemini": (_Artifact(".gemini/commands/bounds.toml", _YAML, _GEMINI_TOML_BODY),),
-    # OpenCode: Markdown custom command -> /bounds (singular `command/` dir matches the config key).
+    # OpenCode: Markdown custom command -> /bounds (project commands live in `.opencode/commands/`,
+    # plural — see https://opencode.ai/docs/commands/; the singular dir was never discovered).
     "opencode": (
-        _Artifact(".opencode/command/bounds.md", _MARKDOWN, _OPENCODE_CMD_BODY,
+        _Artifact(".opencode/commands/bounds.md", _MARKDOWN, _OPENCODE_CMD_BODY,
                   f"---\ndescription: {_ARTIFACT_DESC}\nagent: build\n---\n"),
     ),
     # Copilot: prompt file -> /bounds.

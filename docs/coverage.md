@@ -7,27 +7,33 @@ coverage signal and how a human *or an AI* closes a gap.
 
 ## The signal
 
-`bounds validate` and `bounds discover` report mapping coverage over the repo's **source code**
-(docs/config/assets are excluded so they can't dilute the number):
+`bounds validate` and `bounds discover` report mapping coverage over the repo's **library source
+code** (docs/config/assets are excluded so they can't dilute the number; **test files are excluded
+too** and tracked in their own bucket — see *Docs & tests* below):
 
 ```jsonc
 // bounds validate  →  stats.coverage.mapping
 {
-  "files_source_total": 8,
+  "files_source_total": 8,             // NON-TEST library source only
   "files_mapped": 3,
   "files_unmapped": 5,
-  "mapped_pct": 37.5,
+  "mapped_pct": 37.5,                   // over non-test library source
   "unmapped_unowned_supported": 0,     // supported language, just not in a manifest yet
   "unmapped_unsupported_language": 5,  // no adapter for this language yet
   "unmapped_by_language": { "go": 5 },
-  "unsupported_languages": ["go"]
+  "unsupported_languages": ["go"],
+  // Informational linkage buckets — tracked, NEVER a blocking gap (see "Docs & tests"):
+  "tests": { "total": 12, "linked": 11, "unlinked": 1, "unlinked_sample": ["tests/misc.py"] },
+  "docs":  { "total": 6,  "linked": 4,  "unlinked": 2, "unlinked_sample": ["docs/notes.md"] }
 }
 ```
 
 When `files_unmapped > 0`, `validate` emits one **loud, non-blocking** `E_COVERAGE_GAP` warning and
-`discover` adds a `next_step` — e.g. *"mapped 37.5% of source (3/8 files); unmapped: 5 in unsupported
-languages (go×5)"* with the fix below. It is a **warning, not an error**: an incomplete map is
-honest, not a CI failure on its own (you opt into stricter gates — see *CI* below).
+`discover` adds a `next_step` — e.g. *"mapped 37.5% of library source (3/8 non-test files); unmapped:
+5 in unsupported languages (go×5) (tests/docs are tracked separately, never a gap)"* with the fix
+below. It is a **warning, not an error**: an incomplete map is honest, not a CI failure on its own
+(you opt into stricter gates — see *CI* below). **The gap fires only on unmapped non-test library
+source** — a repo's tests can never drag the % down or be flagged.
 
 Two kinds of gap, two fixes:
 
@@ -35,6 +41,48 @@ Two kinds of gap, two fixes:
 |-----|---------------|-----------------|
 | **unowned-supported** | Bounds *has* an adapter (Python/TS/JS/SQL/Prisma) but the file is in no subsystem's `paths` | add it to a manifest — deterministic, no AI needed |
 | **unsupported language** | no adapter yet (Go, Rust, Java, …) | hand-author (or AI-author) a manifest in the format below, then verify |
+
+## Docs & tests — mapping source ↔ docs ↔ tests
+
+A subsystem can link the **docs** and **test** files that cover it, so coverage maps the full triangle
+of source ↔ docs ↔ tests. This uses a **hybrid model**: optional explicit manifest fields plus
+convention auto-detection, with **explicit always winning**.
+
+```yaml
+name: auth
+role: library
+paths:
+  - src/auth
+docs:                      # optional, authoritative — repo-relative file / dir / glob (same shape as paths)
+  - docs/auth.md
+tests:                     # optional, authoritative
+  - tests/auth             # a whole directory
+  - tests/test_auth_edge.py
+```
+
+- **Explicit `docs:`/`tests:`** are human-curated and authoritative — the most-specific declaration
+  wins, exactly like `paths`/`files`.
+- **Convention auto-detection** supplements them with zero config:
+  - a test file directly under a subsystem's `paths`, or under `tests/<name>/`, `test/<name>/`,
+    `__tests__/<name>/`, or named `test_<name>.py` / `<name>.test.ts` / `<name>.spec.ts`, links to a
+    subsystem named `<name>`;
+  - a doc `docs/<name>.*` or `<name>.md` whose stem equals a subsystem name links to it.
+- **`bounds discover` auto-populates `tests:`** (and `docs:`) from convention on a fresh run, so a new
+  repo already maps its tests with little or no hand-editing (a whole directory collapses to one glob
+  to keep manifests token-lean).
+
+**Tests and docs are tracked, never a blocking gap.** They are excluded from the source denominator
+(`mapped_pct` is over non-test library source) and reported only in the informational `tests`/`docs`
+buckets — an unlinked test or doc is surfaced (so you *can* link it) but never fires `E_COVERAGE_GAP`
+and never fails CI. This is deliberate: no repo's tests get flagged as an unmapped-source gap by
+default. `bounds describe <name> --full` shows a subsystem's linked docs/tests (explicit + convention).
+
+## 100%-or-guidance
+
+Library source aims for **100% mapped**, and when a gap remains the report names the **exact minimal
+manifest action** to close it (add the file to a subsystem's `paths:`, or scaffold one with
+`bounds init --subsystem <name>`). Tests and docs are *tracked* toward full linkage but are never a
+blocking gap — so "100%" is a goal for source, and a visible, opt-in target for docs/tests.
 
 ## Closing a gap (humans and AI)
 

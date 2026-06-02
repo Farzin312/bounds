@@ -1,0 +1,12 @@
+# .boundsignore — exclude non-library tooling from Bounds analysis.
+# Gitignore-style globs, matched against repo-relative POSIX paths.
+# Only library source under src/bounds/ is modeled by .bounds/ manifests; the
+# entries below are build/packaging/benchmark tooling, not the shipped library.
+
+# Packaging / install tooling
+setup.py
+install.sh
+Formula/
+
+# Benchmark harness (measurement scripts, not library code)
+benchmarks/

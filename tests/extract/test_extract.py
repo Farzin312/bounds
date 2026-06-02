@@ -40,12 +40,14 @@ export default function mainFn() {}
 
 # ---- Python adapter ----
 def test_python_adapter_resolves_by_extension():
+    """registry.get_adapter must dispatch a .py file to the python adapter purely by extension — the one is-this-language-X check."""
     adapter = get_adapter("mod.py")
     assert adapter is not None
     assert adapter.language_name == "python"
 
 
 def test_python_exports_public_symbols_only():
+    """The public surface must exclude leading-underscore names — a leaked _private would bloat the token-lean export map describe emits."""
     res = get_adapter("mod.py").extract("mod.py", PY_SRC)
     exported = {s.name for s in res.symbols if s.exported}
     assert "public_fn" in exported
@@ -54,6 +56,7 @@ def test_python_exports_public_symbols_only():
 
 
 def test_python_symbol_kinds():
+    """Symbol kind classification must distinguish function/class/const/variable — kind drives describe rendering and contract checks downstream."""
     res = get_adapter("mod.py").extract("mod.py", PY_SRC)
     kinds = {s.name: s.kind for s in res.symbols}
     assert kinds["public_fn"] == "function"
@@ -63,6 +66,7 @@ def test_python_symbol_kinds():
 
 
 def test_python_imports():
+    """Import edges (module + imported names) must be captured — they are the propagation graph validate walks; a dropped edge hides a real dependency."""
     res = get_adapter("mod.py").extract("mod.py", PY_SRC)
     modules = {imp.module for imp in res.imports}
     assert "os" in modules
@@ -72,6 +76,7 @@ def test_python_imports():
 
 
 def test_python_orm_model_exports_table_name():
+    """Django Meta.db_table and SQLAlchemy __tablename__ must surface as the real table name, not the class name — the schema surface keys on table identity."""
     src = b"""from django.db import models
 
 class User(models.Model):
@@ -88,11 +93,13 @@ class Account(Base):
 
 # ---- TypeScript adapter ----
 def test_typescript_adapter_resolves_ts_and_tsx():
+    """Both .ts and .tsx must dispatch to the typescript adapter — a missed .tsx extension would silently drop every React component file from the map."""
     assert get_adapter("auth.ts").language_name == "typescript"
     assert get_adapter("comp.tsx") is not None
 
 
 def test_typescript_exports_all_declaration_kinds():
+    """Every exported TS declaration form (function/const/class/interface/type/default) must surface with its correct kind — a missed form undercounts the public API."""
     res = get_adapter("auth.ts").extract("auth.ts", TS_SRC)
     exported = {s.name for s in res.symbols if s.exported}
     assert {"login", "verify", "Repo", "User", "Id", "mainFn"} <= exported
@@ -104,12 +111,14 @@ def test_typescript_exports_all_declaration_kinds():
 
 
 def test_typescript_internal_not_exported():
+    """A function without the `export` keyword must be marked exported=False — leaking module-internal helpers into the public surface bloats the token map."""
     res = get_adapter("auth.ts").extract("auth.ts", TS_SRC)
     by_name = {s.name: s.exported for s in res.symbols}
     assert by_name.get("internalHelper") is False
 
 
 def test_typescript_imports():
+    """A TS named import must record both the module specifier and the imported names — these edges feed the resolver and propagation graph."""
     res = get_adapter("auth.ts").extract("auth.ts", TS_SRC)
     modules = {i.module for i in res.imports}
     assert "../database" in modules
@@ -118,6 +127,7 @@ def test_typescript_imports():
 
 
 def test_typescript_orm_exports_table_name():
+    """Drizzle pgTable("users",…) and a @Entity("accounts") decorator must yield the declared table name — the data-boundary surface keys on real table identity, not the JS binding."""
     src = b"""import { pgTable } from "drizzle-orm/pg-core";
 export const users = pgTable("users", {});
 
@@ -141,35 +151,42 @@ def _py_kinds(src: bytes) -> dict[str, str]:
 
 # ---- Python ORM false-positives / false-negatives ----
 def test_orm_django_abstract_model_is_not_a_table():
+    """An abstract Django base must not fabricate a phantom table — a false-positive table pollutes the schema surface and triggers spurious data-boundary contract checks."""
     # Meta.abstract = True is a base/mixin, never a real table (no false positive).
     assert _py_tables(b"class Base(models.Model):\n    class Meta:\n        abstract = True\n") == {}
 
 
 def test_orm_tablename_substring_is_not_a_table():
+    """A class whose body merely mentions "__tablename__" inside a string stays a class, not a table — detection must be structural, not a substring match (no false positive)."""
     # A string literal that merely contains "__tablename__" must not fabricate a table.
     assert _py_kinds(b'class Foo(Bar):\n    note = "see __tablename__ docs"\n')["Foo"] == "class"
 
 
 def test_orm_fstring_tablename_falls_back_to_class_name():
+    """A dynamic f-string __tablename__ is not statically knowable, so the table name falls back to the class name rather than fabricating a bogus literal (zero-LLM, static-only)."""
     # A dynamic f-string name is not statically knowable → fall back, don't fabricate.
     assert _py_tables(b'class A(Base):\n    __tablename__ = f"p_{x}"\n') == {"A": "A"}
 
 
 def test_orm_sqlalchemy_imperative_table_is_detected():
+    """SQLAlchemy's imperative __table__ = Table("widgets",…) form must be detected, not just declarative __tablename__ — both spellings map to the same real table."""
     assert _py_tables(b'class A(Base):\n    __table__ = Table("widgets", meta)\n') == {"widgets": "A"}
 
 
 def test_orm_plain_class_stays_class():
+    """A class with no ORM markers stays kind=class — ORM table detection must not over-trigger on ordinary classes (no false positive)."""
     assert _py_kinds(b"class Foo(Bar):\n    pass\n")["Foo"] == "class"
 
 
 def test_orm_typeorm_entity_object_name_form():
+    """TypeORM's @Entity({ name: "accounts" }) options-object form must yield the declared table name, like the positional @Entity("accounts") form — both spellings are real."""
     src = b'@Entity({ name: "accounts" })\nexport class Account {}\n'
     res = get_adapter("e.ts").extract("e.ts", src)
     assert {s.name: s.metadata.get("model") for s in res.symbols if s.kind == "table"} == {"accounts": "Account"}
 
 
 def test_orm_drizzle_sqlite_and_mysql_tables():
+    """Drizzle's sqliteTable/mysqlTable builders (not just pgTable) must be recognized — Bounds must cover every Drizzle dialect or it undercounts tables on non-Postgres repos."""
     src = (b'export const a = sqliteTable("a_tbl", {});\n'
            b'export const b = mysqlTable("b_tbl", {});\n')
     res = get_adapter("d.ts").extract("d.ts", src)
@@ -177,6 +194,7 @@ def test_orm_drizzle_sqlite_and_mysql_tables():
 
 
 def test_prisma_adapter_extracts_models_as_tables():
+    """Prisma models become tables: @@map("users") sets the table name and @map("post_title") renames a column — the surface reflects the mapped DB name, not the Prisma field name."""
     src = (b'model User {\n  id Int @id\n  email String\n  @@map("users")\n}\n'
            b'model Post {\n  id Int @id\n  title String @map("post_title")\n}\n')
     res = get_adapter("schema.prisma").extract("schema.prisma", src)
@@ -186,6 +204,7 @@ def test_prisma_adapter_extracts_models_as_tables():
 
 
 def test_prisma_brace_inside_string_does_not_desync():
+    """A brace inside a string default must not desync the model-block scanner — else model B is dropped or A gains a phantom 'model' column, corrupting the table surface."""
     # A `{`/`}` inside a string default must not swallow or split the next model.
     src = (b'model A {\n  id Int @id\n  cfg String @default("{")\n}\n'
            b'model B {\n  id Int @id\n}\n')
@@ -197,6 +216,7 @@ def test_prisma_brace_inside_string_does_not_desync():
 
 
 def test_prisma_relation_fields_are_not_columns():
+    """Prisma relation fields (model/enum-typed) are joins, not DB columns, so they must be excluded from a table's column surface — else describe reports phantom columns and a column-granular contract like User.posts passes check_contract incorrectly."""
     # Relation fields (PascalCase model/enum types) are joins, not database columns, so they
     # must not appear in a table's column surface — else `describe` reports phantom columns and
     # a column-granular contract like `User.posts` passes check_contract incorrectly.
@@ -223,6 +243,7 @@ def test_prisma_relation_fields_are_not_columns():
 
 
 def test_sql_adapter_extracts_ddl_operations():
+    """CREATE TABLE, ADD COLUMN, and RENAME COLUMN must each surface as a typed symbol carrying its schema_op — these ops are what the migration fold replays to derive the final table set."""
     src = b"""CREATE TABLE users (id integer primary key, email text);
 ALTER TABLE users ADD COLUMN name text;
 ALTER TABLE users RENAME COLUMN name TO full_name;
@@ -236,6 +257,7 @@ ALTER TABLE users RENAME COLUMN name TO full_name;
 
 
 def test_sql_adapter_extracts_functions_views_indexes_triggers_types():
+    """Functions/views/indexes/triggers/types must each surface as a typed symbol (with index/trigger recording their target table) — previously dropped, leaving the non-table schema surface blank."""
     # Grammar-native statements that were previously dropped: functions (RPCs), views,
     # indexes, triggers, and types must each surface as a typed symbol.
     src = b"""create or replace function public.bump() returns trigger language plpgsql as $$ begin return new; end; $$;
@@ -259,6 +281,7 @@ create type mood as enum ('happy', 'sad');
 
 
 def test_sql_adapter_recovers_policies_and_rls():
+    """tree-sitter-sql can't parse Postgres RLS; the adapter must recover policy + enable_rls from the misparse rather than drop them as schema_error, and emit no phantom column or error."""
     # tree-sitter-sql can't parse Postgres RLS; the adapter recovers policies from ERROR-node
     # text and RLS structurally from the misparsed alter, instead of dropping them as
     # schema_error, and emits no phantom column for the RLS statement.
@@ -279,6 +302,7 @@ create policy "owner can read" on profiles for select using (auth.uid() = id);
 
 
 def test_sql_disable_rls_is_recovered():
+    """DISABLE ROW LEVEL SECURITY must be recovered with schema_op=disable_rls (not dropped as schema_error) so the fold can net an enabled-then-disabled table out of the RLS posture."""
     res = get_adapter("d.sql").extract("d.sql", b"alter table bar disable row level security;\n")
     assert res.error is None
     rls = [s for s in res.symbols if s.kind == "rls"]
@@ -287,6 +311,7 @@ def test_sql_disable_rls_is_recovered():
 
 
 def test_sql_policy_in_a_comment_is_not_a_symbol():
+    """A commented-out CREATE POLICY must not produce a phantom policy — recovery scans only ERROR-node text and a comment is its own node type (no false positive)."""
     # Policy recovery scans only ERROR-node text; a comment is its own node type, never an
     # ERROR, so a commented-out CREATE POLICY must not produce a phantom policy symbol.
     src = b"-- create policy fake on nope for all using (true)\ncreate table t (id int);\n"
@@ -297,6 +322,7 @@ def test_sql_policy_in_a_comment_is_not_a_symbol():
 
 
 def test_sql_genuine_error_beside_policy_is_not_masked():
+    """A genuine broken statement beside a recoverable policy must still surface as schema_error — RLS/policy recovery must never discount a real parse error into silence (fail-soft, report-hard)."""
     # A real broken statement next to a policy must still report as schema_error — the RLS/
     # policy recovery must never discount a genuine parse error into silence.
     src = b"create table t (id int);\nalter table t add column;\ncreate policy p on t for all using (true);\n"
@@ -307,6 +333,7 @@ def test_sql_genuine_error_beside_policy_is_not_masked():
 
 
 def test_sql_broken_statement_fused_into_policy_error_is_not_masked():
+    """When tree-sitter fuses a CREATE POLICY and an adjacent broken statement into one ERROR node, recovering the policy must not mark the whole node explained — the adapter re-parses with policies blanked to recount the genuine error (report-hard)."""
     # tree-sitter fuses a CREATE POLICY and an adjacent broken statement into ONE ERROR node.
     # Recovering the policy must NOT mark the whole node "explained" and swallow the real
     # error: the adapter blanks recovered policies and re-parses to recount genuine errors.
@@ -318,6 +345,7 @@ def test_sql_broken_statement_fused_into_policy_error_is_not_masked():
 
 
 def test_sql_all_error_with_revision_header_is_hard_failure():
+    """A wholly-unparsable migration is a hard failure even with a valid `-- revision` header — the schema_meta header is not a parsed statement and must not be folded as a partial result that masks the breakage (report-hard)."""
     # A migration whose body is wholly unparsable is a hard extraction failure even when it
     # carries a valid `-- revision` header: the schema_meta header is not a parsed statement,
     # so it must not be folded as a partial/cached result that masks the breakage.
@@ -328,6 +356,7 @@ def test_sql_all_error_with_revision_header_is_hard_failure():
 
 
 def test_sql_ddl_inside_transaction_block_is_extracted():
+    """The Supabase BEGIN;…COMMIT; shape: the walk must descend into the transaction container so table, RLS, and policy are all recovered — none dropped because they're nested."""
     # The common Supabase shape: DDL wrapped in BEGIN; … COMMIT;. The walk must descend into
     # the transaction container — table, RLS, and policy are all recovered, none dropped.
     src = b"""BEGIN;
@@ -345,6 +374,7 @@ COMMIT;
 
 
 def test_sql_table_with_inline_constraint_is_recovered():
+    """A table-level CONSTRAINT clause errors the whole CREATE TABLE in tree-sitter-sql; best-effort recovery must keep the table + its columns and raise no schema_error (the unmodeled constraint tail is not a catalog loss)."""
     # tree-sitter-sql cannot parse a table-level CONSTRAINT clause and errors the whole
     # CREATE TABLE; best-effort recovery keeps the table + its columns (the unmodeled
     # constraint tail is not a catalog loss, so no schema_error is raised).
@@ -362,6 +392,7 @@ def test_sql_table_with_inline_constraint_is_recovered():
 
 
 def test_sql_table_name_is_canonical_bare_across_ops():
+    """A table CREATEd as public.t but ALTERed bare (or vice-versa) must canonicalise to one bare name — else the fold sees two tables and the ALTER never lands on the CREATE."""
     # A table CREATEd schema-qualified but ALTERed bare (and vice-versa) must fold to one
     # entry: every table reference canonicalises to its bare name.
     create = get_adapter("a.sql").extract("a.sql", b"CREATE TABLE public.t (id int);")
@@ -372,6 +403,7 @@ def test_sql_table_name_is_canonical_bare_across_ops():
 
 
 def test_sql_policy_lifecycle_create_drop_alter():
+    """DROP and ALTER POLICY must be extracted (not just CREATE), each carrying its schema_op so the fold can net a dropped or renamed policy out of the live RLS surface."""
     # DROP/ALTER POLICY are extracted (not just CREATE), each carrying its schema_op so the
     # fold can net a dropped or renamed policy out of the live surface.
     src = b"""CREATE POLICY p ON t FOR ALL USING (true);
@@ -387,12 +419,14 @@ ALTER POLICY q ON t RENAME TO q2;
 
 
 def test_sql_force_rls_is_recovered():
+    """FORCE ROW LEVEL SECURITY (the owner-bypass-off variant) must be recovered with schema_op=force_rls so the RLS posture distinguishes it from a plain enable."""
     res = get_adapter("f.sql").extract("f.sql", b"ALTER TABLE t FORCE ROW LEVEL SECURITY;\n")
     rls = [s for s in res.symbols if s.kind == "rls"]
     assert rls and rls[0].metadata.get("schema_op") == "force_rls"
 
 
 def test_sql_policy_in_string_literal_is_not_a_symbol():
+    """A 'CREATE POLICY …' string in seed data (INSERT values) must be masked, never a phantom policy — string contents are not DDL (no false positive)."""
     # A 'CREATE POLICY …' string inside seed data (or an EXECUTE) is masked, never a phantom.
     src = b"INSERT INTO audit (action) VALUES ('CREATE POLICY hacker ON t FOR ALL USING (true)');\n"
     res = get_adapter("s.sql").extract("s.sql", src)
@@ -400,6 +434,7 @@ def test_sql_policy_in_string_literal_is_not_a_symbol():
 
 
 def test_sql_policy_in_dollar_quoted_body_is_not_a_symbol():
+    """A CREATE POLICY inside a $$-quoted function body must be masked (never a phantom) while a real CREATE POLICY beside the function is still recovered — body text is not live DDL."""
     # A CREATE POLICY inside a function body ($$ … $$ / EXECUTE) is masked, never a phantom —
     # tree-sitter spans only the $$ delimiters, so the body is blanked textually. The real
     # CREATE POLICY beside the function is still recovered; the in-body one never is.
@@ -416,6 +451,7 @@ $$;
 
 
 def test_sql_policy_line_number_correct_with_multibyte_identifier():
+    """A multibyte char (café ☕) before a policy must not desync its line number or blank span — byte/char-offset parity, else error counts and adjacent statements get mis-attributed."""
     # Byte/char-offset parity: a multibyte char before a policy must not desync its line number
     # or the blank span (which would mis-count errors or eat an adjacent statement).
     src = "-- café ☕ comment\ncreate policy p on t for all using (true);\n".encode("utf-8")
@@ -425,6 +461,7 @@ def test_sql_policy_line_number_correct_with_multibyte_identifier():
 
 
 def test_sql_fragmented_pgdump_recovers_policies():
+    """A pg_dump-style file the grammar shreds into many ERROR fragments must still yield all its policies — recovery scans masked text rather than a single clean node."""
     # A pg_dump-style file the grammar shreds into many ERROR fragments still yields its
     # policies, because recovery scans masked text rather than a single clean node.
     src = (b'CREATE POLICY "a" ON "public"."t1" FOR SELECT USING (true);\n'
@@ -449,6 +486,7 @@ exports.flag = true;
 
 
 def test_commonjs_require_becomes_import_edge():
+    """Plain, destructured, and bare side-effect require() calls must all record an import edge — CommonJS deps are part of the same propagation graph as ESM imports."""
     res = get_adapter("io.cjs").extract("io.cjs", CJS_SRC)
     modules = {i.module for i in res.imports}
     # Plain, destructured, and bare side-effect requires all record an edge.
@@ -456,6 +494,7 @@ def test_commonjs_require_becomes_import_edge():
 
 
 def test_commonjs_module_exports_become_symbols():
+    """module.exports = helper exports `default`, while module.exports.named and exports.flag export their property names — all three CommonJS export forms surface in the public API."""
     res = get_adapter("io.cjs").extract("io.cjs", CJS_SRC)
     exported = {s.name for s in res.symbols if s.exported}
     # `module.exports = helper` -> default; named property assignments -> their names.
@@ -465,6 +504,7 @@ def test_commonjs_module_exports_become_symbols():
 
 
 def test_commonjs_chained_named_exports_become_symbols():
+    """A chained assignment `exports.foo = exports.bar = helper` must export BOTH names, not just the outermost — a missed inner name undercounts the public surface."""
     # `exports.foo = exports.bar = helper` exports BOTH names, not just the outermost.
     res = get_adapter("chain.cjs").extract(
         "chain.cjs", b"function helper() {}\nexports.foo = exports.bar = helper;\n"
@@ -475,6 +515,7 @@ def test_commonjs_chained_named_exports_become_symbols():
 
 
 def test_commonjs_dynamic_require_records_no_edge():
+    """require() with a non-literal argument has no statically knowable module, so no edge is recorded — the static-only extractor must not fabricate an edge from a variable name (zero-LLM)."""
     # require() with a non-literal argument has no statically knowable module.
     res = get_adapter("dyn.js").extract(
         "dyn.js", b'const name = "x";\nconst mod = require(name);\nconst ok = require("static");\n'
@@ -486,6 +527,7 @@ def test_commonjs_dynamic_require_records_no_edge():
 
 # ---- TypeScript/JS: barrel re-exports ----
 def test_barrel_export_star_records_import_edge():
+    """`export * from "./m"` records an import edge (it's a propagation dependency) but is intentionally NOT expanded into symbols — the cross-file union stays unexpanded."""
     # `export * from "./m"` is a propagation dependency; capture it as an import edge.
     res = get_adapter("barrel.ts").extract("barrel.ts", b'export * from "./m";\n')
     modules = {i.module for i in res.imports}
@@ -495,6 +537,7 @@ def test_barrel_export_star_records_import_edge():
 
 
 def test_barrel_export_star_as_namespace():
+    """`export * as ns from "./other"` records the edge AND binds the named namespace symbol `ns` — unlike bare `export *`, the namespace alias is a concrete export to surface."""
     # `export * as ns from "./m"` records the edge AND binds the namespace symbol `ns`.
     res = get_adapter("barrel.ts").extract("barrel.ts", b'export * as ns from "./other";\n')
     modules = {i.module for i in res.imports}
@@ -504,6 +547,7 @@ def test_barrel_export_star_as_namespace():
 
 
 def test_esm_named_reexport_still_records_edge_and_symbols():
+    """`export { a as b, c } from "./named"` must keep BOTH the import edge and the re-exported symbols (b, c) — a re-export is simultaneously a dependency and a public surface entry."""
     # Regression guard: `export { a as b } from "mod"` keeps both symbol and edge.
     res = get_adapter("re.ts").extract("re.ts", b'export { a as b, c } from "./named";\n')
     modules = {i.module for i in res.imports}
@@ -514,6 +558,7 @@ def test_esm_named_reexport_still_records_edge_and_symbols():
 
 # ---- registry ----
 def test_supported_extensions():
+    """The registry must advertise every adapter's extension (.py/.ts/.tsx/.sql) — this set gates which files the recursive source walk feeds to extraction."""
     exts = supported_extensions()
     assert ".py" in exts
     assert ".ts" in exts
@@ -522,17 +567,20 @@ def test_supported_extensions():
 
 
 def test_unsupported_extension_returns_none():
+    """An unsupported extension (.md, .rs) returns None rather than raising — the walk silently skips it, never crashing on a mixed repo (fail-soft)."""
     assert get_adapter("README.md") is None
     assert get_adapter("main.rs") is None
 
 
 # ---- hashing ----
 def test_content_hash_is_deterministic_and_sensitive():
+    """content_hash must be stable for identical bytes and differ for any byte change — it is the cache key the quick path uses to skip re-extracting unchanged files (determinism)."""
     assert content_hash(b"abc") == content_hash(b"abc")
     assert content_hash(b"abc") != content_hash(b"abd")
 
 
 def test_structure_hash_ignores_body_changes():
+    """structure_hash must stay identical when only a function body changes (same interface) while content_hash differs — this is what lets the quick path skip propagation on body-only edits."""
     adapter = get_adapter("m.py")
     a = adapter.extract("m.py", b"def f():\n    return 1\n")
     b = adapter.extract("m.py", b"def f():\n    return 2  # different body\n")
@@ -541,6 +589,7 @@ def test_structure_hash_ignores_body_changes():
 
 
 def test_structure_hash_changes_on_new_export():
+    """structure_hash must change when a new export is added — otherwise the quick path would skip propagating an interface change and miss a downstream contract break."""
     adapter = get_adapter("m.py")
     a = adapter.extract("m.py", b"def f():\n    return 1\n")
     b = adapter.extract("m.py", b"def f():\n    return 1\n\n\ndef g():\n    return 2\n")
@@ -548,6 +597,7 @@ def test_structure_hash_changes_on_new_export():
 
 
 def test_parse_failure_is_soft():
+    """A syntactically broken Python file must return a result (with language set), never raise — a single unparsable file becomes an Issue, not a crash (fail-soft)."""
     # tree-sitter is error-tolerant; a broken file must never raise.
     res = get_adapter("m.py").extract("m.py", b"def (((:\n")
     assert res is not None

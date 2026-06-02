@@ -32,8 +32,18 @@ import yaml
 
 from . import config, errors, gitutil, tsconfig
 from .extract import adapter_for_language
-from .extract.scan import extract_file, iter_repo_source, mapping_coverage
-from .ignore import load_matcher
+from .extract.scan import (
+    extract_file,
+    is_framework_entry_file,
+    is_test_file,
+    is_test_symbol,
+    iter_repo_source,
+    mapping_coverage,
+    resolve_doc_owners,
+    resolve_test_owners,
+)
+from .ignore import IgnoreMatcher, load_matcher
+from .models import SubsystemCompact
 from .validate.checks import index_extracts, resolve_import
 from .validate.schema import SCHEMA_LANGUAGES, schema_catalog
 
@@ -140,6 +150,11 @@ def run_discover(
         if cand.get("consumes"):
             cand["consumes"] = [c for c in cand["consumes"] if c in kept_set]
 
+    # Auto-link tests (and docs) by convention so a fresh discover already maps them — the user does
+    # very little. Conservative: only convention-confident files, collapsed to directory globs when a
+    # directory maps wholly to one subsystem (token-lean). Resolved against the KEPT subsystems.
+    _link_tests_docs(project_root, matcher, gitutil.repo_root(project_root) or project_root, candidates)
+
     # Languages actually present in the extracted source — so root.yaml reflects the repo instead
     # of init's hardcoded `[python]` default (a pure-TS/Prisma repo must not claim to be Python).
     detected_languages = sorted({r.language for r in extracts.values() if getattr(r, "language", None)})
@@ -158,11 +173,18 @@ def run_discover(
         applied = True
 
     # Mapping coverage: how much SOURCE the proposal actually covers — surfaced right here so a
-    # polyglot repo can't look fully discovered while an unsupported language sits unmapped.
+    # polyglot repo can't look fully discovered while an unsupported language sits unmapped. Test
+    # files are excluded from the source denominator and reported in their own bucket (subsystems
+    # passed so the doc/test linkage buckets reflect the discovered subsystems' paths).
     owned = {rel for rel, cand in file_to_candidate.items() if cand in kept_set}
+    cov_subs = {
+        c["name"]: SubsystemCompact(name=c["name"], paths=list(c.get("paths") or []),
+                                    tests=list(c.get("tests") or []), docs=list(c.get("docs") or []))
+        for c in candidates if not c.get("dropped")
+    }
     coverage = mapping_coverage(
         project_root, owned, matcher,
-        repo=gitutil.repo_root(project_root) or project_root,
+        repo=gitutil.repo_root(project_root) or project_root, subsystems=cov_subs,
     )
 
     result = {
@@ -356,6 +378,78 @@ def _candidate_paths(name: str, files: list[str]) -> list[str]:
     return covering or [name]
 
 
+def _link_tests_docs(
+    project_root: Path,
+    matcher: IgnoreMatcher | None,
+    repo: Path,
+    candidates: list[dict],
+) -> None:
+    """Attach convention-detected ``tests``/``docs`` link entries to each kept candidate, in place.
+
+    Builds a :class:`SubsystemCompact` per kept candidate (only ``paths`` matter for resolution),
+    runs :func:`resolve_test_owners`/:func:`resolve_doc_owners` against them, groups the linked files
+    by owner, and collapses each owner's files to minimal directory globs (token-lean) via
+    :func:`_collapse_link_paths`. Unlinked files are skipped (conservative — only confident maps).
+    Deterministic: sorted throughout.
+    """
+    kept = [c for c in candidates if not c.get("dropped")]
+    if not kept:
+        return
+    subs = {
+        c["name"]: SubsystemCompact(name=c["name"], paths=list(c.get("paths") or []))
+        for c in kept
+    }
+    test_owners = resolve_test_owners(project_root, subs, matcher, repo)
+    doc_owners = resolve_doc_owners(project_root, subs, matcher, repo)
+    by_owner_tests: dict[str, list[str]] = {}
+    for rel, owner in test_owners.items():
+        if owner is not None:
+            by_owner_tests.setdefault(owner, []).append(rel)
+    by_owner_docs: dict[str, list[str]] = {}
+    for rel, owner in doc_owners.items():
+        if owner is not None:
+            by_owner_docs.setdefault(owner, []).append(rel)
+    for cand in kept:
+        tests = _collapse_link_paths(sorted(by_owner_tests.get(cand["name"], [])), test_owners, cand["name"])
+        docs = _collapse_link_paths(sorted(by_owner_docs.get(cand["name"], [])), doc_owners, cand["name"])
+        if tests:
+            cand["tests"] = tests
+        if docs:
+            cand["docs"] = docs
+
+
+def _collapse_link_paths(files: list[str], owners: dict[str, str | None], owner: str) -> list[str]:
+    """Collapse a sorted list of linked files to minimal directory globs where one dir maps cleanly.
+
+    A directory is substituted for its individual files only when EVERY linked file in ``owners``
+    under that directory belongs to ``owner`` (so a shared ``tests/`` dir split across subsystems is
+    never over-claimed). Files in a not-cleanly-owned directory are listed individually. Keeps
+    manifests token-lean (prefer ``tests/extract`` over enumerating every file) while staying correct.
+    Deterministic: sorted output, ancestor-covers-descendant dedup.
+    """
+    # Directories whose every linked file (across all owners) belongs to `owner` are collapsible.
+    files_by_dir: dict[str, list[str]] = {}
+    for rel in files:
+        files_by_dir.setdefault(Path(rel).parent.as_posix(), []).append(rel)
+    all_by_dir: dict[str, list[str]] = {}
+    for rel, o in owners.items():
+        all_by_dir.setdefault(Path(rel).parent.as_posix(), []).append((rel, o))  # type: ignore[arg-type]
+    out: list[str] = []
+    for d in sorted(files_by_dir):
+        siblings = all_by_dir.get(d, [])
+        clean = all(o == owner for _rel, o in siblings)
+        if clean and d not in ("", "."):
+            out.append(d)  # whole directory maps to this owner — collapse to the dir glob
+        else:
+            out.extend(files_by_dir[d])  # mixed/owner-shared dir — list files individually
+    # Dedup any dir already covered by an ancestor dir in the set (sorted ⇒ ancestor precedes).
+    covering: list[str] = []
+    for entry in sorted(out):
+        if not any(entry == c or entry.startswith(c + "/") for c in covering):
+            covering.append(entry)
+    return covering
+
+
 # ---------------------------------------------------------------------------
 # Scoring + inference
 # ---------------------------------------------------------------------------
@@ -428,25 +522,6 @@ def _infer_criticality(consumed_by: int) -> str:
     return "leaf"
 
 
-_TEST_DIR_PARTS = {"tests", "test", "__tests__", "spec", "specs", "e2e"}
-
-
-def _is_test_file(rel: str) -> bool:
-    """A test file by directory or filename convention (pytest / Jest / Vitest / Mocha)."""
-    parts = rel.split("/")
-    if any(p in _TEST_DIR_PARTS for p in parts[:-1]):
-        return True
-    stem = parts[-1]
-    return (stem.startswith("test_") or stem.startswith("test.")
-            or "_test." in stem or ".test." in stem or ".spec." in stem or "_spec." in stem
-            or "conftest." in stem)
-
-
-def _is_test_symbol(name: str, kind: str) -> bool:
-    """A test case, not public API: a ``test_*`` function or a ``Test*`` class (xUnit/pytest)."""
-    return name.startswith("test_") or (kind == "class" and name.startswith("Test"))
-
-
 def _exposes_for(files: list[str], extracts: dict, generated: set[str]) -> list[dict]:
     """Every exported, non-private symbol across a candidate's files, verified by tree-sitter.
 
@@ -458,12 +533,22 @@ def _exposes_for(files: list[str], extracts: dict, generated: set[str]) -> list[
     for rel in files:
         if rel in generated or rel not in extracts:
             continue
-        is_test = _is_test_file(rel)
+        if is_framework_entry_file(rel):
+            continue  # a Next.js page/layout/route entry — framework-invoked, not a consumable API
+        is_test = is_test_file(rel)
         for sym in extracts[rel].symbols:
-            if not sym.exported or sym.name.startswith("_") or sym.name in seen:
+            if not sym.exported or sym.name.startswith("_"):
                 continue
-            if is_test and _is_test_symbol(sym.name, sym.kind):
+            if is_test and is_test_symbol(sym.name, sym.kind):
                 continue  # a test case is not a consumable interface
+            # When the same exported name appears in several files (a barrel `export { Foo }
+            # from "./foo"` re-exporting `foo.ts`'s `class Foo`), keep the entry whose kind is
+            # a real declaration over a bare re-export `unknown`, so `kind`/`file` point at the
+            # definition. First-seen wins among equally-declared entries (files are sorted, so
+            # this is deterministic).
+            prior = seen.get(sym.name)
+            if prior is not None and not (prior["kind"] == "unknown" and sym.kind != "unknown"):
+                continue
             seen[sym.name] = {"name": sym.name, "kind": sym.kind, "file": rel, "verified": True}
     return [seen[n] for n in sorted(seen)]
 
@@ -526,6 +611,12 @@ def _write(project_root: Path, root_proposal: dict, candidates: list[dict]) -> t
         doc["paths"] = cand["paths"]
         doc["exposes"] = [{"name": e["name"], "kind": e["kind"]} for e in cand["exposes"]]
         doc["consumes"] = [{"subsystem": s} for s in cand["consumes"]]
+        # Convention-linked tests/docs (only when discover confidently mapped some) — already
+        # sorted/collapsed, so a fresh discover links them and the user does very little.
+        if cand.get("tests"):
+            doc["tests"] = cand["tests"]
+        if cand.get("docs"):
+            doc["docs"] = cand["docs"]
         man_path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
         written.append(rel)
     return written, skipped

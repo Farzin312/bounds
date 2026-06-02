@@ -14,3 +14,5 @@ exposes:
   - { name: FileRecord, kind: class }
 consumes:
   - { subsystem: models, via: models, interfaces: [ExtractResult, Symbol, ImportRef] }
+tests:
+  - tests/cache

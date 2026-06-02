@@ -236,6 +236,24 @@ def validate_subsystem(
             )
         )
 
+    # ``docs``/``tests`` link the doc/test files that cover this subsystem — same shape as
+    # ``paths``: a list of repo-relative posix path strings (file, directory, or simple glob).
+    for field_name in ("docs", "tests"):
+        value = data.get(field_name)
+        if value is None:
+            continue
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            issues.append(
+                Issue(
+                    code=errors.E_SCHEMA_INVALID,
+                    severity="error",
+                    message=f"subsystem '{declared_name}' '{field_name}' must be a list of strings",
+                    subsystem=name,
+                    fix=f"make `{field_name}` a YAML list of file/directory/glob paths "
+                    f"(e.g. `{field_name}: [{'tests/auth' if field_name == 'tests' else 'docs/auth.md'}]`)",
+                )
+            )
+
     exposes = data.get("exposes")
     if exposes is not None:
         if not isinstance(exposes, list):

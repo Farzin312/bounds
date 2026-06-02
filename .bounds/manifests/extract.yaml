@@ -11,5 +11,16 @@ exposes:
   - { name: extract_file, kind: function }
   - { name: iter_repo_source, kind: function }
   - { name: strip_ext, kind: function }
+  - { name: extract_project, kind: function }
+  - { name: adapter_for_language, kind: function }
+  - { name: is_test_file, kind: function }
+  - { name: is_test_symbol, kind: function }
+  - { name: mapping_coverage, kind: function }
+  - { name: resolve_doc_owners, kind: function }
+  - { name: resolve_test_owners, kind: function }
 consumes:
   - { subsystem: models, via: models, interfaces: [Symbol, ImportRef, ExtractResult] }
+tests:
+  - tests/extract
+docs:
+  - docs/languages-and-platforms.md

@@ -147,11 +147,15 @@ cheaper** and more reliable. (Bounds is a navigation layer, not a comprehension 
 read source to understand *behavior*.)
 
 > **Honest scope.** Those numbers are extraction + retrieval economics, which generalize. The
-> auto-`discover` contracts are a **starting draft to curate** — on these repos a fresh `discover`
-> does *not* produce a clean `bounds validate` (it surfaces real drift plus library orphan-export
-> noise), so treat the drift gate as something you reach *after* refining contracts, not a
-> one-command guarantee. The [cross-language report](benchmarks/results/oss-cross-language.md)
-> documents this in full, including the bugs it found.
+> auto-`discover` contracts are a **starting draft to curate** — but a fresh `discover → validate`
+> now converges *close to clean* on well-factored repos (click **3** issues, express **1**, requests
+> **6** — all `ok: true`) and to a small set of genuine, mostly-advisory issues on large or
+> type-heavy ones (flask 19, axios 59, zod 155 — down from 314 / 191 / 3,025 before the noise fixes).
+> What remains is real signal (boundary edges, cross-module re-export kinds), not flood: the
+> orphan-export, test-case, and Next.js framework-callback floods are eliminated (see
+> [docs/known-issues.md](docs/known-issues.md) BOUNDS-012/015/016). Treat the drift gate as something
+> you reach after a light curation pass, not a one-command guarantee on every repo. The
+> [cross-language report](benchmarks/results/oss-cross-language.md) documents this in full.
 
 **Contributors welcome:** run `python benchmarks/oss_bench.py --repo <path>` (token economics) and
 `python benchmarks/oss_features.py --repo <path>` (full-command matrix), or add your model/tokenizer's
@@ -160,6 +164,11 @@ numbers via [`benchmarks/TEMPLATE.md`](benchmarks/TEMPLATE.md) — see
 for the scaling argument and the context-rot effect.
 
 ## Languages & platforms
+
+Bounds is **sharpest on the modern full-stack — TypeScript/JavaScript + Postgres/Supabase** — where
+the verified table + **RLS/policy** surface is a differentiator few context tools offer, and it knows
+Next.js App-/Pages-Router conventions so a real app's route/page entry files don't read as drift.
+**Python is equally first-class** (it converges cleanest of all on a fresh discover). 
 
 **Python, TypeScript/JavaScript, SQL migrations, and Prisma schemas** are verified today — including
 database tables, whether declared as raw DDL, ORM models (SQLAlchemy/Django/Drizzle/TypeORM), or

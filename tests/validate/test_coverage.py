@@ -42,6 +42,7 @@ def _polyglot(tmp_path):
 
 
 def test_mapping_coverage_counts_unsupported_by_language(tmp_path):
+    """mapping_coverage must count unsupported files (Go) as unmapped and bucket them by language; docs/config/assets must never dilute the source denominator."""
     _polyglot(tmp_path)
     cov = scan.mapping_coverage(tmp_path, {"svc/m0.py", "svc/m1.py", "svc/m2.py"})
     assert cov["files_source_total"] == 8
@@ -50,11 +51,46 @@ def test_mapping_coverage_counts_unsupported_by_language(tmp_path):
     assert cov["mapped_pct"] == 37.5
     assert cov["unmapped_by_language"] == {"go": 5}
     assert cov["unsupported_languages"] == ["go"]
+    # The dict now always carries informational tests/docs buckets (empty here — no tests/docs).
+    assert cov["tests"] == {"total": 0, "linked": 0, "unlinked": 0, "unlinked_sample": []}
+    assert cov["docs"] == {"total": 0, "linked": 0, "unlinked": 0, "unlinked_sample": []}
     # docs/config/assets must NOT dilute the denominator.
     (tmp_path / "README.md").write_text("# docs\n")
     (tmp_path / "data.json").write_text("{}\n")
     cov2 = scan.mapping_coverage(tmp_path, {"svc/m0.py", "svc/m1.py", "svc/m2.py"})
     assert cov2["files_source_total"] == 8  # unchanged: non-source excluded
+    assert cov2["docs"]["total"] == 1  # README.md now tracked as a doc (unlinked → never a gap)
+
+
+def test_test_files_excluded_from_source_denominator_and_never_a_gap(tmp_path):
+    """A repo's tests must never count as unmapped source: they're bucketed separately, so an
+    all-source-mapped repo with unlinked tests still reports 100% and emits no E_COVERAGE_GAP."""
+    svc = tmp_path / "svc"
+    svc.mkdir()
+    for i in range(3):
+        (svc / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    for i in range(4):  # four UNLINKED test files in a top-level tests/ dir (no `svc` segment)
+        (tests_dir / f"test_thing{i}.py").write_text("def test_x():\n    assert True\n")
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        'version: "1"\nproject: t\nlanguages: [python]\nsubsystems: [svc]\n'
+    )
+    (cfg / config.MANIFESTS_DIR / "svc.yaml").write_text(
+        "name: svc\nrole: library\ncriticality: leaf\npaths:\n  - svc\nexposes: []\n"
+    )
+    _git_init(tmp_path)
+    report = engine.run(tmp_path, mode="full", enforce="on", include_gitignored=True)
+    mapping = report.stats["coverage"]["mapping"]
+    # The 4 tests are NOT in the source denominator (only the 3 mapped svc files are).
+    assert mapping["files_source_total"] == 3
+    assert mapping["mapped_pct"] == 100.0
+    assert [i for i in report.issues if i.code == errors.E_COVERAGE_GAP] == []
+    # …but they ARE tracked in the tests bucket (unlinked here — informational, not a gap).
+    assert mapping["tests"]["total"] == 4
+    assert mapping["tests"]["unlinked"] == 4
 
 
 def test_validate_emits_loud_coverage_gap_nonblocking(tmp_path):

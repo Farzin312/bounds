@@ -55,6 +55,7 @@ def _has(*keys):
 _HUMAN_RENDERERS = (
     (lambda p: "validation_status" in p and "mode" in p, lambda p: _render_report_dict_human(p)),
     (_has("symbol", "match", "results"), lambda p: _render_where_human(p)),
+    (lambda p: p.get("query_kind") == "file" and "results" in p, lambda p: _render_where_file_human(p)),
     (_has("current", "checked", "outdated"), lambda p: _render_upgrade_check_human(p)),
     (_has("command", "dry_run", "source"), lambda p: _render_upgrade_human(p)),
     (lambda p: p.get("mode") == "guide", lambda p: _render_guide_human(p)),
@@ -123,6 +124,21 @@ def _render_where_human(payload: dict) -> str:
             f"  {r.get('symbol')} ({r.get('kind')})  {r.get('file')}:{r.get('line')}"
             f"  → {r.get('owning_subsystem')}{tag}"
         )
+    return "\n".join(lines)
+
+
+def _render_where_file_human(payload: dict) -> str:
+    """Render a ``bounds where <path>`` result (file → owning subsystem + the symbols it defines)."""
+    rel = payload.get("file", "")
+    owner = payload.get("owning_subsystem", "") or "(unowned)"
+    results = payload.get("results", []) or []
+    head = f"where {rel}  → {owner}  ({len(results)} symbol{'s' if len(results) != 1 else ''})"
+    if not results:
+        return head + "\n\n(no symbols)"
+    lines = [head, ""]
+    for r in results:
+        tag = " [exposed]" if r.get("exposed") else ""
+        lines.append(f"  {r.get('symbol')} ({r.get('kind')})  :{r.get('line')}{tag}")
     return "\n".join(lines)
 
 
@@ -253,13 +269,23 @@ def _render_overview_human(payload: dict) -> str:
     """Render `bounds overview`: a health line + counts; the full edge list stays in the JSON."""
     h = payload.get("health", {}) or {}
     status = "ok" if h.get("ok") else "needs attention"
+    v = h.get("validation", {}) or {}
     lines = [
         f"{payload.get('project', '')}: {payload.get('subsystems', 0)} subsystems — {status}",
         f"  roles: {_kv_inline(payload.get('roles', {}))}",
         f"  criticality: {_kv_inline(payload.get('criticality', {}))}",
         f"  cycles: {h.get('cycles', 0)}   schema errors: {h.get('schema_errors', 0)}"
         f"   dependency edges: {len(payload.get('edges', []))}",
+        f"  validation: {v.get('errors', 0)} errors, {v.get('warnings', 0)} warnings"
+        f"   (drift: {v.get('structural_drift', 0)}, boundaries: {v.get('boundary_violations', 0)})"
+        f"   mapped: {v.get('mapped_pct', 0.0)}%",
     ]
+    # Informational doc/test linkage (tracked, never a gap) — one short line each, only when present.
+    for label in ("tests", "docs"):
+        bucket = v.get(label) or {}
+        if bucket:
+            lines.append(f"  {label}: {bucket.get('linked', 0)} linked / "
+                         f"{bucket.get('unlinked', 0)} unlinked")
     for cyc in payload.get("cycles", []) or []:
         lines.append(f"  cycle: {cyc}")
     return "\n".join(lines)
@@ -483,6 +509,9 @@ def _render_report_dict_human(payload: dict) -> str:
     lines.append(f"status: {status}")
     lines.append(f"mode:   {mode}")
     lines.append(_format_stats_line(stats))
+    # JSON-first parity: surface the docs/tests linkage the JSON carries in stats.coverage.mapping
+    # as one short informational line each (tests/docs are tracked, never a blocking gap).
+    lines.extend(_format_linkage_lines(((stats.get("coverage") or {}).get("mapping") or {})))
 
     by_severity: dict[str, list[dict]] = {sev: [] for sev in _SEVERITY_ORDER}
     other: list[dict] = []
@@ -529,6 +558,21 @@ def _format_stats_line(stats: dict) -> str:
         return "stats:  (none)"
     parts = [f"{key}={stats[key]}" for key in sorted(stats)]
     return "stats:  " + " ".join(parts)
+
+
+def _format_linkage_lines(mapping: dict) -> list[str]:
+    """Render the tests/docs linkage buckets as one short line each (re-renders the same JSON).
+
+    Each bucket is ``{total, linked, unlinked, ...}``; a bucket with no files is omitted so a repo
+    without tests/docs stays quiet. Informational only — tests/docs are tracked, never a gap.
+    """
+    out: list[str] = []
+    for label in ("tests", "docs"):
+        bucket = mapping.get(label) or {}
+        if bucket.get("total"):
+            out.append(f"{label}:  {bucket.get('linked', 0)} linked / "
+                       f"{bucket.get('unlinked', 0)} unlinked")
+    return out
 
 
 def _format_issue_lines(issue: dict) -> list[str]:
@@ -623,12 +667,24 @@ def _render_subsystem_human(payload: dict) -> str:
         lines.append(f"files:      {', '.join(files)}")
     elif payload.get("file_count"):
         lines.append(f"files:      {payload['file_count']} file(s)  (use --full to list)")
+    # Linked docs/tests (explicit + convention) — present only under --full, same gate as the roster.
+    docs = payload.get("docs")
+    if docs:
+        lines.append(f"docs:       {', '.join(docs)}")
+    tests = payload.get("tests")
+    if tests:
+        lines.append(f"tests:      {', '.join(tests)}")
     entry_points = payload.get("entry_points", [])
     if entry_points:
         lines.append(f"entry_points: {', '.join(entry_points)}")
     unparsed = payload.get("unparsed_files", [])
     if unparsed:
         lines.append(f"unparsed_files: {', '.join(unparsed)}")
+    overlaps = payload.get("overlaps", [])
+    if overlaps:
+        lines.append(f"⚠ overlaps ({len(overlaps)}): same path/file claimed by another subsystem")
+        for o in overlaps:
+            lines.append(f"  - {o.get('file', '?')}: {o.get('message', '')}")
 
     exposes = payload.get("exposes", [])
     if exposes:

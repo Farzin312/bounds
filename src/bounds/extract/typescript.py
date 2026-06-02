@@ -10,6 +10,18 @@ re-export clauses). Non-exported top-level declarations are still captured (with
 ``exported=False``) so boundary checks can see that internals exist.
 ``import_statement`` and ``export ... from`` clauses yield import references.
 
+Symbol kind is derived from the declaration node: ``type`` (``export type X``),
+``interface``, ``enum`` (both ``export enum`` and ``export const enum`` parse as
+``enum_declaration``), ``class``, ``function`` (incl. overload signatures, which
+collapse to ONE ``function`` symbol via :func:`_dedup_symbols`), ``const`` (const/
+let/var bindings), ``default``, and ``namespace`` (``export * as ns from "mod"``).
+A *local* re-export (``export { A, B }`` with no ``from``) resolves each name's kind
+from that file's own declaration; a *cross-module* re-export (``export { A } from
+"./m"``) has no local declaration, so its kind is ``unknown`` (the name is still
+emitted, exported, so the surface and any drift check see it). Symbol kind is
+advisory metadata — structural drift is matched by *name* — but it is derived
+correctly wherever the declaration is in-file so the manifest reads accurately.
+
 CommonJS is covered too: a ``require("mod")`` call (including inside a
 ``const x = require(...)`` or ``const {a} = require(...)`` binding) yields an
 import reference, and a top-level ``module.exports = ...`` / ``module.exports.foo
@@ -17,6 +29,13 @@ import reference, and a top-level ``module.exports = ...`` / ``module.exports.fo
 re-exports (``export * from "./m"`` and ``export * as ns from "./m"``) yield an
 import reference so the dependency stays visible to validation/propagation; the
 cross-file union of ``export *`` is not expanded into individual symbols here.
+
+``export * from "./m"`` (a *star* re-export) has no enumerable names at parse time —
+the set of re-exported names lives in ``./m`` and is only knowable cross-file — so it
+emits NO symbols, only the import edge. ``discover`` therefore never declares any
+unresolvable star name in ``exposes`` (it lists only what some file *actually*
+exports a name for), which keeps discover and the validate extractor symmetric: a
+name reaches ``exposes`` only when this extractor would also mark it exported.
 """
 
 from __future__ import annotations
@@ -34,14 +53,27 @@ _TSX_LANG: ts.Language | None = None
 _TSX_EXTS = (".tsx", ".jsx")
 
 # Declaration node type -> the Symbol kind it produces.
+# ``function_signature`` is an overload signature (``function f(a): T;`` with no body); it
+# names the same function as the implementation, so it maps to ``function`` and the per-name
+# dedup in ``_dedup_symbols`` collapses an overload set to ONE ``function`` symbol.
 _DECL_KIND = {
     "function_declaration": "function",
     "generator_function_declaration": "function",
+    "function_signature": "function",
     "class_declaration": "class",
     "abstract_class_declaration": "class",
     "interface_declaration": "interface",
     "type_alias_declaration": "type",
-    "enum_declaration": "const",
+    "enum_declaration": "enum",
+}
+
+# Symbol kinds that carry a real local declaration, ranked best-to-worst when the same name
+# is produced more than once in a file (e.g. an overload set, or a local re-export whose
+# target is also declared here). A declaration-bearing kind always beats a bare re-export
+# (``unknown``); ``default`` is kept distinct so it never masks a named declaration.
+_KIND_RANK = {
+    "table": 0, "class": 1, "function": 1, "interface": 1, "type": 1,
+    "enum": 1, "const": 1, "namespace": 1, "default": 2, "unknown": 3,
 }
 
 
@@ -106,6 +138,60 @@ def _decl_symbols(decl: ts.Node, source: bytes, line: int, exported: bool) -> li
     return []
 
 
+def _dedup_symbols(symbols: list[Symbol]) -> list[Symbol]:
+    """Collapse same-(name, exported) symbols, keeping the most declaration-bearing one.
+
+    A TypeScript overload set is several ``export function f(...);`` signatures plus one
+    implementation — each a separate top-level ``export_statement`` naming the same ``f`` —
+    so without dedup the surface would carry one ``function`` symbol per signature. We keep a
+    single symbol per ``(name, exported)`` pair, preferring the best :data:`_KIND_RANK` (a real
+    declaration over a bare ``unknown`` re-export) and, within an equal kind, the earliest line
+    (the implementation typically follows its signatures, but ties resolve deterministically).
+    Output order is by first appearance so the result stays stable across runs.
+    """
+    best: dict[tuple[str, bool], Symbol] = {}
+    order: list[tuple[str, bool]] = []
+    for sym in symbols:
+        key = (sym.name, sym.exported)
+        cur = best.get(key)
+        if cur is None:
+            best[key] = sym
+            order.append(key)
+            continue
+        cur_rank = _KIND_RANK.get(cur.kind, 3)
+        new_rank = _KIND_RANK.get(sym.kind, 3)
+        if new_rank < cur_rank or (new_rank == cur_rank and sym.line < cur.line):
+            best[key] = sym
+    return [best[k] for k in order]
+
+
+def _local_decl_kinds(root: ts.Node, source: bytes) -> dict[str, str]:
+    """Map each top-level declared name in the file to its Symbol kind.
+
+    Used to give a *local* re-export (``export { A }`` with no ``from``) the kind of A's
+    own declaration instead of a bare ``unknown``. Covers both bare top-level declarations
+    and ``export <decl>`` forms, so ``export { A }; class A {}`` and ``class A {}; export { A }``
+    both resolve. Cross-module re-exports (``export { A } from "./m"``) are intentionally not
+    resolvable here — the declaration is in another file — and stay ``unknown``.
+    """
+    kinds: dict[str, str] = {}
+    for node in root.named_children:
+        decl = node
+        if node.type == "export_statement":
+            decl = next(
+                (c for c in node.named_children
+                 if c.type in _DECL_KIND or c.type in ("lexical_declaration", "variable_declaration")),
+                None,
+            )
+            if decl is None:
+                continue
+        if decl.type not in _DECL_KIND and decl.type not in ("lexical_declaration", "variable_declaration"):
+            continue
+        for sym in _decl_symbols(decl, source, _line(decl), exported=False):
+            kinds.setdefault(sym.name, sym.kind)
+    return kinds
+
+
 def _call_name(call: ts.Node, source: bytes) -> str | None:
     fn = call.child_by_field_name("function")
     return _text(fn, source) if fn is not None else None
@@ -160,8 +246,17 @@ def _typeorm_table_name(decl: ts.Node, fallback: str, source: bytes) -> str | No
     return None
 
 
-def _export_clause_symbols(clause: ts.Node, source: bytes, line: int) -> list[Symbol]:
-    """Symbols for ``export { a as b, c }`` -- one per exported alias name."""
+def _export_clause_symbols(
+    clause: ts.Node, source: bytes, line: int, local_kinds: dict[str, str], is_reexport: bool
+) -> list[Symbol]:
+    """Symbols for ``export { a as b, c }`` -- one per exported alias name.
+
+    For a *local* re-export (no ``from``), the kind is the local declaration's kind
+    (looked up in ``local_kinds`` by the *local* name, the first identifier) so
+    ``export { Widget }`` over a ``class Widget {}`` reads as ``class``, not ``unknown``.
+    For a cross-module re-export (``is_reexport``), the declaration lives in another
+    file, so the kind stays ``unknown`` (the name is still emitted, exported).
+    """
     out: list[Symbol] = []
     for spec in clause.named_children:
         if spec.type != "export_specifier":
@@ -170,8 +265,10 @@ def _export_clause_symbols(clause: ts.Node, source: bytes, line: int) -> list[Sy
         idents = [c for c in spec.named_children if c.type in ("identifier", "type_identifier")]
         if not idents:
             continue
+        local_name = _text(idents[0], source)
         exported_name = _text(idents[-1], source)
-        out.append(Symbol(name=exported_name, kind="unknown", line=line, exported=True))
+        kind = "unknown" if is_reexport else local_kinds.get(local_name, "unknown")
+        out.append(Symbol(name=exported_name, kind=kind, line=line, exported=True))
     return out
 
 
@@ -308,10 +405,14 @@ class TypeScriptAdapter(LanguageAdapter):
         imports: list[ImportRef] = []
         try:
             tree = _parser(rel_path).parse(source)
-            for node in tree.root_node.named_children:
+            root = tree.root_node
+            # Local declaration kinds, computed once, so a local re-export (`export { X }`
+            # with no `from`) can be tagged with X's own declaration kind.
+            local_kinds = _local_decl_kinds(root, source)
+            for node in root.named_children:
                 t = node.type
                 if t == "export_statement":
-                    symbols.extend(self._export_symbols(node, source, imports))
+                    symbols.extend(self._export_symbols(node, source, imports, local_kinds))
                 elif t in _DECL_KIND or t in ("lexical_declaration", "variable_declaration"):
                     # Non-exported top-level declaration: capture as internal.
                     symbols.extend(_decl_symbols(node, source, _line(node), exported=False))
@@ -327,10 +428,11 @@ class TypeScriptAdapter(LanguageAdapter):
         except Exception as e:  # fail soft: bad file -> result carrying the error
             return make_result(rel_path, self.language_name, [], [], source, error=str(e))
 
-        return make_result(rel_path, self.language_name, symbols, imports, source)
+        # Collapse overload sets (and any other same-name duplicates) to one symbol each.
+        return make_result(rel_path, self.language_name, _dedup_symbols(symbols), imports, source)
 
     def _export_symbols(
-        self, node: ts.Node, source: bytes, imports: list[ImportRef]
+        self, node: ts.Node, source: bytes, imports: list[ImportRef], local_kinds: dict[str, str]
     ) -> list[Symbol]:
         """Symbols (and any re-export ImportRefs) from one export_statement."""
         line = _line(node)
@@ -357,16 +459,19 @@ class TypeScriptAdapter(LanguageAdapter):
         for child in node.named_children:
             ct = child.type
             if ct == "namespace_export":
-                # `export * as ns from "mod"`: the namespace alias is an exported symbol.
+                # `export * as ns from "mod"`: the namespace alias is an exported symbol
+                # that binds the whole module namespace -> kind `namespace`.
                 name_node = next(
                     (c for c in child.named_children if c.type == "identifier"), None
                 )
                 if name_node is not None:
                     out.append(
-                        Symbol(name=_text(name_node, source), kind="const", line=line, exported=True)
+                        Symbol(name=_text(name_node, source), kind="namespace", line=line, exported=True)
                     )
             elif ct == "export_clause":
-                clause_syms = _export_clause_symbols(child, source, line)
+                clause_syms = _export_clause_symbols(
+                    child, source, line, local_kinds, is_reexport=source_string is not None
+                )
                 out.extend(clause_syms)
                 if source_string is not None:
                     # `export { ... } from "mod"`: also record the import edge.

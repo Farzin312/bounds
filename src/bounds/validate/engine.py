@@ -250,8 +250,10 @@ def run(
     if mode != "quick":
         mapping = scan.mapping_coverage(
             project_root, set(file_owner), matcher,
-            repo=repo, include_gitignored=include_gitignored,
+            repo=repo, include_gitignored=include_gitignored, subsystems=subsystems,
         )
+        # The gap fires only on unmapped NON-TEST library source (mapping_coverage already excludes
+        # test files from files_unmapped) — a repo's tests/docs are tracked, never a blocking gap.
         if mapping["files_unmapped"] > 0:
             issues.append(_coverage_gap_issue(mapping))
 
@@ -293,7 +295,12 @@ def run(
 # Helpers
 # ===========================================================================
 def _coverage_gap_issue(mapping: dict) -> Issue:
-    """One loud, advisory issue summarizing unmapped source + the concrete next step to close it."""
+    """One loud, advisory issue summarizing unmapped NON-TEST source + the concrete next step.
+
+    "100%-or-guidance": fired only when unmapped library source remains (tests/docs are tracked in
+    their own buckets and never a gap). The message names what is unmapped; the fix names the exact
+    minimal manifest action to close it. Test/doc linkage is reported separately in stats, never here.
+    """
     parts = []
     if mapping["unmapped_unsupported_language"]:
         langs = ", ".join(f"{lang}×{n}" for lang, n in sorted(mapping["unmapped_by_language"].items())
@@ -305,11 +312,13 @@ def _coverage_gap_issue(mapping: dict) -> Issue:
     return Issue(
         errors.E_COVERAGE_GAP,
         "warning",
-        f"mapped {mapping['mapped_pct']}% of source "
-        f"({mapping['files_mapped']}/{mapping['files_source_total']} files); unmapped: {detail}",
-        fix="close the gap: `bounds init --subsystem <name>` then add the files to its `paths`, or "
-            "have an AI author the manifest (see docs/coverage.md) — unsupported languages need a "
-            "hand-authored manifest until an adapter lands; report gaps to help us reach 100%",
+        f"mapped {mapping['mapped_pct']}% of library source "
+        f"({mapping['files_mapped']}/{mapping['files_source_total']} non-test files); unmapped: {detail} "
+        f"(tests/docs are tracked separately, never a gap)",
+        fix="reach 100%: add each unmapped file to a subsystem's `paths:` "
+            "(`bounds init --subsystem <name>` to scaffold one), or have an AI author the manifest "
+            "(see docs/coverage.md) — unsupported languages need a hand-authored manifest until an "
+            "adapter lands; report gaps to help us reach 100%",
     )
 
 

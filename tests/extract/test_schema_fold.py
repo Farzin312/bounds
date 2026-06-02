@@ -36,6 +36,7 @@ def _tables(files: dict[str, bytes]) -> dict[str, list[str]]:
 
 # ---- the full migration fold ----
 def test_fold_create_add_drop_rename_to_final_set():
+    """The full migration fold must replay CREATE→ADD→DROP→RENAME-col→RENAME-table to the final live set — describe/validate report the current schema, not the union of every migration."""
     tables = _tables({
         "001_create.sql": b"CREATE TABLE users (id int, email text, tmp text);",
         "002_add.sql": b"ALTER TABLE users ADD COLUMN name text;",
@@ -47,6 +48,7 @@ def test_fold_create_add_drop_rename_to_final_set():
 
 
 def test_fold_drop_table_removes_it():
+    """A DROP TABLE in a later migration must remove the table from the live catalog — a dropped table left in the surface would report phantom data boundaries."""
     tables = _tables({
         "001.sql": b"CREATE TABLE a (id int); CREATE TABLE b (id int);",
         "002.sql": b"DROP TABLE a;",
@@ -55,12 +57,14 @@ def test_fold_drop_table_removes_it():
 
 
 def test_fold_quoted_postgres_identifiers_survive():
+    """Double-quoted Postgres identifiers must survive with their exact case and spaces ("Full Name") — stripping quotes or normalising case would mismatch the real DB column name."""
     tables = _tables({"001.sql": b'CREATE TABLE "Users" ("Id" int, "Full Name" text);'})
     assert tables == {"Users": ["Full Name", "Id"]}
 
 
 # ---- ordering determinism ----
 def test_filename_numeric_prefix_orders_beyond_lexical():
+    """Numeric filename prefixes must order 10 after 2 (numeric, not lexical) so 10's drop wins — lexical ordering would apply migrations out of sequence and derive the wrong final schema (determinism)."""
     # 10 must apply AFTER 2 (numeric order), not before (lexical) — the drop in 10 must win.
     files = {
         "2_add.sql": b"CREATE TABLE t (id int); ALTER TABLE t ADD COLUMN a int;",
@@ -74,6 +78,7 @@ def test_filename_numeric_prefix_orders_beyond_lexical():
 
 
 def test_revision_chain_orders_unprefixed_files():
+    """With no numeric prefix, the Alembic-style revision/down_revision chain drives order (a_first before b_second) so the fold is deterministic on unprefixed migrations."""
     # No numeric prefix; order is driven by the down_revision chain, not the filename.
     files = {
         "b_second.sql": b"-- revision: 2\n-- down_revision: 1\nALTER TABLE t DROP COLUMN a;",
@@ -87,6 +92,7 @@ def test_revision_chain_orders_unprefixed_files():
 
 
 def test_no_deterministic_order_is_flagged():
+    """When no prefix, revision chain, or explicit order exists, the fold result is order-dependent so order_migrations must set no_order and emit E_SCHEMA_NO_ORDER (report-hard, not a silent guess)."""
     files = {
         "alpha.sql": b"CREATE TABLE t (id int);",
         "beta.sql": b"ALTER TABLE t DROP COLUMN id;",
@@ -99,6 +105,7 @@ def test_no_deterministic_order_is_flagged():
 
 
 def test_explicit_order_header_wins():
+    """An explicit `-- bounds:order N` header must override filename order so z.sql (order 1) applies before a.sql (order 2) — the human-declared order is authoritative."""
     files = {
         "z.sql": b"-- bounds:order 1\nCREATE TABLE t (id int, a int);",
         "a.sql": b"-- bounds:order 2\nALTER TABLE t DROP COLUMN a;",
@@ -108,6 +115,7 @@ def test_explicit_order_header_wins():
 
 # ---- fail soft ----
 def test_unparsable_ddl_statement_keeps_siblings_and_reports():
+    """A broken DDL statement between two valid CREATE TABLEs must not fail the whole file: both tables survive and the broken statement is reported as E_SCHEMA_UNPARSED (fail-soft, report-hard)."""
     # A broken DDL statement between two valid CREATE TABLEs: both tables survive and the
     # broken statement is reported (E_SCHEMA_UNPARSED) — it carried DDL we couldn't parse.
     files = {"001.sql": b"CREATE TABLE a (id int); ALTER TABLE a ADD COLUMN; CREATE TABLE b (x int);"}
@@ -119,6 +127,7 @@ def test_unparsable_ddl_statement_keeps_siblings_and_reports():
 
 
 def test_non_ddl_parse_error_is_not_reported_as_schema_loss():
+    """A non-DDL statement the grammar trips on (a cron.schedule call) must NOT raise E_SCHEMA_UNPARSED when all tables parsed cleanly — no DDL was lost, so flagging it is cry-wolf."""
     # A file whose tables parse cleanly but which also contains a non-DDL statement the
     # grammar trips on (a Postgres cron registration) must NOT be flagged: no DDL was lost.
     files = {"001.sql": b"CREATE TABLE a (id int);\n"
@@ -131,6 +140,7 @@ def test_non_ddl_parse_error_is_not_reported_as_schema_loss():
 
 
 def test_data_only_file_is_not_a_failure():
+    """A pure seed (INSERT) or grant (GRANT/REVOKE) file has no schema DDL: it must extract to empty symbols with NO error so describe/validate never mislabel it as unparsed (the cry-wolf fix)."""
     # A pure seed / grant file has no schema DDL: it extracts to empty symbols and NO error,
     # so describe/validate never mislabel it as "unparsed" (the cry-wolf bug this fixes).
     for src in (b"INSERT INTO t (id) VALUES (1) ON CONFLICT DO NOTHING;\n",
@@ -141,6 +151,7 @@ def test_data_only_file_is_not_a_failure():
 
 
 def test_unparsable_ddl_file_is_hard_error():
+    """A file that intends DDL (mentions CREATE TABLE) but is wholly unparsable is a hard error with no symbols — real schema was lost, so it surfaces loudly, never as a silent partial (report-hard)."""
     # A file that *means* to carry DDL (it mentions CREATE TABLE) but is wholly unparsable is
     # a hard extraction failure — real schema was lost, surfaced loudly (not a partial result).
     res = get_adapter("x.sql").extract("x.sql", b"CREATE TABLE @#$%^&*( totally broken !!!")
@@ -149,6 +160,7 @@ def test_unparsable_ddl_file_is_hard_error():
 
 
 def test_no_ddl_garbage_is_not_a_failure():
+    """A .sql file with no DDL intent and no revision header must not hard-fail (no error, no symbols) — only DDL-bearing or revision-headered files can fail; the counterpart to the cry-wolf fix."""
     # A .sql file with no DDL intent and no migration header contributes nothing to the schema:
     # Bounds (a schema tool) has no opinion on it and never hard-fails it — only DDL-bearing or
     # revision-headered files can fail. This is the counterpart to the cry-wolf fix.
@@ -158,6 +170,7 @@ def test_no_ddl_garbage_is_not_a_failure():
 
 
 def test_create_schema_only_migration_is_not_a_failure():
+    """A migration that only runs CREATE SCHEMA / CREATE EXTENSION (real DDL Bounds doesn't model as tables) must not hard-fail or emit schema_error — it parsed, it just yields no table surface."""
     # A valid migration that only does CREATE SCHEMA / CREATE EXTENSION (real DDL Bounds does
     # not model into a table surface) must NOT hard-fail — it parsed, it just has no tables.
     for src in (b"CREATE SCHEMA IF NOT EXISTS private;\n",
@@ -169,6 +182,7 @@ def test_create_schema_only_migration_is_not_a_failure():
 
 # ---- deterministic hash ----
 def test_schema_structure_hash_is_stable_and_order_insensitive():
+    """schema_structure_hash must be identical when only column DDL order differs (sorted at the boundary) but differ when the column set changes — a deterministic, byte-stable schema fingerprint."""
     a = _extracts({"001.sql": b"CREATE TABLE t (id int, a int);"})
     b = _extracts({"001.sql": b"CREATE TABLE t (a int, id int);"})  # columns reordered in DDL
     assert schema_structure_hash("db", *a) == schema_structure_hash("db", *b)
@@ -178,6 +192,7 @@ def test_schema_structure_hash_is_stable_and_order_insensitive():
 
 # ---- prisma ----
 def test_prisma_models_fold_like_tables():
+    """Prisma models must flow through the same schema_catalog fold as SQL tables, honoring @@map/@map — one catalog path serves both source kinds so describe/validate never disagree by language."""
     tables = _tables({
         "schema.prisma": b'model User {\n  id Int @id\n  email String\n  @@map("users")\n}\n'
                          b'model Post {\n  id Int @id\n  title String @map("post_title")\n}\n'
@@ -187,6 +202,7 @@ def test_prisma_models_fold_like_tables():
 
 # ---- non-table schema objects (functions/views/indexes/triggers/types/policies/rls) ----
 def test_schema_objects_surface_functions_policies_and_rls():
+    """schema_objects must surface functions/views/indexes/policies/rls (tables excluded — they have their own catalog), sorted by (kind, name) for deterministic, byte-stable output."""
     extracts, file_owner = _extracts({
         "001.sql": b"create table profiles (id uuid);\n"
                    b"alter table profiles enable row level security;\n"
@@ -210,6 +226,7 @@ def test_schema_objects_surface_functions_policies_and_rls():
 
 # ---- policy / RLS fold (drops net out, like tables) ----
 def test_policy_dropped_in_a_later_migration_is_not_live():
+    """A policy created then DROPped in a later migration must net out of the live surface — like tables, policies fold to their final state, not the union of every CREATE."""
     extracts, fo = _extracts({
         "001.sql": b"create table t (id int);\ncreate policy p on t for all using (true);\n",
         "002.sql": b"drop policy if exists p on t;\n",
@@ -219,6 +236,7 @@ def test_policy_dropped_in_a_later_migration_is_not_live():
 
 
 def test_policy_dropped_then_recreated_in_one_file_is_live():
+    """The idempotent re-run pattern (DROP IF EXISTS then CREATE in one file) must leave the policy LIVE — order within the file matters, and the final CREATE wins."""
     # The idempotent re-run pattern: DROP IF EXISTS then CREATE in the same file → present.
     extracts, fo = _extracts({
         "001.sql": b"create table t (id int);\n"
@@ -229,6 +247,7 @@ def test_policy_dropped_then_recreated_in_one_file_is_live():
 
 
 def test_rls_enabled_then_disabled_nets_out():
+    """RLS enabled then disabled across migrations must net out (no live rls object) — the posture reflects the final state, so a later DISABLE removes the table from the protected set."""
     extracts, fo = _extracts({
         "001.sql": b"create table t (id int);\nalter table t enable row level security;\n",
         "002.sql": b"alter table t disable row level security;\n",
@@ -239,6 +258,7 @@ def test_rls_enabled_then_disabled_nets_out():
 
 # ---- RLS security posture ----
 def test_rls_posture_classifies_tables():
+    """RLS posture must classify each table into protected (RLS + policy), rls_without_policy (locked, a security gap), and unprotected (no RLS) — this is the data-boundary security signal validate surfaces."""
     extracts, fo = _extracts({
         "001.sql": b"create table protected (id int);\n"
                    b"create table locked (id int);\n"
@@ -256,6 +276,7 @@ def test_rls_posture_classifies_tables():
 
 
 def test_unordered_policy_lifecycle_flags_no_order():
+    """An unordered migration set containing a DROP/ALTER POLICY (whose fold result depends on order) must surface E_SCHEMA_NO_ORDER — policy/RLS folding has the same order-determinism requirement as tables."""
     # Policies/RLS fold, so an unordered set with a DROP/ALTER POLICY (or DISABLE RLS) and no
     # deterministic order basis must surface E_SCHEMA_NO_ORDER — the fold result depends on order.
     extracts, fo = _extracts({
@@ -267,6 +288,7 @@ def test_unordered_policy_lifecycle_flags_no_order():
 
 
 def test_no_force_rls_keeps_rls_enabled():
+    """NO FORCE ROW LEVEL SECURITY clears only the owner-bypass exemption, so RLS stays enabled — it must not be misread as a disable that drops the table from the protected set."""
     # NO FORCE clears only the owner-bypass exemption; RLS stays enabled.
     extracts, fo = _extracts({
         "001.sql": b"create table t (id int);\n"
@@ -278,6 +300,7 @@ def test_no_force_rls_keeps_rls_enabled():
 
 
 def test_rls_posture_empty_when_schema_has_no_rls():
+    """A schema that never uses RLS (plain SQL or Prisma) must return an empty posture, not "all unprotected" — reporting a posture for a non-RLS schema would be a false security alarm."""
     # A schema that never uses RLS (here: plain tables) has no posture to report — emitting
     # "all unprotected" would be a false alarm. Same for a Prisma schema.
     extracts, fo = _extracts({"001.sql": b"create table t (id int);\n"})

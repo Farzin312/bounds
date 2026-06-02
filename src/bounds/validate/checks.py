@@ -14,7 +14,7 @@ from posixpath import normpath
 
 from .. import errors, tsconfig
 from ..extract import get_adapter
-from ..extract.scan import strip_ext
+from ..extract.scan import is_framework_entry_file, is_test_file, is_test_symbol, strip_ext
 from ..models import ExtractResult, Issue, RootManifest, SubsystemCompact
 from .schema import SCHEMA_LANGUAGES, _fold_subsystem_schema, schema_diagnostics
 
@@ -317,7 +317,29 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
             # Tables whose columns are declared column-granularly (``users.email``) shouldn't
             # also be reported as an undeclared table-level export.
             declared_table_parents = {d.split(".", 1)[0] for d in declared if "." in d}
-            for extra in sorted(actual - declared):
+            # BOUNDS-015: a test case (``test_*`` function / ``Test*`` class in a test file) is
+            # intentionally kept OUT of a subsystem's exposes (discover._exposes_for does the same,
+            # BOUNDS-014). It must therefore not be re-reported here as an "undeclared export", or a
+            # repo with a tests subsystem floods with hundreds of info drifts — the exact noise
+            # BOUNDS-014 removed. Excluded symmetrically, by the shared is_test_* predicates.
+            test_case_exports = {
+                s.name
+                for p in ctx.files_of(name) if is_test_file(p)
+                for s in ctx.extracts[p].symbols
+                if is_test_symbol(s.name, s.kind)
+            }
+            # BOUNDS-016: a Next.js framework entry file (page/layout/route/… under app/ or pages/)
+            # exports symbols the framework invokes by convention (the default component, GET/POST
+            # handlers, route-segment config). Nothing imports them — they are not a consumable
+            # surface — so, like test cases, exclude the whole file's exports from undeclared-export
+            # drift (discover._exposes_for omits them too, keeping the two symmetric). This is what
+            # stops a real Next.js app from flooding with hundreds of framework-callback "drifts".
+            framework_exports = {
+                s.name
+                for p in ctx.files_of(name) if is_framework_entry_file(p)
+                for s in ctx.extracts[p].symbols if s.exported
+            }
+            for extra in sorted(actual - declared - test_case_exports - framework_exports):
                 if extra in declared_table_parents:
                     continue
                 issues.append(

@@ -94,6 +94,63 @@ def strip_ext(rel: str) -> str:
     return rel[: -len(suffix)] if suffix else rel
 
 
+# Directory-segment names that mark a test tree (pytest / Jest / Vitest / Mocha conventions).
+_TEST_DIR_PARTS = {"tests", "test", "__tests__", "spec", "specs", "e2e"}
+
+
+def is_test_file(rel: str) -> bool:
+    """A test file by directory or filename convention (pytest / Jest / Vitest / Mocha).
+
+    The single shared home for test-file recognition: discover (to keep test cases out of a
+    subsystem's public surface), doc/test ownership resolution, and mapping-coverage all key off
+    this one predicate so they never disagree about what counts as a test. ``rel`` is a
+    repo-relative posix path.
+    """
+    parts = rel.split("/")
+    if any(p in _TEST_DIR_PARTS for p in parts[:-1]):
+        return True
+    stem = parts[-1]
+    return (stem.startswith("test_") or stem.startswith("test.")
+            or "_test." in stem or ".test." in stem or ".spec." in stem or "_spec." in stem
+            or "conftest." in stem)
+
+
+def is_test_symbol(name: str, kind: str) -> bool:
+    """A test case, not public API: a ``test_*`` function or a ``Test*`` class (xUnit/pytest)."""
+    return name.startswith("test_") or (kind == "class" and name.startswith("Test"))
+
+
+# Next.js App-/Pages-Router special filenames. Under an ``app/`` or ``pages/`` directory these are
+# framework ENTRY files: the framework invokes their exports by convention (the default page/layout
+# component, route handlers ``GET``/``POST``…, and route-segment config like ``revalidate``/
+# ``dynamic``/``generateMetadata``). Nothing *imports* them, so — like test cases — their exports are
+# not a consumable cross-module surface.
+_FRAMEWORK_ENTRY_STEMS = {
+    "page", "layout", "loading", "error", "not-found", "template", "default", "route",
+    "global-error", "middleware", "instrumentation", "sitemap", "robots", "manifest",
+    "opengraph-image", "twitter-image", "icon", "apple-icon",
+}
+_TS_JS_EXTS = ("ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs")
+
+
+def is_framework_entry_file(rel: str) -> bool:
+    """A Next.js framework entry file (``page``/``layout``/``route``/… under ``app/`` or ``pages/``).
+
+    Such a file's exports are framework-invoked by convention, not a consumable API — so they are
+    excluded from a subsystem's ``exposes`` (discover) and from undeclared-export drift (validate),
+    exactly like a test case (:func:`is_test_symbol`), to stop a Next.js app from flooding with
+    framework-callback noise. Gated on BOTH the special filename AND an ``app``/``pages`` path
+    segment, so an ordinary library file (e.g. ``lib/route.ts``) is never mistaken for a route entry.
+    ``rel`` is a repo-relative posix path.
+    """
+    parts = rel.split("/")
+    base = parts[-1]
+    stem, _, ext = base.partition(".")
+    if ext not in _TS_JS_EXTS or stem not in _FRAMEWORK_ENTRY_STEMS:
+        return False
+    return any(seg in ("app", "pages") for seg in parts[:-1])
+
+
 def iter_repo_source(project_root: Path, matcher: IgnoreMatcher | None = None) -> list[str]:
     """Repo-relative POSIX paths of every supported source file under ``project_root``.
 
@@ -205,34 +262,234 @@ def resolve_owners(
     return {rel: (name, abs_path) for rel, (_spec, name, abs_path) in claims.items()}
 
 
+def _gitignore_filter(
+    project_root: Path,
+    rels: list[str],
+    repo: Path | None,
+    include_gitignored: bool,
+) -> list[str]:
+    """Drop gitignored paths from ``rels`` (parity with mapping_coverage's denominator filter).
+
+    No-op when ``include_gitignored`` is True or ``repo`` is None (non-git repo); otherwise asks git
+    once for the ignored subset. Lazy import keeps ``extract/`` free of a top-level gitutil import.
+    """
+    if include_gitignored or repo is None or not rels:
+        return rels
+    from .. import gitutil
+    ignored = gitutil.gitignored(repo, rels)
+    return [r for r in rels if r not in ignored]
+
+
+def _walk_rels(
+    project_root: Path,
+    predicate,
+    matcher: IgnoreMatcher | None,
+    repo: Path | None,
+    include_gitignored: bool,
+) -> list[str]:
+    """Repo-relative posix paths of every non-ignored file matching ``predicate(rel, ext)``.
+
+    Ignore-aware exactly like :func:`mapping_coverage` — ``config.DEFAULT_IGNORES`` (via
+    :func:`walk_supported`), ``.boundsignore`` (``matcher``), and ``.gitignore`` (``repo``) — so the
+    doc/test universe matches the file universe the rest of validation uses. Sorted, deterministic.
+    """
+    rels: list[str] = []
+    for abs_path in walk_supported(project_root, None):  # None => every file
+        rel = abs_path.relative_to(project_root).as_posix()
+        if matcher and matcher.matches(rel):
+            continue
+        if not predicate(rel, abs_path.suffix):
+            continue
+        rels.append(rel)
+    rels = _gitignore_filter(project_root, rels, repo, include_gitignored)
+    return sorted(rels)
+
+
+def _explicit_owner(rel: str, subs: dict[str, "SubsystemCompact"], *, link_field: str) -> str | None:
+    """Most-specific subsystem that EXPLICITLY declares ``rel``, or None.
+
+    Considers each subsystem's ``link_field`` (``tests``/``docs``) first, then its ``paths``/``files``
+    — all path-shaped, so :func:`path_specificity` ranks them on one scale (an explicit
+    ``files:`` entry is strongest, then exact path, then directory/glob prefix). Most-specific wins;
+    equal specificity breaks to the sorted-first subsystem name for determinism. Returns None when no
+    subsystem covers ``rel`` at specificity > 0.
+    """
+    best_spec = 0
+    best_name: str | None = None
+    for name in sorted(subs):  # sorted ⇒ first-seen at a given specificity is the sorted-first name
+        sub = subs[name]
+        declared = list(getattr(sub, link_field, []) or [])
+        # link_field paths + the subsystem's own paths/files, ranked together (path_specificity
+        # treats `paths`-shaped entries uniformly). files: is the strongest single-file intent.
+        spec = path_specificity(rel, declared + list(sub.paths or []), sub.files)
+        if spec > best_spec:  # strictly-greater keeps the sorted-first tie winner
+            best_spec = spec
+            best_name = name
+    return best_name
+
+
+def resolve_test_owners(
+    project_root: Path,
+    subsystems: dict[str, "SubsystemCompact"],
+    matcher: IgnoreMatcher | None = None,
+    repo: Path | None = None,
+    include_gitignored: bool = False,
+) -> dict[str, str | None]:
+    """Map every repo test file (rel-posix) → ``owning_subsystem`` name, or None when unlinked.
+
+    Walks the tree once for test files (recognized via :func:`is_test_file`, ignore-aware like
+    :func:`mapping_coverage`) and assigns an owner in priority order:
+
+      1. **explicit** — the most-specific subsystem whose ``tests:`` (then ``paths``/``files``)
+         declares the file (:func:`_explicit_owner`);
+      2. **convention** — a test file directly under a subsystem's declared ``paths`` belongs to it
+         (deepest path wins); else a path segment ``tests/<area>/…`` / ``test/<area>/…`` /
+         ``__tests__/<area>/…`` or a filename ``test_<area>.py`` / ``<area>.test.ts`` /
+         ``<area>.spec.ts`` maps to a subsystem whose NAME == ``<area>`` if one exists;
+      3. else **None** — unlinked (informational, never a gap).
+
+    Deterministic: most-specific wins, equal specificity breaks to the sorted-first subsystem name.
+    """
+    rels = _walk_rels(project_root, lambda rel, ext: is_test_file(rel), matcher, repo, include_gitignored)
+    sub_names = set(subsystems)
+    out: dict[str, str | None] = {}
+    for rel in rels:
+        owner = _explicit_owner(rel, subsystems, link_field="tests")
+        if owner is None:
+            owner = _convention_test_owner(rel, subsystems, sub_names)
+        out[rel] = owner
+    return out
+
+
+def _convention_test_owner(
+    rel: str, subsystems: dict[str, "SubsystemCompact"], sub_names: set[str]
+) -> str | None:
+    """Convention-based owner for a test file (no explicit ``tests:`` declaration matched).
+
+    First: a test file directly under a subsystem's declared ``paths`` belongs to that subsystem
+    (deepest declared path wins, via :func:`path_specificity`). Otherwise: derive an ``<area>`` from
+    a ``tests/<area>/…`` (or ``test``/``__tests__``) path segment, or a ``test_<area>.py`` /
+    ``<area>.test.ts`` / ``<area>.spec.ts`` filename, and map it to a subsystem of that exact name.
+    Returns None when no convention matches.
+    """
+    # (a) directly under a subsystem's declared paths/files — deepest path owns it.
+    best_spec = 0
+    best_name: str | None = None
+    for name in sorted(subsystems):
+        sub = subsystems[name]
+        spec = path_specificity(rel, sub.paths, sub.files)
+        if spec > best_spec:
+            best_spec = spec
+            best_name = name
+    if best_name is not None:
+        return best_name
+    # (b) area from a tests/<area>/ path segment.
+    parts = rel.split("/")
+    for i, part in enumerate(parts[:-1]):
+        if part in {"tests", "test", "__tests__"} and i + 1 < len(parts) - 1:
+            area = parts[i + 1]
+            if area in sub_names:
+                return area
+    # (c) area from the filename: test_<area>.py / <area>.test.ts / <area>.spec.ts.
+    stem = parts[-1]
+    area = _filename_test_area(stem)
+    if area and area in sub_names:
+        return area
+    return None
+
+
+def _filename_test_area(stem: str) -> str | None:
+    """Extract the tested ``<area>`` from a test filename, or None.
+
+    ``test_auth.py`` → ``auth``; ``auth.test.ts`` / ``auth.spec.ts`` → ``auth``;
+    ``auth_test.py`` → ``auth``. Returns the bare area name (no directory, no extension).
+    """
+    if stem.startswith("test_"):
+        rest = stem[len("test_"):]
+        return rest.split(".", 1)[0] or None
+    for marker in (".test.", ".spec.", "_test.", "_spec."):
+        if marker in stem:
+            return stem.split(marker, 1)[0] or None
+    return None
+
+
+def resolve_doc_owners(
+    project_root: Path,
+    subsystems: dict[str, "SubsystemCompact"],
+    matcher: IgnoreMatcher | None = None,
+    repo: Path | None = None,
+    include_gitignored: bool = False,
+) -> dict[str, str | None]:
+    """Map every repo doc file (rel-posix) → ``owning_subsystem`` name, or None when unlinked.
+
+    Doc files are those whose extension is in :data:`config.DOC_EXTS` (``.md``/``.mdx``/``.rst``),
+    ignore-aware like :func:`mapping_coverage`. Owner assignment, in priority order:
+
+      1. **explicit** — the most-specific subsystem whose ``docs:`` (then ``paths``/``files``)
+         declares the file;
+      2. **convention** — ``docs/<name>.*`` or ``<name>.md`` whose stem == a subsystem name;
+      3. else **None** — unlinked.
+
+    Docs are ALWAYS informational, never a coverage gap. Deterministic: most-specific wins, equal
+    specificity breaks to the sorted-first subsystem name.
+    """
+    rels = _walk_rels(
+        project_root, lambda rel, ext: ext in config.DOC_EXTS, matcher, repo, include_gitignored
+    )
+    sub_names = set(subsystems)
+    out: dict[str, str | None] = {}
+    for rel in rels:
+        owner = _explicit_owner(rel, subsystems, link_field="docs")
+        if owner is None:
+            owner = _convention_doc_owner(rel, sub_names)
+        out[rel] = owner
+    return out
+
+
+def _convention_doc_owner(rel: str, sub_names: set[str]) -> str | None:
+    """Convention-based owner for a doc file: ``docs/<name>.*`` or ``<name>.md`` whose stem is a
+    subsystem name. Returns None when the stem matches no subsystem."""
+    stem = PurePosixPath(rel).stem
+    if stem in sub_names:
+        return stem
+    return None
+
+
 def mapping_coverage(
     project_root: Path,
     owned: set[str],
     matcher: IgnoreMatcher | None = None,
     repo: Path | None = None,
     include_gitignored: bool = False,
+    subsystems: dict[str, "SubsystemCompact"] | None = None,
 ) -> dict:
-    """How much of the repo's *source code* Bounds actually mapped, and an honest breakdown of what
-    it could not — the metric that stops a polyglot repo from looking fully mapped while half of it
-    is an unsupported language.
+    """How much of the repo's *library source code* Bounds actually mapped, an honest breakdown of
+    what it could not, plus separate docs/tests linkage buckets — the metric that stops a polyglot
+    repo from looking fully mapped while half of it is an unsupported language.
 
     Walks every non-ignored file (``config.DEFAULT_IGNORES`` + ``.boundsignore``), counts only files
     whose extension is in :data:`config.KNOWN_SOURCE_EXTS` (docs/config/assets are excluded so they
-    can't dilute the %), and classifies each as:
+    can't dilute the %). **Test files are excluded from the source denominator entirely** (recognized
+    via :func:`is_test_file`) and tracked in a separate ``tests`` bucket: a repo's tests can never
+    drag the mapped % down or be flagged as an unmapped-source gap. Each non-test source file is:
       - **mapped** — owned by a subsystem (``rel in owned``),
       - **unowned-supported** — Bounds *has* an adapter for it, it's just not in any manifest's
         paths (fix: add it to a manifest — deterministically mappable),
       - **unsupported** — no adapter for that language yet (fix: hand-author/AI-author a manifest, or
         it waits for an adapter).
-    Returns counts, ``mapped_pct``, and a sorted by-language breakdown of the unmapped source.
-    Deterministic; safe to skip on the ``--quick`` hot path (callers gate it). Honors ``.gitignore``
-    when ``repo`` is given and ``include_gitignored`` is False, so the denominator matches the
-    gitignore-aware file universe the rest of validation uses (a gitignored owned file is excluded
-    from both numerator and denominator, never miscounted as unmapped).
+    Returns source counts, ``mapped_pct``, a sorted by-language breakdown of the unmapped source, and
+    two informational buckets — ``tests`` and ``docs`` — each ``{total, linked, unlinked,
+    unlinked_sample}`` computed via :func:`resolve_test_owners`/:func:`resolve_doc_owners`
+    (``subsystems`` required for linkage; absent ⇒ all unlinked). Deterministic; safe to skip on the
+    ``--quick`` hot path (callers gate it). Honors ``.gitignore`` when ``repo`` is given and
+    ``include_gitignored`` is False, so the denominator matches the gitignore-aware file universe the
+    rest of validation uses (a gitignored owned file is excluded from both numerator and denominator,
+    never miscounted as unmapped).
     """
     supported = supported_extensions()
     # Collect source-code candidates first so gitignore can be applied in one batched call (parity
-    # with the engine's owned-file gitignore filtering).
+    # with the engine's owned-file gitignore filtering). Test files are bucketed separately below
+    # and never enter the source denominator.
     candidates: list[tuple[str, str, str]] = []  # (rel, ext, lang)
     for abs_path in walk_supported(project_root, None):  # None => every file
         ext = abs_path.suffix
@@ -242,6 +499,8 @@ def mapping_coverage(
         rel = abs_path.relative_to(project_root).as_posix()
         if matcher and matcher.matches(rel):
             continue
+        if is_test_file(rel):
+            continue  # tests are NOT library source — counted in the `tests` bucket, never a gap
         candidates.append((rel, ext, lang))
     if not include_gitignored and repo is not None:
         from .. import gitutil  # lazy: keep extract/ free of a top-level gitutil import
@@ -265,6 +524,10 @@ def mapping_coverage(
     pct = round(mapped / total * 100, 1) if total else 100.0
     if total and mapped < total and pct >= 100.0:
         pct = 99.9  # never display a rounded 100% while a gap remains
+
+    subs = subsystems or {}
+    test_owners = resolve_test_owners(project_root, subs, matcher, repo, include_gitignored)
+    doc_owners = resolve_doc_owners(project_root, subs, matcher, repo, include_gitignored)
     return {
         "files_source_total": total,
         "files_mapped": mapped,
@@ -274,6 +537,25 @@ def mapping_coverage(
         "unmapped_unsupported_language": unsupported,
         "unmapped_by_language": dict(sorted(by_lang.items())),
         "unsupported_languages": sorted(unsupported_langs),
+        "tests": _linkage_bucket(test_owners),
+        "docs": _linkage_bucket(doc_owners),
+    }
+
+
+def _linkage_bucket(owners: dict[str, str | None]) -> dict:
+    """Summarize a doc/test ownership map into ``{total, linked, unlinked, unlinked_sample}``.
+
+    ``linked`` counts files whose owner is not None; ``unlinked_sample`` is up to ten sorted
+    rel-posix paths of the unlinked files (a token-lean preview — the full set lives in the
+    resolver). Sorted for determinism.
+    """
+    unlinked = sorted(rel for rel, owner in owners.items() if owner is None)
+    linked = len(owners) - len(unlinked)
+    return {
+        "total": len(owners),
+        "linked": linked,
+        "unlinked": len(unlinked),
+        "unlinked_sample": unlinked[:10],
     }
 
 

@@ -120,6 +120,11 @@ KNOWN_SOURCE_EXTS = {
     ".sh": "shell", ".bash": "shell", ".zsh": "shell", ".ps1": "powershell",
 }
 
+# Documentation file extensions. Used by mapping-coverage to track which docs a subsystem links
+# (informational only — docs are NEVER counted in the source denominator and never a coverage gap;
+# they are deliberately excluded from KNOWN_SOURCE_EXTS so they can't dilute the mapped %).
+DOC_EXTS = {".md", ".mdx", ".rst"}
+
 # ---- Propagation ----
 # Depth of consumer propagation, keyed by the *changed provider's* criticality.
 #   -1 = unbounded (transitive closure), 0 = none, N = N hops.

@@ -80,6 +80,11 @@ class SubsystemCompact:
     exposes: list[Interface] = field(default_factory=list)
     consumes: list[Consumes] = field(default_factory=list)
     files: list[str] = field(default_factory=list)
+    # Repo-relative posix path strings (a file, a directory, or a simple glob — same shape
+    # semantics as ``paths``/``files``) linking the docs and test files that cover this subsystem.
+    # Human-curated and authoritative; convention auto-detection supplements them. Empty by default.
+    docs: list[str] = field(default_factory=list)
+    tests: list[str] = field(default_factory=list)
     consumed_by: list[str] = field(default_factory=list)  # AUTO-filled by loader
     source_path: str = ""
 
@@ -97,6 +102,12 @@ class SubsystemCompact:
         }
         if self.namespace:
             d["namespace"] = self.namespace
+        # Emit docs/tests only when non-empty (mirror ``namespace``), so a subsystem that links
+        # neither keeps the lean default shape.
+        if self.docs:
+            d["docs"] = list(self.docs)
+        if self.tests:
+            d["tests"] = list(self.tests)
         return d
 
     @classmethod
@@ -111,6 +122,8 @@ class SubsystemCompact:
             exposes=[Interface.from_dict(e) for e in (data.get("exposes") or [])],
             consumes=[Consumes.from_dict(c) for c in (data.get("consumes") or [])],
             files=[str(f) for f in (data.get("files") or [])],
+            docs=[str(d) for d in (data.get("docs") or [])],
+            tests=[str(t) for t in (data.get("tests") or [])],
             source_path=source_path,
         )
 
@@ -211,7 +224,7 @@ class RootManifest:
 @dataclass
 class Symbol:
     name: str
-    kind: str  # function|class|const|type|interface|variable|table|column|view|index|trigger|policy|rls|drop|rename|schema_meta|schema_error
+    kind: str  # function|class|const|type|interface|enum|namespace|default|variable|table|column|view|index|trigger|policy|rls|drop|rename|schema_meta|schema_error|unknown
     line: int
     exported: bool = True
     metadata: dict = field(default_factory=dict)

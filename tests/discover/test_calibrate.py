@@ -60,6 +60,7 @@ def _build(tmp_path):
 
 
 def test_calibrate_remove_keep_and_exempt(tmp_path):
+    """Stale exposes split three ways: unconsumed->remove, consumed->needs_review, internal->exempt (never proposed)."""
     _build(tmp_path)
     result = run_calibrate(tmp_path)
     db = result["subsystems"]["db"]
@@ -71,6 +72,7 @@ def test_calibrate_remove_keep_and_exempt(tmp_path):
 
 
 def test_calibrate_adds_undeclared_export(tmp_path):
+    """A tree-sitter-found export not in the manifest (`verify`) surfaces as an add_exposes proposal."""
     _build(tmp_path)
     result = run_calibrate(tmp_path)
     auth = result["subsystems"]["auth"]
@@ -78,6 +80,7 @@ def test_calibrate_adds_undeclared_export(tmp_path):
 
 
 def test_calibrate_flags_ghost_consumes_interface(tmp_path):
+    """A consumes interface the producer never exposes (GHOST) is flagged for removal — dangling edges drift."""
     _build(tmp_path)
     result = run_calibrate(tmp_path)
     auth = result["subsystems"]["auth"]
@@ -86,6 +89,7 @@ def test_calibrate_flags_ghost_consumes_interface(tmp_path):
 
 
 def test_calibrate_role_criticality_never_touched(tmp_path):
+    """Calibrate reconciles only exposes/consumes vs source — human-declared role/criticality are never proposed."""
     _build(tmp_path)
     result = run_calibrate(tmp_path)
     assert "role" not in str(result["subsystems"]["db"])
@@ -93,6 +97,7 @@ def test_calibrate_role_criticality_never_touched(tmp_path):
 
 
 def test_calibrate_apply_rewrites_manifests(tmp_path):
+    """apply=True persists the full proposal to YAML: DROPME removed, KEEPME/SECRET kept, verify added, GHOST pruned, role intact."""
     _build(tmp_path)
     run_calibrate(tmp_path, apply=True)
     cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
@@ -112,12 +117,14 @@ def test_calibrate_apply_rewrites_manifests(tmp_path):
 
 
 def test_calibrate_single_subsystem_scope(tmp_path):
+    """subsystem='auth' confines the proposal to that subsystem — scoped calibration never touches others."""
     _build(tmp_path)
     result = run_calibrate(tmp_path, subsystem="auth")
     assert set(result["subsystems"]) <= {"auth"}
 
 
 def test_calibrate_apply_drops_fully_stale_edge_to_bare(tmp_path):
+    """An edge whose only interface is a ghost collapses to a bare edge (key omitted), never a noisy `interfaces: []`."""
     # An edge whose ONLY interface is a ghost must not be left as `interfaces: []`.
     _build(tmp_path)
     cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
@@ -140,6 +147,7 @@ def test_calibrate_apply_drops_fully_stale_edge_to_bare(tmp_path):
 
 
 def test_calibrate_clean_subsystem_absent_from_proposal(tmp_path):
+    """Calibrate is idempotent: after apply, a second run proposes zero adds/removes — no phantom drift on clean manifests."""
     # A subsystem whose manifest already matches source should not appear in proposals.
     _build(tmp_path)
     # auth declares login but verify is undeclared -> auth will appear; db will appear.
@@ -152,6 +160,7 @@ def test_calibrate_clean_subsystem_absent_from_proposal(tmp_path):
 
 # ---- Drift baseline + check (the freshness gate) ----
 def test_check_without_baseline_flags_all_drift(tmp_path):
+    """With no baseline file, the freshness gate treats all existing drift as new (ok=False) and emits agent-structured items."""
     _build(tmp_path)  # the fixture carries real drift (verify undeclared, DROPME stale, ...)
     result = check_drift(tmp_path)
     assert result["mode"] == "calibrate-check"
@@ -163,6 +172,7 @@ def test_check_without_baseline_flags_all_drift(tmp_path):
 
 
 def test_baseline_then_check_is_clean(tmp_path):
+    """After dumping a baseline that captures all current drift, the check passes (ok=True, zero new) — accepted drift is silenced."""
     _build(tmp_path)
     dumped = dump_baseline(tmp_path)
     assert dumped["drift_count"] > 0
@@ -175,6 +185,7 @@ def test_baseline_then_check_is_clean(tmp_path):
 
 
 def test_check_flags_only_new_drift_above_baseline(tmp_path):
+    """Drift introduced after baselining (a new export) is the sole new_drift item — the gate fires only on genuinely new drift."""
     _build(tmp_path)
     dump_baseline(tmp_path)
     # Introduce NEW drift: add an undeclared export to db.
@@ -189,6 +200,7 @@ def test_check_flags_only_new_drift_above_baseline(tmp_path):
 
 
 def test_malformed_baseline_is_treated_as_absent(tmp_path):
+    """Fail-soft: a corrupt baseline file degrades to has_baseline=False (drift counted as new) instead of raising or falsely passing."""
     # A corrupt/hand-broken baseline must not be reported as a real baseline (which would
     # imply "no new drift above it"); it fails soft to has_baseline=False, never raising.
     _build(tmp_path)
@@ -200,6 +212,7 @@ def test_malformed_baseline_is_treated_as_absent(tmp_path):
 
 
 def test_resolving_drift_does_not_fail_check(tmp_path):
+    """Fixing drift (fewer keys than baseline) passes the check and reports resolved_count>0 — shrinking drift is never a failure."""
     _build(tmp_path)
     dump_baseline(tmp_path)
     # Resolve all drift by applying the reconciliation; fewer keys than baseline must pass.
