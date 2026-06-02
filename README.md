@@ -189,8 +189,10 @@ flowchart LR
   `paths:`. Deterministic, no AI needed.
 - **Unsupported language** (Go/Rust/Java — no adapter yet) → hand the agent the `unmapped_by_language`
   list and an existing `.bounds/manifests/*.yaml` as a template; it authors the missing manifest
-  (`paths` + `exposes` + `consumes`), then `bounds validate` confirms it clean. "100%" means 100% of
-  *supported-language* source — Bounds names exactly what it can't yet parse instead of guessing.
+  (`paths` + `exposes` + `consumes`), then `bounds validate` confirms it clean. Those hand-authored
+  exposes are **durable** — `calibrate` routes a not-found one to `needs_review` (never strips it) and
+  `validate` never flags it as drift, so the work survives. "100%" means 100% of *supported-language*
+  source — Bounds names exactly what it can't yet parse instead of guessing.
 
 The full human-and-AI workflow is in **[docs/coverage.md](docs/coverage.md)**. On this repo `bounds
 validate` reports **100% of source mapped** (36/36 non-test files) — Bounds dogfoods its own gate.
@@ -221,8 +223,16 @@ end-to-end on [click](https://github.com/pallets/click) (Python) and
 [axios](https://github.com/axios/axios) (TypeScript); NestJS/Angular import shapes are covered by the
 resolver test matrix.
 
-Runs on **Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on the
-roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
+Three honest tiers: **fully supported** (Python, TS/JS, SQL, Prisma — extracted *and* verified),
+**partially supported** (a supported parser with a documented, self-reported gap — e.g. an
+unparseable Postgres DDL statement, flagged `E_SCHEMA_UNPARSED`, with the rest of the file still
+folded), and **unsupported** (Go, Rust, Java — no adapter yet, but **hand-mappable and durable**: a
+hand-authored manifest survives `calibrate`/`validate`, never silently stripped or flagged). Every
+gap surfaces loudly with a next step — never a silent omission. Go and Rust adapters target v0.2.0,
+Java v0.3.0; adding one is a single
+[adapter class](docs/languages-and-platforms.md#adding-a-language-adapter). Runs on **Linux, macOS,
+and Windows** (Python 3.10–3.14). Full
+[support matrix + roadmap](docs/languages-and-platforms.md).
 
 ---
 

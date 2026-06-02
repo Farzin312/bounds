@@ -170,16 +170,24 @@ def iter_repo_source(project_root: Path, matcher: IgnoreMatcher | None = None) -
     return sorted(out)
 
 
-def iter_subsystem_files(project_root: Path, sub: SubsystemCompact, exts: set[str]) -> list[Path]:
-    """Every supported source file a subsystem owns (its ``paths`` globs + explicit ``files``).
+def iter_subsystem_files(
+    project_root: Path, sub: SubsystemCompact, exts: set[str] | None
+) -> list[Path]:
+    """Files a subsystem owns (its ``paths`` globs + explicit ``files``), filtered by ``exts``.
 
     The single home for the owned-file walk: the validation engine and ``describe`` both
     call this so they agree on exactly which files belong to a subsystem — no second copy to
-    drift. Deduplicated by real path (so a file reached via two globs is counted once) and
-    sorted by posix path for deterministic output. Skips :data:`config.DEFAULT_IGNORES`.
+    drift. ``exts`` is the extension allow-set (e.g. ``supported_extensions()``); pass ``None`` to
+    include EVERY extension — used by :func:`subsystems_with_unsupported_source` so an
+    unsupported-language file (``.go``/``.rs``/…) is visible (mirroring ``walk_supported``'s
+    ``exts=None`` convention). Deduplicated by real path (so a file reached via two globs is counted
+    once) and sorted by posix path for deterministic output. Skips :data:`config.DEFAULT_IGNORES`.
     """
     out: list[Path] = []
     seen: set[Path] = set()
+
+    def included(suffix: str) -> bool:
+        return exts is None or suffix in exts
 
     def add(f: Path) -> None:
         try:
@@ -197,16 +205,16 @@ def iter_subsystem_files(project_root: Path, sub: SubsystemCompact, exts: set[st
             for f in walk_supported(base, exts):
                 add(f)
         elif base.is_file():
-            if base.suffix in exts:
+            if included(base.suffix):
                 add(base)
         else:  # treat as a glob relative to the project root
             for f in sorted(project_root.glob(raw)):
-                if f.is_file() and f.suffix in exts and not in_default_ignores(f, project_root):
+                if f.is_file() and included(f.suffix) and not in_default_ignores(f, project_root):
                     add(f)
 
     for raw in sub.files or []:
         f = project_root / raw
-        if f.is_file() and f.suffix in exts:
+        if f.is_file() and included(f.suffix):
             add(f)
 
     return sorted(out, key=lambda p: p.as_posix())
@@ -558,6 +566,48 @@ def _convention_doc_owner(rel: str, sub_names: set[str]) -> str | None:
     if stem in sub_names:
         return stem
     return None
+
+
+def subsystems_with_unsupported_source(
+    project_root: Path,
+    subsystems: dict[str, "SubsystemCompact"],
+    matcher: IgnoreMatcher | None = None,
+) -> set[str]:
+    """Names of subsystems that own at least one UNSUPPORTED-language source file.
+
+    A file is "unsupported source" when its extension is a known source language
+    (:data:`config.KNOWN_SOURCE_EXTS`) but **no adapter handles it** — i.e. tree-sitter cannot
+    extract its symbols (Go, Rust, Java, …). For such a file Bounds has *zero evidence* about which
+    symbols a hand-authored ``exposes`` declares, so calibrate must not auto-remove those exposes and
+    validate must not flag them as structural drift. This is the single shared signal both paths key
+    off, so :mod:`bounds.calibrate` and :mod:`bounds.validate` can never disagree about an
+    unsupported-language manifest.
+
+    A directory/glob walk only — it inspects extensions, never reads source — so it stays cheap and
+    adds no per-file source reads to the ``--quick`` budget. Ignore-aware (``.boundsignore``) and
+    skips :data:`config.DEFAULT_IGNORES`; test files are excluded (a test in an unsupported language
+    is not the public surface a manifest's exposes describes). Deterministic: returns a plain set the
+    callers sort at their serialization boundary.
+    """
+    supported = supported_extensions()
+    out: set[str] = set()
+    for name in sorted(subsystems):
+        sub = subsystems[name]
+        for abs_path in iter_subsystem_files(project_root, sub, None):  # None => every extension
+            ext = abs_path.suffix
+            if ext in supported or ext not in config.KNOWN_SOURCE_EXTS:
+                continue  # supported (verifiable) or not source code at all
+            try:
+                rel = abs_path.relative_to(project_root).as_posix()
+            except ValueError:
+                continue
+            if is_test_file(rel):
+                continue
+            if matcher and matcher.matches(rel):
+                continue
+            out.add(name)
+            break  # one unsupported-source file is enough to mark the subsystem
+    return out
 
 
 def mapping_coverage(

@@ -237,6 +237,12 @@ def run(
 
     propagated = propagation.propagate(dirty, subsystems, root.criticality_registry())
 
+    # Subsystems owning an UNSUPPORTED-language source file (Go/Rust/Java/…): the SAME signal
+    # calibrate computes (scan.subsystems_with_unsupported_source), so structural-drift never flags a
+    # hand-authored expose Bounds couldn't verify while calibrate routes it to needs_review. A
+    # directory/extension walk only (no source reads), so it stays within the --quick budget.
+    unsupported_owners = scan.subsystems_with_unsupported_source(project_root, subsystems, matcher)
+
     ctx = CheckContext(
         project_root=project_root,
         root=root,
@@ -245,6 +251,7 @@ def run(
         file_owner=file_owner,
         dirty=dirty,
         propagated=propagated,
+        unsupported_owners=unsupported_owners,
     )
     for check in CHECKS_BY_MODE.get(mode, []):
         issues.extend(check(ctx))
@@ -323,26 +330,54 @@ def _coverage_gap_issue(mapping: dict) -> Issue:
 
     "100%-or-guidance": fired only when unmapped library source remains (tests/docs are tracked in
     their own buckets and never a gap). The message names what is unmapped; the fix names the exact
-    minimal manifest action to close it. Test/doc linkage is reported separately in stats, never here.
+    minimal manifest action — distinguishing the two gap kinds, because the right move differs:
+
+      * **unowned-supported** (we have an adapter — Python/TS/JS/SQL/Prisma — the file is just in no
+        subsystem): a deterministic fix — add the file to a manifest's `paths:`.
+      * **unsupported language** (no adapter yet — Go/Rust/Java/…): hand-author (or AI-author) a
+        manifest; those exposes are DURABLE (calibrate routes them to needs_review, validate never
+        flags them as drift), so the work survives.
+
+    The fix also points at `--fail-on-unowned` for teams that WANT an unmapped supported file to be a
+    hard CI gate. Test/doc linkage is reported separately in stats, never here.
     """
     parts = []
-    if mapping["unmapped_unsupported_language"]:
+    has_unsupported = bool(mapping["unmapped_unsupported_language"])
+    if has_unsupported:
         langs = ", ".join(f"{lang}×{n}" for lang, n in sorted(mapping["unmapped_by_language"].items())
                           if lang in mapping["unsupported_languages"])
         parts.append(f"{mapping['unmapped_unsupported_language']} in unsupported languages ({langs})")
     if mapping["unmapped_unowned_supported"]:
         parts.append(f"{mapping['unmapped_unowned_supported']} supported file(s) in no subsystem")
     detail = "; ".join(parts) or "some source files"
+
+    # Tailor the fix to which gap(s) are present so the advice is never generic. The two moves are
+    # genuinely different (deterministic add vs. durable hand-authored manifest); say so explicitly.
+    fixes: list[str] = []
+    if mapping["unmapped_unowned_supported"]:
+        fixes.append(
+            "supported files (Python/TS/JS/SQL/Prisma) in no subsystem → add each to a subsystem's "
+            "`paths:` (`bounds init --subsystem <name>` scaffolds one) — deterministic, no AI"
+        )
+    if has_unsupported:
+        fixes.append(
+            "unsupported-language files (no adapter yet) → hand-author (or AI-author) a manifest's "
+            "`exposes` from an existing `.bounds/manifests/*.yaml` template; those exposes are "
+            "DURABLE (calibrate keeps them as needs_review, validate never flags them as drift) so "
+            "the work survives"
+        )
+    fix = (
+        "reach 100% — " + "; ".join(fixes) + ". Verify with `bounds validate` (see docs/coverage.md). "
+        "Want unmapped supported files to BLOCK CI instead of warn? `bounds validate --fail-on-unowned`. "
+        "Report gaps so the supported-language list grows."
+    )
     return Issue(
         errors.E_COVERAGE_GAP,
         "warning",
         f"mapped {mapping['mapped_pct']}% of library source "
         f"({mapping['files_mapped']}/{mapping['files_source_total']} non-test files); unmapped: {detail} "
         f"(tests/docs are tracked separately, never a gap)",
-        fix="reach 100%: add each unmapped file to a subsystem's `paths:` "
-            "(`bounds init --subsystem <name>` to scaffold one), or have an AI author the manifest "
-            "(see docs/coverage.md) — unsupported languages need a hand-authored manifest until an "
-            "adapter lands; report gaps to help us reach 100%",
+        fix=fix,
     )
 
 

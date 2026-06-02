@@ -256,14 +256,17 @@ def run_discover(
         "skipped": sorted(skipped),
     }
     if coverage["files_unmapped"] > 0:
+        has_unsupported = bool(coverage["unsupported_languages"])
         result["next_step"] = (
             f"mapped {coverage['mapped_pct']}% of source; "
             f"{coverage['files_unmapped']} file(s) unmapped"
             + (f" in unsupported languages ({', '.join(coverage['unsupported_languages'])})"
-               if coverage["unsupported_languages"] else "")
+               if has_unsupported else "")
             + ". To reach 100%: `bounds init --subsystem <name>` and add the files to its `paths`, "
-            "or have an AI author the manifest in the same format — then `bounds validate`. "
-            "See docs/coverage.md."
+            "or have an AI author the manifest in the same format — then `bounds validate`."
+            + (" Hand-authored exposes for an unsupported language are durable (calibrate/validate "
+               "keep them, never strip or flag as drift)." if has_unsupported else "")
+            + " See docs/coverage.md."
         )
     notice = _apply_notice(applied, written, skipped)
     if notice is not None:

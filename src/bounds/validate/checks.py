@@ -61,6 +61,12 @@ class CheckContext:
     file_owner: dict[str, str]          # rel posix path -> subsystem name
     dirty: set[str] = field(default_factory=set)
     propagated: set[str] = field(default_factory=set)
+    # Subsystems that own an UNSUPPORTED-language source file (Go/Rust/Java/…). For those Bounds has
+    # no adapter, so it extracted nothing and has zero evidence a declared expose is gone — such a
+    # declared-but-absent expose must NOT be flagged as structural drift (it is hand-authored and
+    # unverifiable). Computed once by the engine via scan.subsystems_with_unsupported_source — the
+    # SAME helper calibrate uses — so the two can never disagree about an unsupported-language manifest.
+    unsupported_owners: set[str] = field(default_factory=set)
     # Coverage signal: count of local-looking imports that did NOT resolve to an owned
     # file. checks are pure (CheckContext)->list[Issue], so the count is threaded here (the
     # engine reads it after running checks) rather than returned. Only check_boundary writes it.
@@ -291,7 +297,15 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
         declared = sub.expose_names()
         actual = ctx.actual_exports(name)
         schema = ctx.schema_tables(name)
+        # A subsystem owning an UNSUPPORTED-language file (Go/Rust/Java/…) has exposes Bounds can't
+        # verify — it has no adapter, extracted nothing, so a declared-but-absent expose is NOT
+        # proven-stale drift. Skip the declared-but-missing branch for it (consistent with calibrate,
+        # which routes the same exposes to needs_review rather than remove). Undeclared *actual*
+        # exports can't arise here either (nothing was extracted), so the second branch is unaffected.
+        owns_unsupported = name in ctx.unsupported_owners
         for missing in sorted(declared - actual):
+            if owns_unsupported:
+                continue  # unverifiable hand-authored expose for an unparseable language — never drift
             # A column-granular expose (``users.email``) is satisfied when the fold still has
             # that table+column; a dropped column then correctly drifts. This mirrors the
             # consumes resolution in check_contract so exposes and consumes agree.

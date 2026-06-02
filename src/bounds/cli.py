@@ -480,9 +480,28 @@ def overview_cmd(human: bool) -> None:
         next_steps: list[str] = []
         mapped_pct = validation["mapped_pct"]
         if mapped_pct < 100.0:
+            # Name WHAT is unmapped and the right move per gap kind — so an agent reading overview is
+            # told loudly which files are dark and that unsupported-language manifests are durable
+            # (hand-author once; calibrate/validate won't strip or flag them). JSON-first: the same
+            # mapping fields the human view re-renders.
+            unsupported_n = mapping.get("unmapped_unsupported_language", 0)
+            unowned_n = mapping.get("unmapped_unowned_supported", 0)
+            bits: list[str] = []
+            if unowned_n:
+                bits.append(
+                    f"{unowned_n} supported file(s) in no subsystem — add to a manifest's `paths:`"
+                )
+            if unsupported_n:
+                langs = ", ".join(sorted(mapping.get("unsupported_languages", []) or []))
+                bits.append(
+                    f"{unsupported_n} file(s) in unsupported languages"
+                    + (f" ({langs})" if langs else "")
+                    + " — hand-author a manifest's `exposes` (durable: calibrate/validate keep it)"
+                )
+            detail = ("; ".join(bits)) if bits else "missing library source"
             next_steps.append(
-                "Map the missing library source: run `bounds validate -H`, follow the "
-                "`E_COVERAGE_GAP` fix, then rerun `bounds validate`."
+                f"Close the coverage gap ({detail}). Run `bounds validate -H` for the full "
+                "`E_COVERAGE_GAP` fix (see docs/coverage.md), then rerun `bounds validate`."
             )
         if validation["ownership_overlaps"]:
             next_steps.append(

@@ -13,7 +13,8 @@ from bounds.models import RootManifest
 from bounds.validate.checks import CheckContext
 
 
-def _ctx(subsystems, extracts=None, file_owner=None, dirty=None, propagated=None):
+def _ctx(subsystems, extracts=None, file_owner=None, dirty=None, propagated=None,
+         unsupported_owners=None):
     return CheckContext(
         project_root=Path("."),
         root=RootManifest(),
@@ -22,4 +23,5 @@ def _ctx(subsystems, extracts=None, file_owner=None, dirty=None, propagated=None
         file_owner=file_owner or {},
         dirty=dirty or set(),
         propagated=propagated or set(),
+        unsupported_owners=unsupported_owners or set(),
     )

@@ -55,10 +55,18 @@ import yaml
 
 from bounds import errors
 
-# Recognized targets. An empty request set means "all of these".
+# Recognized targets. These are the canonical file destinations each CI host
+# mandates and cannot be relocated (GitHub Actions => .github/workflows/, GitLab
+# => root .gitlab-ci.yml, pre-commit => root .pre-commit-config.yaml).
 _ALL_TARGETS = ("action", "precommit", "gitlab")
 
-# Relative paths (POSIX) each target writes to, under the project root.
+# The two *remote-CI provider* targets (host-bound). `precommit` is deliberately
+# excluded: a local hook is orthogonal to which CI host you use, so it is never
+# auto-installed by provider detection — it is always opt-in.
+_PROVIDER_TARGETS = ("action", "gitlab")
+
+# Relative paths (POSIX) each target writes to, under the project root. These are
+# fixed by each tool and must NOT be changed (relocation breaks the host).
 _TARGET_PATHS = {
     "action": ".github/workflows/bounds.yml",
     "precommit": ".pre-commit-config.yaml",

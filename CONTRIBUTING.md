@@ -196,16 +196,15 @@ All tests must pass. If you add a new feature, include tests.
 
 ## Adding a Language Adapter
 
-Tree-sitter adapters live in `src/bounds/extract/`. To add a new language:
-
-1. Create a file `src/bounds/extract/<language>.py`.
-2. Subclass `LanguageAdapter` from `.base`. Set `language_name` and `extensions`.
-3. Implement `extract(self, rel_path, source) -> ExtractResult` to walk the
-   tree-sitter tree for exported symbols and import references. Build the result via
-   `base.make_result(...)` so both the content and structure hashes are computed consistently.
-4. Register the adapter in `src/bounds/extract/registry.py`.
-5. Add the tree-sitter grammar to `pyproject.toml` dependencies.
-6. Write tests in `tests/extract/test_extract.py`.
+Adding a language moves it from *unsupported* (hand-mappable) to *fully supported* (extracted +
+verified) and is **one adapter class plus a registry entry** — no engine changes. The **canonical,
+step-by-step how-to** (subclass `extract.base.LanguageAdapter`, implement `extract` via
+`base.make_result(...)`, register in `extract/registry.py`, add the grammar to `pyproject.toml`,
+write tests under `tests/extract/`, when to bump `config.STATE_VERSION`) lives in
+**[docs/languages-and-platforms.md → Adding a language adapter](docs/languages-and-platforms.md#adding-a-language-adapter)**.
+That page is the single source of truth — follow it there so the steps never drift between docs.
+The same page's [Roadmap](docs/languages-and-platforms.md#roadmap) lists which languages are next
+(Go/Rust v0.2.0, Java v0.3.0).
 
 ## Release Process & Source of Truth
 

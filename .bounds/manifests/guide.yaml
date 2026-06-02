@@ -6,6 +6,9 @@ paths:
   - src/bounds/guide.py
 exposes:
   - { name: run_guide, kind: function }
-consumes: []
+consumes:
+  - { subsystem: manifest, via: loader, interfaces: [find_root, load_all] }
+  - { subsystem: extract, via: scan, interfaces: [supported_extensions, mapping_coverage] }
+  - { subsystem: ignore, via: ignore, interfaces: [load_matcher] }
 tests:
   - tests/cli/test_guide.py

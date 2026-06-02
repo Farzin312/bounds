@@ -113,12 +113,14 @@ MAX_FILE_BYTES = 1_000_000
 DEFAULT_IGNORES = {
     # Dependencies & VCS
     "node_modules",
+    "vendor",  # Go vendored deps (also PHP Composer)
     ".git",
     # Generic build output
     "dist",
     "build",
     "out",
     "target",  # Rust/Cargo, Maven/Gradle JVM output
+    ".gradle",  # Java/Gradle build cache
     "coverage",
     # JS/TS framework build & tooling dirs
     ".next",

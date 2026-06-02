@@ -1,0 +1,10 @@
+repos:
+- repo: local
+  hooks:
+  - id: bounds
+    name: bounds
+    entry: bounds validate --quick --ci
+    language: system
+    pass_filenames: false
+    stages:
+    - pre-commit
