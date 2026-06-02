@@ -99,6 +99,27 @@ DEFAULT_IGNORES = {
     ".compact",  # legacy config dir
 }
 
+# Extension -> language label for *known source code*, language-agnostic. The denominator for
+# mapping-coverage: how much of a repo's source Bounds actually mapped, and an honest, by-language
+# breakdown of what it could not (so a polyglot repo can't look "fully mapped" while half of it is an
+# unsupported language). The labels Bounds has an adapter for (python/typescript/javascript/sql/
+# prisma) are *mappable*; the rest are *unsupported today* and surface as a loud coverage gap. Only
+# code extensions belong here — docs/config/assets are deliberately excluded so they don't dilute %.
+KNOWN_SOURCE_EXTS = {
+    ".py": "python", ".pyi": "python",
+    ".ts": "typescript", ".tsx": "typescript", ".mts": "typescript", ".cts": "typescript",
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+    ".sql": "sql", ".prisma": "prisma",
+    # Unsupported today (no adapter) — counted so coverage is honest, not silently dropped.
+    ".go": "go", ".rs": "rust", ".java": "java", ".kt": "kotlin", ".kts": "kotlin",
+    ".rb": "ruby", ".php": "php", ".cs": "c#", ".swift": "swift", ".scala": "scala",
+    ".c": "c", ".h": "c", ".cc": "c++", ".cpp": "c++", ".cxx": "c++", ".hpp": "c++", ".hh": "c++",
+    ".m": "objective-c", ".mm": "objective-c++", ".dart": "dart", ".lua": "lua", ".ex": "elixir",
+    ".exs": "elixir", ".erl": "erlang", ".clj": "clojure", ".hs": "haskell", ".ml": "ocaml",
+    ".r": "r", ".jl": "julia", ".groovy": "groovy", ".vue": "vue", ".svelte": "svelte",
+    ".sh": "shell", ".bash": "shell", ".zsh": "shell", ".ps1": "powershell",
+}
+
 # ---- Propagation ----
 # Depth of consumer propagation, keyed by the *changed provider's* criticality.
 #   -1 = unbounded (transitive closure), 0 = none, N = N hops.

@@ -41,8 +41,11 @@ loop (pre-commit hooks + CI), see [./team-workflow.md](./team-workflow.md).
 > project's `.bounds/` directory; nothing auto-loads it (by design — see the binary-cache note below).
 > The supported path is to run `bounds agent --sync` **once** per repo: it writes an instruction file
 > that each coding agent already reads (see the table below), telling the agent to query `bounds
-> describe` / `bounds list` instead of reading raw source. (Run bare `bounds agent` first if you just
-> want to see which agents are present — it is read-only and writes nothing.) Native MCP detection —
+> describe` / `bounds list` instead of reading raw source — and, for most agents, a native command or
+> auto-triggering skill so the agent can *invoke* Bounds, not just be told to (see
+> [Native commands & skills](#native-commands--skills-not-just-a-pointer)). (Run bare `bounds agent`
+> first if you just want to see which agents are present — it is read-only and writes nothing.) Native
+> MCP detection —
 > where an MCP-aware agent discovers Bounds as a structured tool with no instruction file — is on the
 > roadmap (v0.3), not shipped today.
 
@@ -54,8 +57,9 @@ No manual copy-paste. The flow is three commands, safe to run in order:
 
 1. **`bounds agent`** — bare, read-only. Lists which coding agents this repo already has (it
    defaults to `--detect`, so typing it does nothing destructive). Start here.
-2. **`bounds agent --sync`** — wire them. Writes the canonical contract into `AGENTS.md` and a
-   pointer file for each agent.
+2. **`bounds agent --sync`** — wire them. Writes the canonical contract into `AGENTS.md`, a
+   pointer file for each agent, and — for the agents that support one — a native invokable
+   command or auto-triggering skill (see [Native commands & skills](#native-commands--skills-not-just-a-pointer) below).
 3. **`bounds agent --check`** — verify the wiring is current (JSON by default, so it drops straight
    into CI).
 
@@ -64,7 +68,7 @@ agents already read) plus a short pointer file for **eight** coding agents — t
 `bounds list`, `bounds describe`, and `bounds impact` before broad source searches, and to run
 `bounds validate --quick` after edits:
 
-| Agent | Config file written |
+| Agent | Pointer file written |
 |-------|---------------------|
 | **Claude Code** | `.claude/commands/bounds.md` |
 | **Codex CLI** + **OpenCode** | shared `AGENTS.md` |
@@ -75,13 +79,17 @@ agents already read) plus a short pointer file for **eight** coding agents — t
 | **Windsurf** | `.windsurf/rules/bounds.md` |
 
 Shared files (`AGENTS.md`, `GEMINI.md`) get a marked Bounds block that leaves your other content
-intact; hand-written configs are never clobbered.
+intact; hand-written configs are never clobbered. The pointer is only the *instruction* layer — it
+tells the agent to use Bounds. Most agents also get a native artifact that lets them *invoke* (or
+auto-trigger) Bounds; see the next section.
 
 **What ships vs what's generated:** only `AGENTS.md` is **committed** to the repo (the cross-ecosystem
 standard file). Every per-tool pointer above — `.claude/commands/bounds.md`, `GEMINI.md`,
 `.cursor/rules/bounds.mdc`, `.windsurf/rules/bounds.md`, `.aider.conf.yml`,
-`.github/copilot-instructions.md` — is **gitignored and regenerated locally** by `bounds agent --sync`,
-so a clone stays lean. Run `bounds agent --sync` after cloning to (re)create the ones your editor uses.
+`.github/copilot-instructions.md` — plus the native command/skill artifacts (see
+[Native commands & skills](#native-commands--skills-not-just-a-pointer)) is **gitignored and
+regenerated locally** by `bounds agent --sync`, so a clone stays lean. Run `bounds agent --sync` after
+cloning to (re)create the ones your editor uses.
 
 ### Commands & flags
 
@@ -127,6 +135,46 @@ happened:
   markers; opt it in with the marker pair above.
 - `left alone (you edited the bounds block)` — a managed block whose body you hand-edited since the
   last sync; Bounds won't overwrite your changes.
+
+## Native commands & skills (not just a pointer)
+
+The `AGENTS.md` contract and the per-agent pointer files are the **instruction** layer: they tell a
+cooperating agent to reach for `bounds describe` / `bounds list` / `bounds impact` instead of reading
+raw files. But an instruction the agent has to remember to follow is weaker than a command it can
+*invoke* — or a skill that *fires on its own* at the right moment. So `bounds agent --sync` also
+generates, for each agent that supports one, a **native, invokable command or auto-triggering skill**
+in that tool's own format and location:
+
+| Agent | Native artifact | Kind | Argument syntax |
+|-------|-----------------|------|-----------------|
+| **Claude Code** | `.claude/skills/bounds/SKILL.md` (+ the `/bounds` dispatcher at `.claude/commands/bounds.md`) | Auto-triggering skill | — |
+| **Codex CLI** | `.codex/skills/bounds/SKILL.md` | Auto-triggering skill | — |
+| **Gemini** | `.gemini/commands/bounds.toml` | TOML custom command | `{{args}}` |
+| **OpenCode** | `.opencode/command/bounds.md` | Markdown command | `$ARGUMENTS` |
+| **GitHub Copilot** | `.github/prompts/bounds.prompt.md` | Prompt file | `${input:…}` |
+| **Cursor** | `.cursor/commands/bounds.md` | Command (the always-on `.cursor/rules/bounds.mdc` is the pointer) | — |
+| **Windsurf** | `.windsurf/workflows/bounds.md` | Workflow (the always-on `.windsurf/rules/bounds.md` is the pointer) | — |
+| **Aider** | **none** | — | — |
+
+**The auto-trigger skills are the intelligence layer.** A Claude/Codex `SKILL.md` carries the decision
+logic in its `description` front-matter — the matcher the model reads to decide *when* to invoke
+Bounds. It encodes concrete trigger conditions, not a tagline: exploring an unfamiliar area, needing a
+subsystem's public API or DB tables, **before** a risky change to a shared/core subsystem or a
+migration (check the blast radius first), "what depends on X" / "what breaks if X changes," and
+verifying drift after an edit. With the skill in place the agent reaches for Bounds on its own, rather
+than only when a human reminds it.
+
+**Aider gets none — on purpose.** Aider has no committable custom-command mechanism, so it receives
+only its `.aider.conf.yml` pointer. Bounds never fakes a command file a tool won't actually load; an
+honest "no native command here" beats a dead file.
+
+**Every artifact is bounds-owned, marker-managed, and hand-edit safe.** Each is a dedicated
+(bounds-only) file wrapped in `<!-- BOUNDS:START -->` / `<!-- BOUNDS:END -->` markers and stamped with
+the bounds version + a content hash, so a re-sync of an unedited file is a no-op (`already current`).
+If a human edits the body inside the markers, the next sync reports it `left alone (you edited the
+bounds block)` and never clobbers the change. Like the per-tool pointers, these native artifacts are
+**gitignored and regenerated locally** — run `bounds agent --sync` after cloning to (re)create the
+ones your editor uses.
 
 ## Manual copy block
 

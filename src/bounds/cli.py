@@ -26,6 +26,7 @@ from . import (
     describe as describe_mod,
     discover as discover_mod,
     errors,
+    guide as guide_mod,
     locate,
     output,
     upgrade as upgrade_mod,
@@ -149,7 +150,7 @@ def _version_display(raw: str) -> str:
 # by spelling. Every registered command must appear in exactly one group; a stray command not
 # listed here still shows up under "Other" (a loud signal to add it), so nothing is ever hidden.
 _COMMAND_GROUPS = (
-    ("Set up", ("init", "discover", "agent", "ci")),
+    ("Set up", ("guide", "init", "discover", "agent", "ci")),
     ("Read the map (do this before grepping source)", ("list", "describe", "overview", "where", "impact")),
     ("Catch drift", ("validate", "preflight", "calibrate")),
     ("Maintain", ("cache", "upgrade", "upgrade-check")),
@@ -159,6 +160,7 @@ _COMMAND_GROUPS = (
 # command line mid-word; the prose paragraph after the blank line is allowed to wrap normally.
 _HELP_EPILOG = (
     "\b\n"
+    "New here? Run 'bounds guide' for a state-aware setup checklist.\n"
     "Quick start:\n"
     "  bounds init --root  ·  bounds discover --apply  ·  bounds agent --sync\n"
     "\n"
@@ -212,6 +214,22 @@ def main() -> None:
     architecture drift in CI. Structural extraction and validation are deterministic
     and zero-LLM.
     """
+
+
+# ===========================================================================
+# guide
+# ===========================================================================
+@main.command("guide", short_help="Setup checklist: get Bounds working in this project")
+@_human
+def guide_cmd(human: bool) -> None:
+    """Show the setup steps (init → discover → agent --sync → ci) with what's already done, plus
+    the daily commands and the single next action. Read-only; safe to run anywhere."""
+    human = _interactive_human(human)
+
+    def go() -> None:
+        output.emit(guide_mod.run_guide(Path.cwd()), human)
+
+    _run(human, go)
 
 
 # ===========================================================================

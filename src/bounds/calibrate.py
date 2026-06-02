@@ -30,6 +30,7 @@ from pathlib import Path
 import yaml
 
 from . import config, errors
+from . import tsconfig
 from .extract.scan import extract_project
 from .ignore import load_matcher
 from .manifest import loader as manifest_loader
@@ -50,6 +51,7 @@ def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bo
     matcher = load_matcher(project_root)
     file_owner, extracts, generated = extract_project(project_root, subs, matcher)
     known_noext, suffix_index = index_extracts(extracts)  # one shared projection (built once)
+    aliases = tsconfig.load(project_root)  # TS path aliases, loaded once for the whole run
 
     # What every subsystem consumes (provider -> set of interface names) and consumed providers.
     consumed_ifaces: dict[tuple[str, str], set[str]] = {}
@@ -64,7 +66,7 @@ def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bo
     for name in targets:
         proposal = _calibrate_one(
             name, subs, file_owner, extracts, generated, known_noext, suffix_index,
-            consumed_providers_ifaces,
+            consumed_providers_ifaces, aliases,
         )
         if _has_changes(proposal):
             proposals[name] = proposal
@@ -95,6 +97,7 @@ def _calibrate_one(
     known_noext: dict[str, str],
     suffix_index: dict[str, str],
     consumed_providers_ifaces: dict[str, set[str]],
+    aliases: "tsconfig.TsAliases | None" = None,
 ) -> dict:
     sub = subs[name]
     own_files = sorted(p for p, owner in file_owner.items() if owner == name and p in extracts)
@@ -132,7 +135,7 @@ def _calibrate_one(
     actual_owners: set[str] = set()
     for rel in own_files:
         for imp in extracts[rel].imports:
-            target = resolve_import(rel, imp.module, known_noext, suffix_index)
+            target = resolve_import(rel, imp.module, known_noext, suffix_index, aliases)
             owner = file_owner.get(target) if target else None
             if owner and owner != name and owner in subs:
                 actual_owners.add(owner)

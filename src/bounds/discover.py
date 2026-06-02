@@ -30,9 +30,9 @@ from pathlib import Path
 
 import yaml
 
-from . import config, errors, gitutil
+from . import config, errors, gitutil, tsconfig
 from .extract import adapter_for_language
-from .extract.scan import extract_file, iter_repo_source
+from .extract.scan import extract_file, iter_repo_source, mapping_coverage
 from .ignore import load_matcher
 from .validate.checks import index_extracts, resolve_import
 from .validate.schema import SCHEMA_LANGUAGES, schema_catalog
@@ -77,14 +77,15 @@ def run_discover(
             extracts[rel] = result
     known_noext, suffix_index = index_extracts(extracts)  # one shared projection (built once)
 
-    # Cross-candidate consume edges (direct imports only).
+    # Cross-candidate consume edges (direct imports only). TS path aliases (@/…) resolve too.
+    aliases = tsconfig.load(project_root)
     consumes: dict[str, set[str]] = {c: set() for c in candidate_files}
     for rel, result in extracts.items():
         owner = file_to_candidate.get(rel)
         if owner is None:
             continue
         for imp in result.imports:
-            target = resolve_import(rel, imp.module, known_noext, suffix_index)
+            target = resolve_import(rel, imp.module, known_noext, suffix_index, aliases)
             tgt_owner = file_to_candidate.get(target) if target else None
             if tgt_owner and tgt_owner != owner:
                 consumes[owner].add(tgt_owner)
@@ -131,9 +132,21 @@ def run_discover(
             cand["namespace"] = namespace
         candidates.append(cand)
 
+    # Drop consume-edges to candidates that were not kept (low-score, dropped): writing a
+    # `consumes: <name>` for a subsystem discover never materializes would make `validate` raise a
+    # self-inflicted E_UNRESOLVED_REFERENCE on a fresh run. Only edges between kept subsystems stand.
+    kept_set = set(kept)
+    for cand in candidates:
+        if cand.get("consumes"):
+            cand["consumes"] = [c for c in cand["consumes"] if c in kept_set]
+
+    # Languages actually present in the extracted source — so root.yaml reflects the repo instead
+    # of init's hardcoded `[python]` default (a pure-TS/Prisma repo must not claim to be Python).
+    detected_languages = sorted({r.language for r in extracts.values() if getattr(r, "language", None)})
     root_proposal = {
         "version": config.SCHEMA_VERSION,
         "project": project_root.resolve().name,
+        "languages": detected_languages,
         "subsystems": kept,
     }
 
@@ -144,14 +157,33 @@ def run_discover(
         written, skipped = _write(project_root, root_proposal, candidates)
         applied = True
 
+    # Mapping coverage: how much SOURCE the proposal actually covers — surfaced right here so a
+    # polyglot repo can't look fully discovered while an unsupported language sits unmapped.
+    owned = {rel for rel, cand in file_to_candidate.items() if cand in kept_set}
+    coverage = mapping_coverage(
+        project_root, owned, matcher,
+        repo=gitutil.repo_root(project_root) or project_root,
+    )
+
     result = {
         "mode": "discover",
         "applied": applied,
         "root": root_proposal,
         "candidates": candidates,
+        "coverage": coverage,
         "written": sorted(written),
         "skipped": sorted(skipped),
     }
+    if coverage["files_unmapped"] > 0:
+        result["next_step"] = (
+            f"mapped {coverage['mapped_pct']}% of source; "
+            f"{coverage['files_unmapped']} file(s) unmapped"
+            + (f" in unsupported languages ({', '.join(coverage['unsupported_languages'])})"
+               if coverage["unsupported_languages"] else "")
+            + ". To reach 100%: `bounds init --subsystem <name>` and add the files to its `paths`, "
+            "or have an AI author the manifest in the same format — then `bounds validate`. "
+            "See docs/coverage.md."
+        )
     notice = _apply_notice(applied, written, skipped)
     if notice is not None:
         result["notice"] = notice
@@ -211,6 +243,16 @@ def _group(
         dkey = "" if parent in (Path("."), Path("")) else parent.as_posix()
         by_dir.setdefault(dkey, []).append(rel)
 
+    # 2b. Fold a module's structural sub-directories (dto/, services/, entities/, …) into the
+    #     module dir so a framework module (e.g. NestJS auth/{dto,services,auth.module.ts}) becomes
+    #     ONE `auth` subsystem, not five confusingly-named ones (auth-dto, auth-services, …). Only
+    #     folds when the parent is itself a candidate, so a standalone structural dir is preserved.
+    dir_set = set(by_dir)
+    folded: dict[str, list[str]] = {}
+    for dkey, files in by_dir.items():
+        folded.setdefault(_fold_target(dkey, dir_set), []).extend(files)
+    by_dir = folded
+
     # 3. Name each directory: its basename when unique, else a path-derived name so two
     #    same-named dirs in different trees (e.g. a/utils and b/utils) stay SEPARATE
     #    subsystems instead of being silently fused.
@@ -221,6 +263,40 @@ def _group(
             file_to_candidate[rel] = name
             candidate_files.setdefault(name, set()).add(rel)
     return file_to_candidate, candidate_files
+
+
+# Directory basenames that are a module's implementation sub-parts, not subsystem boundaries of
+# their own. When one sits directly under another candidate directory, its files fold into that
+# parent — so a framework module's `dto/`/`services/`/… don't each become a separate (and
+# confusingly-named) subsystem. Conservative by design: folding requires the parent to already be
+# a candidate, so a deliberate standalone `src/types` (whose parent has no direct sources) is kept.
+_STRUCTURAL_SUBPARTS = frozenset({
+    "dto", "dtos", "entity", "entities", "model", "models", "schema", "schemas",
+    "interface", "interfaces", "type", "types", "constant", "constants", "enum", "enums",
+    "service", "services", "controller", "controllers", "guard", "guards", "pipe", "pipes",
+    "decorator", "decorators", "middleware", "middlewares", "repository", "repositories",
+    "dao", "util", "utils", "helper", "helpers", "validator", "validators",
+})
+
+
+def _fold_target(dkey: str, dir_set: set[str]) -> str:
+    """Walk a structural sub-dir up to the module candidate it belongs to (else return it as-is).
+
+    ``src/auth/dto`` → ``src/auth`` when ``src/auth`` is a candidate; repeats so
+    ``src/auth/dto/nested`` collapses too. Stops at the first non-structural dir or when the parent
+    isn't a candidate, so unrelated trees never fuse.
+    """
+    cur = dkey
+    seen: set[str] = set()
+    while cur and cur not in seen:
+        seen.add(cur)
+        base = cur.rsplit("/", 1)[-1] if "/" in cur else cur
+        parent = cur.rsplit("/", 1)[0] if "/" in cur else ""
+        if base in _STRUCTURAL_SUBPARTS and parent in dir_set:
+            cur = parent
+        else:
+            break
+    return cur
 
 
 def _merge_match(rel: str, merge_index: list[tuple[str, list[str]]]) -> str | None:
@@ -267,9 +343,17 @@ def _disambiguate(dkey: str, used: set[str]) -> str:
 
 
 def _candidate_paths(name: str, files: list[str]) -> list[str]:
-    """The common parent directories owning a candidate's files (deduped, sorted)."""
+    """The minimal set of parent directories owning a candidate's files (deduped, sorted).
+
+    A dir already covered by an ancestor in the set is dropped, so a folded module collapses to a
+    single root path (``src/auth`` rather than ``src/auth`` + ``src/auth/dto`` + ``src/auth/services``).
+    """
     dirs = sorted({Path(f).parent.as_posix() for f in files})
-    return dirs or [name]
+    covering: list[str] = []
+    for d in dirs:  # sorted ⇒ an ancestor always precedes its descendants
+        if not any(d == c or d.startswith(c + "/") for c in covering):
+            covering.append(d)
+    return covering or [name]
 
 
 # ---------------------------------------------------------------------------
@@ -344,15 +428,43 @@ def _infer_criticality(consumed_by: int) -> str:
     return "leaf"
 
 
+_TEST_DIR_PARTS = {"tests", "test", "__tests__", "spec", "specs", "e2e"}
+
+
+def _is_test_file(rel: str) -> bool:
+    """A test file by directory or filename convention (pytest / Jest / Vitest / Mocha)."""
+    parts = rel.split("/")
+    if any(p in _TEST_DIR_PARTS for p in parts[:-1]):
+        return True
+    stem = parts[-1]
+    return (stem.startswith("test_") or stem.startswith("test.")
+            or "_test." in stem or ".test." in stem or ".spec." in stem or "_spec." in stem
+            or "conftest." in stem)
+
+
+def _is_test_symbol(name: str, kind: str) -> bool:
+    """A test case, not public API: a ``test_*`` function or a ``Test*`` class (xUnit/pytest)."""
+    return name.startswith("test_") or (kind == "class" and name.startswith("Test"))
+
+
 def _exposes_for(files: list[str], extracts: dict, generated: set[str]) -> list[dict]:
-    """Every exported, non-private symbol across a candidate's files, verified by tree-sitter."""
+    """Every exported, non-private symbol across a candidate's files, verified by tree-sitter.
+
+    Test cases (``test_*`` functions / ``Test*`` classes in a test file) are excluded: a test runner
+    discovers them by naming convention, nothing *imports* them, so listing all of them as a public
+    surface is wrong and bloats the manifest (a 400-test dir would yield an 800-line `exposes`).
+    """
     seen: dict[str, dict] = {}
     for rel in files:
         if rel in generated or rel not in extracts:
             continue
+        is_test = _is_test_file(rel)
         for sym in extracts[rel].symbols:
-            if sym.exported and not sym.name.startswith("_") and sym.name not in seen:
-                seen[sym.name] = {"name": sym.name, "kind": sym.kind, "file": rel, "verified": True}
+            if not sym.exported or sym.name.startswith("_") or sym.name in seen:
+                continue
+            if is_test and _is_test_symbol(sym.name, sym.kind):
+                continue  # a test case is not a consumable interface
+            seen[sym.name] = {"name": sym.name, "kind": sym.kind, "file": rel, "verified": True}
     return [seen[n] for n in sorted(seen)]
 
 
@@ -385,6 +497,11 @@ def _write(project_root: Path, root_proposal: dict, candidates: list[dict]) -> t
             root_doc = dict(raw)
             existing_subs = [str(s) for s in (raw.get("subsystems") or [])]
     root_doc["subsystems"] = sorted(set(existing_subs) | set(root_proposal["subsystems"]))
+    # Detection is authoritative over init's `[python]` placeholder: when discover actually saw
+    # source, overwrite languages with what it found (only when non-empty, so a no-op run can't
+    # blank a hand-set value).
+    if root_proposal.get("languages"):
+        root_doc["languages"] = root_proposal["languages"]
     root_doc.setdefault("version", root_proposal["version"])
     root_doc.setdefault("project", root_proposal["project"])
     root_doc.setdefault("entry_points", [])

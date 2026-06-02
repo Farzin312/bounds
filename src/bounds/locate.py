@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import errors
+from . import tsconfig
 from .extract import scan
 from .ignore import load_matcher
 from .manifest import loader as manifest_loader
@@ -119,6 +120,7 @@ def _undeclared_consumer_edges(project_root: Path, subs: dict, name: str) -> lis
     """
     file_owner, extracts, _ = scan.extract_project(project_root, subs, load_matcher(project_root))
     known_noext, suffix_index = index_extracts(extracts)
+    aliases = tsconfig.load(project_root)
     declared = set(subs[name].consumed_by)  # subsystems that already declare consuming `name`
     evidence: dict[str, set[str]] = {}
     for rel in sorted(extracts):
@@ -126,7 +128,7 @@ def _undeclared_consumer_edges(project_root: Path, subs: dict, name: str) -> lis
         if owner is None or owner == name:
             continue
         for imp in extracts[rel].imports:
-            target = resolve_import(rel, imp.module, known_noext, suffix_index)
+            target = resolve_import(rel, imp.module, known_noext, suffix_index, aliases)
             if target and file_owner.get(target) == name:
                 evidence.setdefault(owner, set()).add(rel)
     return [

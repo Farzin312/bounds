@@ -57,6 +57,36 @@ than validated.
 
 ---
 
+## Framework & import-resolution support (TypeScript / JavaScript)
+
+Extraction sees *what* a file imports; the **import resolver** decides which in-repo file a specifier
+points at, and that edge is what `impact` / boundary checks / `where` rely on. Real-world TS projects
+rarely import by raw relative stem — they lean on framework filename conventions and `tsconfig`
+aliases — so the resolver understands these shapes (a bare specifier it can't resolve becomes no edge,
+never a wrong one):
+
+| Import shape | Example | Resolves? | Notes |
+|--------------|---------|-----------|-------|
+| **Dot-named relative files** | `./auth.service` → `auth.service.ts` | ✅ | The NestJS / Angular convention. The dots belong to the *filename*, not a path separator |
+| **`tsconfig` `paths` aliases** | `@/common`, `@app/*` → `src/common`, … | ✅ | One `*` wildcard per entry; tried in sorted order before the baseUrl fallback |
+| **`baseUrl`-relative bare imports** | `common/types` with `baseUrl: "src"` → `src/common/types` | ✅ | TS resolves bare specifiers against `baseUrl` before node_modules |
+| **`extends` chains** | a leaf `tsconfig.json` extending a shared base | ✅ | The chain is merged base→leaf (leaf wins); JSONC comments + trailing commas tolerated. Bare-package `extends` (`@tsconfig/node20`) is out of scope |
+
+**Honest limits.** Only **one** `*` wildcard per `paths` entry is supported. An alias that resolves
+into a `node_modules` package (a monorepo workspace dependency) is treated as **external** — no edge.
+Aliases apply **only to TS/JS importers**: a Python file never consults `tsconfig`. A broken or missing
+`tsconfig` fails soft (no aliases, never an error). And these are **import-resolution + extraction**
+capabilities — Bounds does not "support a framework" beyond seeing its imports and exported symbols;
+it does not model framework runtime semantics (DI graphs, decorators-as-routes, module systems).
+
+**Verified.** The cross-repo benchmarks run end-to-end on **click** (Python) and **axios**
+(TypeScript) — axios's cross-subsystem edges resolve *only* because of the dotted-filename +
+`tsconfig` path-alias fixes (on `main` its graph is badly undercounted). See
+[`benchmarks/`](../benchmarks/). The NestJS / Angular import shapes (dot-named service/component files)
+are covered by the resolver's test matrix.
+
+---
+
 ## How SQL / schema extraction works (and what happens when it can't)
 
 A schema subsystem (`paths:` pointing at `.sql` migrations, or a `.prisma` schema) is never

@@ -48,7 +48,9 @@ bounds/
 │       ├── ignore.py              # .boundsignore matcher + @generated-marker detection
 │       ├── discover.py            # bootstrap discovery: auto-propose manifests from source
 │       ├── calibrate.py           # manifest↔source reconciliation
+│       ├── guide.py               # read-only state-aware setup checklist (`bounds guide`)
 │       ├── agentsync.py           # cross-agent config generation
+│       ├── tsconfig.py            # tolerant tsconfig.json path-alias loader (baseUrl + paths)
 │       ├── ciconfig.py            # CI config generation
 │       ├── manifest/
 │       │   ├── __init__.py
@@ -605,20 +607,57 @@ def check_drift(project_root, *, subsystem=None) -> dict
     #    new_count, resolved_count, baseline_count, current_count, note}
 ```
 
+### `guide.py` — read-only setup checklist (`bounds guide`)
+```python
+def run_guide(project_root: Path) -> dict
+    # State-aware setup walkthrough; pure detection, never mutates and never raises on a
+    # half-set-up/empty project (a missing .bounds/ just reads early steps as not-done).
+    # → {mode:"guide", steps:[{id,title,command,why,done}], daily:[{command,use}],
+    #    agents_detected:bool, next:<next undone command or null>, complete:bool}
+    #   step ids (ordered): init / discover / agents / ci. Human view renders a checklist.
+```
+
 ### `agentsync.py` — cross-agent config generation
 ```python
 AGENT_KEYS = ("claude","codex","opencode","gemini","copilot","cursor","aider","windsurf")
 def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
     # mode "sync"   → write the canonical AGENTS.md (marked block, always) + per-agent pointer
     #                 files (dedicated files overwritten; shared files get a marked block;
-    #                 hand-written configs left untouched).
-    #                 → {created, updated, unchanged, skipped_custom, skip_reasons, canonical};
+    #                 hand-written configs left untouched) + per-agent NATIVE command/skill
+    #                 artifacts (below). All marker-managed + idempotent.
+    #                 → {created, updated, unchanged, skipped_custom, skip_reasons, canonical}
+    #                   (artifact paths also appear in created/updated/unchanged);
     #                   skip_reasons maps path → "authored" (human-written file already mentions
     #                   bounds) | "hand-edited" (our managed block's body changed since we stamped it)
+    # Native artifacts per agent (in addition to the AGENTS.md pointer):
+    #   claude   → .claude/skills/bounds/SKILL.md (auto-trigger) + .claude/commands/bounds.md
+    #   codex    → .codex/skills/bounds/SKILL.md (auto-trigger)
+    #   gemini   → .gemini/commands/bounds.toml
+    #   opencode → .opencode/command/bounds.md
+    #   copilot  → .github/prompts/bounds.prompt.md
+    #   cursor   → .cursor/commands/bounds.md
+    #   windsurf → .windsurf/workflows/bounds.md
+    #   aider    → NONE (no committable command mechanism — never faked)
     # mode "detect" → {detected:[agent keys with a native footprint]}
     # mode "check"  → {ok, missing, stale, configured} over detected-and-selected agents
     #                 (+ fix when missing/stale)
     # Raises E_USAGE for an unknown mode or agent key.
+```
+
+### `tsconfig.py` — TypeScript path-alias resolution
+```python
+@dataclass(frozen=True)
+class TsAliases:
+    base_url: str                                   # project-relative POSIX baseUrl ("" = root)
+    patterns: tuple[tuple[str, tuple[str, ...]], ...]  # sorted (pattern, targets), project-relative
+    def candidate_stems(self, module: str) -> list[str]  # extension-less stems a bare specifier aliases to
+
+def load(project_root: Path) -> TsAliases | None
+    # Tolerant JSONC loader (comments + trailing commas) for tsconfig.json/jsconfig.json; follows
+    # the `extends` chain (depth-bounded) and precompiles baseUrl + paths (single `*` wildcard) into
+    # candidate stems for the import resolver. Fail-soft: a missing/garbled config (or no
+    # paths/baseUrl) → None, never an exception. Loaded once per run by discover/calibrate/locate
+    # and by CheckContext.ts_aliases() for boundary checking.
 ```
 
 ### `ciconfig.py` — CI gate generation
@@ -707,7 +746,7 @@ consumes:
 ## 7. The 7 checks (logic)
 
 1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files plus any surviving tables from the subsystem's SQL/Prisma schema fold. Declared-but-missing → drift (`error`); a column-granular expose (`users.email`) is resolved against the fold (table exposed **and** column still present), so a dropped column drifts in both the exposes and consumes directions. Undeclared-but-exported (a symbol/table in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (bidirectional drift; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). The `info` severity never blocks, so exit codes are unchanged. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
-2. **Boundary compliance** (`E_BOUNDARY_VIOLATION`, error): for each import in subsystem A resolving to a file owned by subsystem B, the imported names must all be in B's `exposes`. Importing a non-exposed (internal) symbol → violation. Resolution: match import `module` against B's file paths (suffix/relative resolution). Fix: "import only B's exposed interfaces, or add `<name>` to B.exposes".
+2. **Boundary compliance** (`E_BOUNDARY_VIOLATION`, error): for each import in subsystem A resolving to a file owned by subsystem B, the imported names must all be in B's `exposes`. Importing a non-exposed (internal) symbol → violation. Resolution (`checks.resolve_import`): match import `module` against B's file paths via exact-stem, package `/index`/`/__init__`, then a trailing-segment suffix fallback. Relative imports handle both dialects — a TS `./auth.service` keeps the dotted filename (never split into `auth/service`), a Python `..models` treats the dots as separators. For a bare specifier from a TS/JS file the project's `tsconfig.json` `baseUrl`/`paths` aliases (loaded via `tsconfig.load`, threaded as `CheckContext.ts_aliases()`) are tried first, so an aliased import like `@/common` resolves. Fix: "import only B's exposed interfaces, or add `<name>` to B.exposes".
 3. **Contract compliance** (`E_CONTRACT_MISSING_EXPORT`, error): for each `consumes` entry, every listed interface must appear in the provider's `exposes`. For schema contracts, `table.column` is valid only when `table` is exposed and the deterministic SQL fold still contains `column`. Missing → contract break. Fix: "provider `<B>` does not expose `<iface>`; update consumer or provider".
 4. **Cross-subsystem impact** (`E_STALE_INTERFACE`, error/stale): a provider's `structure_hash` changed (it's in `dirty`) and it has consumers (`consumed_by`) → those consumer interfaces may be stale. Emits one issue per affected consumer. Fix: "re-validate consumer `<C>`; provider `<B>` interface surface changed".
 5. **Cycle detection** (`E_CYCLE_DETECTED`, error): build the directed graph from `consumes`; DFS for back-edges; report each cycle as a chain `A → B → C → A`. Fix: "break the dependency cycle; introduce an interface/inversion".
@@ -758,6 +797,10 @@ The scan-bearing commands (`validate`, `preflight`) also accept `--include-ignor
 `--follow-symlinks`, `--fail-on-unowned`, and `--ci` (tab-delimited CI output).
 
 ```
+bounds guide                       → {mode:"guide", steps:[{id,title,command,why,done}],
+                                       daily:[{command,use}], agents_detected, next, complete}
+                                       # read-only state-aware setup checklist (ids: init/discover/
+                                       # agents/ci); next = the next undone command or null
 bounds list [--namespace NS]       → {project, subsystems:[{name, role, criticality, namespace?,
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count, entry_points, validation_status,
@@ -823,6 +866,9 @@ bounds calibrate [--subsystem S] [--apply|--dry-run|--check|--dump-baseline]
                                    → --check exits 1 on NEW drift above the committed baseline
 bounds agent [--detect|--sync|--check] [--<agent> ...]   (no mode = --detect)
                                    → agentsync.run_agent payload (see §4)
+                                   # --sync writes AGENTS.md + each agent's pointer AND its native
+                                   # command/skill artifact (Claude/Codex skill, Gemini/OpenCode/
+                                   # Cursor command, Copilot prompt, Windsurf workflow; aider none)
 bounds ci --install [--action|--precommit|--gitlab|--all]
                                    → ciconfig.run_ci_install payload {created, skipped, targets}
 bounds cache (--migrate|--inspect|--prune)

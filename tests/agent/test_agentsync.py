@@ -269,12 +269,16 @@ def test_only_filters_to_single_agent_but_canonical_always_written(tmp_path):
     root = _mk_root(tmp_path)
     report = agentsync.run_agent(root, mode="sync", only={"claude"})
 
-    # AGENTS.md (canonical) is ALWAYS written; the claude pointer references it.
+    # AGENTS.md (canonical) is ALWAYS written; the claude pointer + skill reference it.
     assert (root / "AGENTS.md").exists()
     assert (root / ".claude/commands/bounds.md").exists()
+    assert (root / ".claude/skills/bounds/SKILL.md").exists()  # auto-trigger skill
     assert not (root / ".cursor/rules/bounds.mdc").exists()
+    assert not (root / ".gemini/commands/bounds.toml").exists()  # other agents untouched
     assert not (root / "GEMINI.md").exists()
-    assert set(report["created"]) == {"AGENTS.md", ".claude/commands/bounds.md"}
+    assert set(report["created"]) == {
+        "AGENTS.md", ".claude/commands/bounds.md", ".claude/skills/bounds/SKILL.md",
+    }
 
 
 def test_aider_yaml_block_points_at_agents_md(tmp_path):
