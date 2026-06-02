@@ -150,7 +150,7 @@ in that tool's own format and location:
 | **Claude Code** | `.claude/skills/bounds/SKILL.md` (+ the `/bounds` dispatcher at `.claude/commands/bounds.md`) | Auto-triggering skill | — |
 | **Codex CLI** | `.codex/skills/bounds/SKILL.md` | Auto-triggering skill | — |
 | **Gemini** | `.gemini/commands/bounds.toml` | TOML custom command | `{{args}}` |
-| **OpenCode** | `.opencode/command/bounds.md` | Markdown command | `$ARGUMENTS` |
+| **OpenCode** | `.opencode/commands/bounds.md` | Markdown command | `$ARGUMENTS` |
 | **GitHub Copilot** | `.github/prompts/bounds.prompt.md` | Prompt file | `${input:…}` |
 | **Cursor** | `.cursor/commands/bounds.md` | Command (the always-on `.cursor/rules/bounds.mdc` is the pointer) | — |
 | **Windsurf** | `.windsurf/workflows/bounds.md` | Workflow (the always-on `.windsurf/rules/bounds.md` is the pointer) | — |

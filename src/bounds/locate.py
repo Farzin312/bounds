@@ -8,7 +8,7 @@ every boundary. No cache is trusted for ``where`` — extraction is always fresh
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from . import errors
 from . import tsconfig
@@ -138,19 +138,27 @@ def _undeclared_consumer_edges(project_root: Path, subs: dict, name: str) -> lis
     ]
 
 
-def run_where(project_root: Path, symbol: str, prefix: bool = False) -> dict:
-    """Locate a symbol: which file defines it and which subsystem owns it.
+def run_where(project_root: Path, query: str, prefix: bool = False) -> dict:
+    """Locate a symbol — or a file path — and report which subsystem owns it.
 
-    Returns every definition — name collisions across files are all reported — each tagged with its
-    owning subsystem and whether that subsystem *declares* it in ``exposes``. Extraction is fresh
-    (never a stale cache). Works for Python and TypeScript/JavaScript. Results sorted for stability.
+    ``query`` is normally a symbol name: every definition is returned (name collisions across files
+    are all reported), each tagged with its owning subsystem and whether that subsystem *declares* it
+    in ``exposes``. When ``query`` is instead **path-shaped** — it contains a ``/`` or matches an
+    existing repo-relative source file by posix comparison — it is treated as a file lookup: the owning
+    subsystem plus every symbol that file defines is returned (BOUNDS-007), so ``where src/foo.py``
+    no longer comes back empty. Extraction is fresh (never a stale cache). Works for Python and
+    TypeScript/JavaScript. Posix paths only; results sorted for stability.
     """
     _, subs, _ = manifest_loader.load_all(project_root)
     file_owner, extracts, _ = scan.extract_project(project_root, subs, load_matcher(project_root))
     declared_by = {n: subs[n].expose_names() for n in subs}
 
+    target_file = _path_query(project_root, query, extracts)
+    if target_file is not None:
+        return _where_file(target_file, file_owner, extracts, declared_by)
+
     def hit(sym_name: str) -> bool:
-        return sym_name.startswith(symbol) if prefix else sym_name == symbol
+        return sym_name.startswith(query) if prefix else sym_name == query
 
     results: list[dict] = []
     for rel in extracts:
@@ -168,8 +176,66 @@ def run_where(project_root: Path, symbol: str, prefix: bool = False) -> dict:
                 })
     results.sort(key=lambda r: (r["file"], r["symbol"], r["line"], r["kind"]))
     return {
-        "symbol": symbol,
+        "symbol": query,
         "match": "prefix" if prefix else "exact",
+        "count": len(results),
+        "results": results,
+    }
+
+
+def _path_query(project_root: Path, query: str, extracts: dict) -> str | None:
+    """Return the repo-relative posix path ``query`` names, or ``None`` if it's a plain symbol.
+
+    Path-shaped means either it contains a ``/`` (an explicit posix path the user typed) or it
+    matches an existing repo-relative source file by posix comparison (so a bare ``main.py`` that
+    exists is treated as a file, while a bare symbol name that doesn't exist on disk stays a symbol).
+    Compared in posix form on both sides, never with OS separators. A path that exists but isn't an
+    extracted source file still resolves (so the caller can report "owned, no symbols" honestly).
+    """
+    posix = PurePosixPath(query).as_posix()
+    if posix in extracts:
+        return posix
+    abs_path = project_root / query
+    try:
+        is_file = abs_path.is_file()
+    except OSError:
+        is_file = False
+    if is_file:
+        try:
+            return abs_path.relative_to(project_root).as_posix()
+        except ValueError:
+            return None
+    if "/" in query:  # explicit path the user typed, even if it doesn't resolve on disk
+        return posix
+    return None
+
+
+def _where_file(rel: str, file_owner: dict, extracts: dict, declared_by: dict) -> dict:
+    """Build the ``where``-by-file payload: a file's owning subsystem + every symbol it defines.
+
+    Mirrors the symbol-query shape (same per-result keys) so the JSON stays uniform; ``query_kind``
+    distinguishes the two so an agent can tell a file lookup from a symbol lookup. ``owning_subsystem``
+    comes from the shared ownership map (so it agrees with validate/describe). Results sorted.
+    """
+    owner = file_owner.get(rel, "")
+    declared = declared_by.get(owner, set())
+    result = extracts.get(rel)
+    symbols = result.symbols if result is not None else []
+    results = sorted(
+        ({
+            "symbol": sym.name,
+            "kind": sym.kind,
+            "file": rel,
+            "line": sym.line,
+            "owning_subsystem": owner,
+            "exposed": sym.name in declared,
+        } for sym in symbols),
+        key=lambda r: (r["symbol"], r["line"], r["kind"]),
+    )
+    return {
+        "file": rel,
+        "query_kind": "file",
+        "owning_subsystem": owner,
         "count": len(results),
         "results": results,
     }

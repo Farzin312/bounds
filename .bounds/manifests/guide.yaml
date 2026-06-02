@@ -1,0 +1,11 @@
+name: guide
+role: library
+criticality: leaf
+description: "`bounds guide` — a state-aware setup walkthrough (init, discover, agent sync, CI gate) that marks each step done/to-do from what is already present, plus daily commands and the single next action. Pure detection, zero mutation."
+paths:
+  - src/bounds/guide.py
+exposes:
+  - { name: run_guide, kind: function }
+consumes: []
+tests:
+  - tests/cli/test_guide.py

@@ -27,6 +27,7 @@ def _mk_root(tmp_path):
 # sync
 # ---------------------------------------------------------------------------
 def test_sync_writes_canonical_agents_md_and_pointer_files(tmp_path):
+    """Sync must write the canonical contract as a marked block in AGENTS.md plus per-tool pointer files that each carry the activating front-matter — without it every rule sits dormant."""
     root = _mk_root(tmp_path)
     report = agentsync.run_agent(root, mode="sync")
 
@@ -111,6 +112,7 @@ def test_claude_command_forwards_arguments(tmp_path):
 
 
 def test_sync_paths_are_sorted_posix(tmp_path):
+    """Reported paths must be sorted and posix-formed (no backslashes) so output is byte-stable cross-platform (determinism + posix-path constraints)."""
     root = _mk_root(tmp_path)
     report = agentsync.run_agent(root, mode="sync")
     assert report["created"] == sorted(report["created"])
@@ -118,6 +120,7 @@ def test_sync_paths_are_sorted_posix(tmp_path):
 
 
 def test_sync_inserts_marked_block_into_existing_agents_md(tmp_path):
+    """Sync into an existing AGENTS.md must insert the marked block while preserving the prior human content — it appends a managed region, never overwrites the file."""
     root = _mk_root(tmp_path)
     prior = "# My Project\n\nSome existing developer notes here.\n"
     (root / "AGENTS.md").write_text(prior, encoding="utf-8")
@@ -132,6 +135,7 @@ def test_sync_inserts_marked_block_into_existing_agents_md(tmp_path):
 
 
 def test_resync_is_idempotent_and_only_touches_block(tmp_path):
+    """Re-sync must touch only the managed block: out-of-marker human edits survive, the block stays single, and a clean re-sync writes nothing (idempotent determinism)."""
     root = _mk_root(tmp_path)
     (root / "AGENTS.md").write_text("# My Project\n\nKeep me.\n", encoding="utf-8")
 
@@ -209,6 +213,7 @@ def test_dedicated_file_preserves_out_of_marker_edits(tmp_path):
 
 
 def test_handwritten_agents_md_without_markers_is_skipped(tmp_path):
+    """A human-authored AGENTS.md that mentions bounds but has no markers must be left untouched and reported skipped_custom — sync never injects into a file it didn't author."""
     root = _mk_root(tmp_path)
     handwritten = "# Agents\n\nUse `bounds list` to see the map. Do not edit blindly.\n"
     (root / "AGENTS.md").write_text(handwritten, encoding="utf-8")
@@ -220,6 +225,7 @@ def test_handwritten_agents_md_without_markers_is_skipped(tmp_path):
 
 
 def test_unrelated_agents_md_is_appended_not_skipped(tmp_path):
+    """An AGENTS.md that never mentions bounds is safe to extend: sync appends its marked block (updated, not skipped) while keeping the existing unrelated content."""
     root = _mk_root(tmp_path)
     (root / "AGENTS.md").write_text("# Agents\n\nRun the test suite before pushing.\n", encoding="utf-8")
 
@@ -266,6 +272,7 @@ def test_skip_reasons_distinguish_authored_from_hand_edited(tmp_path):
 
 
 def test_only_filters_to_single_agent_but_canonical_always_written(tmp_path):
+    """`only={claude}` must write claude's pointer+skill AND the canonical AGENTS.md (always), while leaving every other agent's files absent."""
     root = _mk_root(tmp_path)
     report = agentsync.run_agent(root, mode="sync", only={"claude"})
 
@@ -282,6 +289,7 @@ def test_only_filters_to_single_agent_but_canonical_always_written(tmp_path):
 
 
 def test_aider_yaml_block_points_at_agents_md(tmp_path):
+    """Aider gets only a YAML-comment marked block adding `read: [AGENTS.md]`, preserving the user's existing config — its pointer must reference the canonical, not duplicate it."""
     root = _mk_root(tmp_path)
     (root / ".aider.conf.yml").write_text("model: gpt-4\n", encoding="utf-8")
     report = agentsync.run_agent(root, mode="sync", only={"aider"})
@@ -293,6 +301,7 @@ def test_aider_yaml_block_points_at_agents_md(tmp_path):
 
 
 def test_codex_and_opencode_dedupe_to_one_write(tmp_path):
+    """Two agents that both target AGENTS.md must write it exactly once — the canonical file is deduped across selected agents, never reported twice."""
     root = _mk_root(tmp_path)
     report = agentsync.run_agent(root, mode="sync", only={"codex", "opencode"})
     all_paths = report["created"] + report["updated"] + report["skipped_custom"]
@@ -300,6 +309,7 @@ def test_codex_and_opencode_dedupe_to_one_write(tmp_path):
 
 
 def test_sync_rejects_unknown_agent_key(tmp_path):
+    """An unknown agent key in `only` must raise BoundsError E_USAGE — a typo'd agent fails loudly rather than silently wiring nothing (fail-soft/report-hard; stable error code)."""
     root = _mk_root(tmp_path)
     with pytest.raises(errors.BoundsError) as exc:
         agentsync.run_agent(root, mode="sync", only={"bogus"})
@@ -307,6 +317,7 @@ def test_sync_rejects_unknown_agent_key(tmp_path):
 
 
 def test_unknown_mode_raises_usage(tmp_path):
+    """An unknown mode (not sync/detect/check) must raise BoundsError E_USAGE so a bad invocation fails fast with the stable usage code rather than no-op'ing."""
     root = _mk_root(tmp_path)
     with pytest.raises(errors.BoundsError) as exc:
         agentsync.run_agent(root, mode="nope")
@@ -317,26 +328,32 @@ def test_unknown_mode_raises_usage(tmp_path):
 # _looks_bounds_authored heuristic
 # ---------------------------------------------------------------------------
 def test_looks_bounds_authored_ignores_out_of_bounds_idiom():
+    """The 'out of bounds' English idiom must NOT read as bounds-authored, so sync won't wrongly skip an unrelated AGENTS.md as already-ours (false-positive guard)."""
     assert _looks_bounds_authored("array index out of bounds in the parser") is False
 
 
 def test_looks_bounds_authored_ignores_bounds_checking_prose():
+    """'bounds checking' prose must NOT count as bounds-authored — the word 'bounds' alone is too weak a signal to claim a file mentions the bounds CLI (false-positive guard)."""
     assert _looks_bounds_authored("We do bounds checking on every write.") is False
 
 
 def test_looks_bounds_authored_matches_inline_command():
+    """An inline-code `bounds list` invocation must read as bounds-authored so sync respects a hand-written file as ours and skips it rather than clobbering (true-positive)."""
     assert _looks_bounds_authored("Run `bounds list` to see the map.") is True
 
 
 def test_looks_bounds_authored_matches_bare_command_invocation():
+    """A bare (un-backticked) `bounds describe` command invocation must still read as bounds-authored — the subcommand verb is enough signal to treat the file as ours (true-positive)."""
     assert _looks_bounds_authored("Use bounds describe auth before editing.") is True
 
 
 def test_looks_bounds_authored_matches_heading():
+    """A '## Bounds' section heading must read as bounds-authored so a human-written bounds section is recognized as ours and preserved (true-positive)."""
     assert _looks_bounds_authored("## Bounds — architecture contract") is True
 
 
 def test_looks_bounds_authored_matches_inline_code_name():
+    """The bare inline-code token `bounds` must read as bounds-authored — an explicit code-formatted tool name is a deliberate reference, not idiomatic prose (true-positive)."""
     assert _looks_bounds_authored("`bounds`") is True
 
 
@@ -344,11 +361,13 @@ def test_looks_bounds_authored_matches_inline_code_name():
 # detect
 # ---------------------------------------------------------------------------
 def test_detect_empty_root(tmp_path):
+    """Detect on a root with no agent footprints must return an empty list (exact JSON shape), not invent agents — the baseline for the detect contract."""
     root = _mk_root(tmp_path)
     assert agentsync.run_agent(root, mode="detect") == {"detected": []}
 
 
 def test_detect_finds_footprints(tmp_path):
+    """Detect must report every agent whose footprint exists (.claude, .cursor, GEMINI.md, AGENTS.md → codex/opencode) and only those — driving which agents `--sync` proposes."""
     root = _mk_root(tmp_path)
     (root / ".claude").mkdir()
     (root / ".cursor").mkdir()
@@ -361,6 +380,7 @@ def test_detect_finds_footprints(tmp_path):
 
 
 def test_bare_github_dir_does_not_detect_copilot(tmp_path):
+    """A bare .github/ dir (universal CI/templates) must NOT detect copilot — only its actual copilot-instructions.md does, else nearly every repo would false-positive."""
     # A .github/ directory (workflows, templates) is universal — not a Copilot signal.
     root = _mk_root(tmp_path)
     (root / ".github" / "workflows").mkdir(parents=True)
@@ -374,6 +394,7 @@ def test_bare_github_dir_does_not_detect_copilot(tmp_path):
 # check
 # ---------------------------------------------------------------------------
 def test_check_shape_when_nothing_detected(tmp_path):
+    """With no agents detected, --check returns ok:True with empty missing/stale/configured and NO `fix` key — the JSON gate result omits fix when there's nothing to fix."""
     root = _mk_root(tmp_path)
     # No fix key when there's nothing to fix.
     assert agentsync.run_agent(root, mode="check") == {
@@ -382,6 +403,7 @@ def test_check_shape_when_nothing_detected(tmp_path):
 
 
 def test_check_reports_missing_for_detected_unconfigured_agent(tmp_path):
+    """A detected-but-never-synced agent must make --check report ok:False with that agent in `missing` — the CI gate fails until the agent is actually wired."""
     root = _mk_root(tmp_path)
     (root / ".claude").mkdir()  # detected, not yet synced
     result = agentsync.run_agent(root, mode="check")
@@ -390,6 +412,7 @@ def test_check_reports_missing_for_detected_unconfigured_agent(tmp_path):
 
 
 def test_check_reports_configured_after_sync(tmp_path):
+    """After syncing a detected agent, --check must flip to ok:True with it in `configured` — closing the detect→sync→check loop the CI gate relies on."""
     root = _mk_root(tmp_path)
     (root / ".claude").mkdir()
     agentsync.run_agent(root, mode="sync", only={"claude"})
@@ -399,6 +422,7 @@ def test_check_reports_configured_after_sync(tmp_path):
 
 
 def test_check_shared_file_needs_marker(tmp_path):
+    """An AGENTS.md without a bounds marker leaves every agent that shares it (codex+opencode) `missing` until synced — a shared canonical file must carry the marker to count as configured."""
     root = _mk_root(tmp_path)
     (root / "AGENTS.md").write_text("# Agents\n\nUnrelated.\n", encoding="utf-8")
     result = agentsync.run_agent(root, mode="check")
@@ -510,6 +534,7 @@ def test_sync_restores_deleted_front_matter_on_dedicated_file(tmp_path):
 # Interactive "pick your AI" picker for `bounds agent --sync`
 # ---------------------------------------------------------------------------
 def test_prompt_agent_selection_parses_choices(monkeypatch):
+    """The interactive picker must parse 'all'/numbers/names/empty/garbage correctly and always fail open to all-agents (None), never to nothing — bad input must not silently wire zero agents."""
     from bounds import cli
 
     available = cli._AGENT_FLAGS
@@ -532,6 +557,7 @@ def test_prompt_agent_selection_parses_choices(monkeypatch):
 
 
 def test_sync_non_tty_skips_prompt_and_wires_all(monkeypatch, tmp_path):
+    """In a non-TTY (piped/CI) run, `agent --sync` must never show the picker — it wires all agents so automation never blocks waiting on stdin."""
     # A piped/CI run (CliRunner stdout is not a TTY) must NOT prompt — it wires every agent
     # (the prior kitchen-sink behavior) so automation never blocks on input.
     from click.testing import CliRunner
@@ -552,6 +578,7 @@ def test_sync_non_tty_skips_prompt_and_wires_all(monkeypatch, tmp_path):
 
 
 def test_agent_check_stays_json_when_not_a_tty(monkeypatch, tmp_path):
+    """`agent --check` must emit parseable JSON in non-TTY even though sync/detect are TTY-aware, so an automated CI gate always gets a machine result, not prose (JSON-first)."""
     # --check is a CI gate: even though sync/detect are TTY-aware, --check must stay
     # JSON-default in non-TTY so an automated gate always parses a machine result.
     from click.testing import CliRunner

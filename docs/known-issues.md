@@ -89,42 +89,51 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Test:** `tests/validate/test_coverage.py`.
 
 ### BOUNDS-006 — `discover` can emit overlapping subsystem paths with no diagnostic
-- **Severity / Status:** medium / **Mitigated**
+- **Severity / Status:** medium / **Fixed**
 - **Found:** 2026-06-01 via benchmark (lodash/zod `root=.` catch-alls; nested package dirs).
-- **Status detail:** BOUNDS-001 makes nesting *correct* (deepest path owns the file), so the false drift is gone. **Residual (Open):** a genuine same-path conflict still has no warning, and `describe`'s `file_count` can double-count a file that a more-specific sibling now owns.
-- **Fix:** proposed — a manifest-load overlap/ambiguity diagnostic; make `describe` file counting use `scan.resolve_owners` so it agrees with `validate`.
-- **Test:** `tests/validate/test_regression_nested_paths.py` covers the ownership half; describe-consistency test still to add.
+- **Symptom:** `describe`'s `file_count` double-counted a file a more-specific sibling subsystem now owns (disagreeing with `validate`); a genuine same-path conflict had no warning.
+- **Root cause:** `describe.extract_owned` walked the subsystem's own paths blindly (`scan.iter_subsystem_files`) instead of resolving ownership.
+- **Fix:** `gen9-correctness-mapping-100pct` — `describe._owned_files` reuses `scan.resolve_owners` (most-specific-path-wins), so `describe`'s `file_count`/`files` agree with `validate`; `describe.subsystem_overlaps` flags a genuine *equal-specificity* same-path conflict as a non-fatal `E_SUBSYSTEM_OVERLAP` warning (new append-only code) in the describe payload, with a fix hint. Nested paths (different specificity) are correctly never flagged.
+- **Test:** `tests/validate/test_regression_describe_ownership.py` (no-double-count, agrees-with-resolve_owners, nested-not-flagged, same-path-emits-overlap, code-registered).
 
 ### BOUNDS-007 — `bounds where <file-path>` returns 0 results for a manifest-owned file
-- **Severity / Status:** low / **Mitigated**
+- **Severity / Status:** low / **Fixed**
 - **Found:** 2026-06-01 via benchmark (click `tests/typing/…`, zod `packages/docs/…`).
-- **Status detail:** the underlying ownership starvation is fixed by BOUNDS-001 (the file's *symbols* are now findable via `where <symbol>`). **Residual (Open):** `where` takes a symbol by default; passing a file path returns 0, which is a confusing UX even when correct.
-- **Fix:** proposed — detect a path-shaped argument and report the owning subsystem, or document the symbol-only contract more loudly.
+- **Symptom:** `where` took a symbol by default; passing a file path returned 0 results — confusing UX even when correct.
+- **Root cause:** `locate.run_where` only ever matched its argument against symbol names.
+- **Fix:** `gen9-correctness-mapping-100pct` — `run_where` detects a path-shaped argument (`_path_query`: contains `/`, or matches an existing repo-relative source file by posix compare) and returns the owning subsystem plus every symbol that file defines (`_where_file`, `query_kind: "file"`), reusing the shared ownership map so it agrees with `validate`/`describe`. Symbol lookups unchanged; `cli.py` untouched (detection lives in `run_where`).
+- **Test:** `tests/cli/test_where_path_arg.py` (symbol unchanged, path reports owner+symbols, bare existing filename treated as path, nonexistent symbol stays a symbol query, distinct human render).
 
 ### BOUNDS-008 — TS `export type`/re-export under-detection + symbol `kind`/`file` mislabels
-- **Severity / Status:** medium / **Open** (now the leading residual drift after BOUNDS-001/012)
-- **Found:** 2026-06-01 via benchmark; isolated as the dominant remaining `E_STRUCTURAL_DRIFT` source on TS repos (zod `core` ~165, axios ~22, chalk ~4) — `discover` declares a TS `export type`/`export { } from` symbol in `exposes` that `validate`'s extractor doesn't re-detect as exported. Plus kind mislabels (fastapi `Body` function→class file; nest `HttpStatus` enum→const; chalk `export class Chalk`→const).
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-01 via benchmark; isolated as the dominant remaining `E_STRUCTURAL_DRIFT` source on TS repos (zod `core` ~165, axios ~22, chalk ~4) — `discover` declares a TS `export type`/`export { } from` symbol in `exposes` that `validate`'s extractor doesn't re-detect as exported. Plus kind mislabels (`enum`→`const`; an overload/class symbol pointing at the wrong file).
 - **Symptom:** residual false structural drift on TS type-heavy modules; imprecise `kind`/`file` can misdirect navigation.
-- **Root cause:** `extract/typescript.py` export/kind detection for `export type`, `export interface`, `enum`, re-exports, and overloaded names.
-- **Fix:** proposed — tighten TS type/re-export export detection so `discover` and `validate` agree; add per-adapter tests. This is the next correctness lever for clean fresh-discover on TS repos.
+- **Root cause:** `extract/typescript.py` mapped `enum_declaration`→`const`, gave every `export { }` specifier `kind: unknown`, and emitted one symbol per overload signature; barrel re-exports attributed a name to the re-export file rather than its declaration.
+- **Fix:** `gen9-correctness-mapping-100pct` — `enum_declaration`→`enum`; `function_signature` added + `_dedup_symbols` collapses an overload set to one `function`; `export * as ns`→`namespace`; a *local* re-export (`export { X }`, no `from`) resolves `X`'s kind from its in-file declaration (`_local_decl_kinds`) while a *cross-module* re-export (`export { A } from "./m"`) stays exported with `kind: unknown` (declaration is in another file); `export * from "./m"` emits no symbol (only the import edge), so `discover` never declares an unresolvable star name — keeping the discover/validate extractor **symmetric**. `discover._exposes_for` now prefers a real declaration over a bare `unknown` re-export on a name collision (correct `kind`/`file`). Symbol `kind` is advisory (drift is name-matched) but now derived correctly wherever the declaration is in-file.
+- **Residual:** a cross-module re-export's `kind` is `unknown` by design (single-file extractor; the true kind lives in another file) — harmless for drift/boundary/contract checks.
+- **Test:** `tests/extract/test_typescript_exports.py` (per-form kind/file/exported) + `tests/discover/test_ts_discover_validate_symmetry.py` (fresh discover→validate on a type-heavy TS package yields zero `E_STRUCTURAL_DRIFT`).
 
 ### BOUNDS-009 — `overview` reports `health.ok=true` while `validate` reports errors
-- **Severity / Status:** low / **Open**
+- **Severity / Status:** low / **Fixed**
 - **Found:** 2026-06-01 via benchmark (date-fns ok=true with 948 validate errors; lodash).
-- **Root cause:** `overview` health only counts schema errors + cycles, not drift/boundary.
-- **Fix:** proposed — fold a lightweight validate summary (or the coverage %) into `overview` health, or rename the field so it doesn't read as "the project is healthy."
+- **Root cause:** `overview` health only counted schema errors + cycles, not drift/boundary.
+- **Fix:** `gen9-correctness-mapping-100pct` — `overview_cmd` folds a real validation pass (`validate_engine.run(..., persist=False)`, reusing the content-hash cache, spinner-wrapped) into `health.ok` so it is true only when validate is clean AND there are no cycles/schema errors. The JSON gains `health.validation` (errors/warnings/drift/boundary/contract/stale + `mapped_pct`); the human view renders the same line. Off the `--quick` budget path.
+- **Test:** `tests/cli/test_cli.py::test_overview_health_reflects_drift`, `::test_overview_health_clean_when_no_drift`.
 
 ### BOUNDS-010 — `describe` JSON omits the file list its `--human`/`--full` view shows
-- **Severity / Status:** low / **Open**
+- **Severity / Status:** low / **Fixed**
 - **Found:** 2026-06-01 via benchmark (lodash, date-fns).
-- **Symptom:** `describe` JSON has `file_count` but `files: []`, while `--human`/`--full` show the list — violating the JSON-first invariant (`--human` must not expose what the JSON omits).
-- **Fix:** proposed — populate `files` in JSON (or only at `--full`, consistently across both renderings).
+- **Symptom:** `describe` JSON had `file_count` but `files: []`, while `--human`/`--full` showed the list — violating the JSON-first invariant (`--human` must not expose what the JSON omits).
+- **Fix:** `gen9-correctness-mapping-100pct` — `describe_one` populates `files` in the JSON under the *same* `--full` gate the human renderer keys off, so the two views are byte-consistent: default stays token-lean (count only), `--full` shows the roster in JSON and human alike. The roster is the `scan.resolve_owners`-based sorted list (see BOUNDS-006).
+- **Test:** `tests/validate/test_regression_describe_ownership.py::test_describe_files_json_human_parity`.
 
 ### BOUNDS-011 — `validate` exits `0` on a fatal `E_MANIFEST_NOT_FOUND`
-- **Severity / Status:** low / **Open**
+- **Severity / Status:** low / **Fixed** (regression-guarded; not reproducible on current `main`)
 - **Found:** 2026-06-01 via benchmark (chalk, after a no-op dry-run `discover`).
-- **Symptom:** `validate` printed a fatal error object but exited `0`, which can mislead CI into reading a missing-manifest fatal as success.
-- **Fix:** proposed — return the fatal exit code (2) on the fatal-error path.
+- **Symptom:** reported as `validate` printing a fatal error object but exiting `0`, which could mislead CI.
+- **Status detail:** on current code every fatal missing-manifest path already exits `2` (`_run` catches `BoundsError` → `sys.exit(config.EXIT_FATAL)`), including after a no-op dry-run `discover` — verified empirically and by test. The original report likely came from a wrapper/shell that swallowed the code. Locked with regression guards so it cannot silently regress.
+- **Fix:** `gen9-correctness-mapping-100pct` — regression tests asserting exit `2` on the fatal path (including after a dry-run discover) and exit `0`/blocked on the normal path.
+- **Test:** `tests/cli/test_cli.py` (validate fatal-exit guards).
 
 ### BOUNDS-012 — `E_ORPHAN_EXPORT` floods on libraries (every public export looks orphaned)
 - **Severity / Status:** medium / **Fixed**
@@ -132,13 +141,16 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Symptom:** a library's public API is consumed by external users, not a sibling subsystem, so every export read as "consumed by nothing" — the dominant noise on the most common use case (point Bounds at a library).
 - **Root cause:** `discover` records `consumes` edges at *subsystem* granularity with no `interfaces` (`discover.py`), but `check_orphans` judged orphans *per interface* — so with no interface data, every export looked unconsumed.
 - **Fix:** `agent-plugins-aliases-benchmark` — `check_orphans` now only judges orphans for subsystems that have **interface-level** consumption recorded (curated contracts); subsystem-granularity edges (what `discover` emits) no longer flood. Verified: click orphan 183→0 (total validate issues 206→3, `ok: True`), flask 314→19, requests 146→6, express 53→1, zod 3,025→166.
-- **Test:** `tests/validate/test_validate.py::test_orphans_not_flagged_without_interface_level_consumption`.
+- **Test:** `tests/validate/test_checks.py::test_orphans_not_flagged_without_interface_level_consumption`.
 
 ### BOUNDS-013 — fresh `discover → validate` was far from clean on real repos
-- **Severity / Status:** medium / **Mitigated**
+- **Severity / Status:** medium / **Fixed**
 - **Found:** 2026-06-01 via benchmark (0/13 supported repos validated clean after a fresh discover; calibrate didn't converge).
-- **Status detail:** BOUNDS-001/002/012 together collapsed the issue counts on a *fresh* discover (no calibrate): click 206→3 (`ok: True`), flask 314→19, requests 146→6, express 53→1, axios 191→59, zod 3,025→166. The floods are gone. **Residual (Open):** TS type-export extraction drift (BOUNDS-008, e.g. zod's `core`) and boundary edges on auto-drawn partitions. These are smaller and either genuine or tracked under BOUNDS-008.
-- **Fix:** continue with BOUNDS-008; re-run the corpus convergence numbers as each lands.
+- **Status detail:** BOUNDS-001/002/008/012/015/016 together collapse the issue counts on a *fresh* discover (no calibrate). Re-measured 2026-06-01 on `gen9-correctness-mapping-100pct` (tiktoken; `init → discover --apply → validate`, all `ok: True`):
+  - **click** 206→**3** (2 boundary + 1 coverage-gap; 0 drift) — note BOUNDS-015 was required to hold this: it had silently regressed to 479 (476 test-case drifts) after BOUNDS-014.
+  - **requests** 146→**6** · **flask** 314→**19** · **express** 53→**1** · **axios** 191→**59** · **zod** 3,025→**155**.
+  The library-source mapping is 100% on well-factored repos (click, axios) and is reported honestly with a fix hint elsewhere. **Residual (genuine, mostly info-severity):** auto-drawn boundary edges (axios 37, flask 5), TS cross-module re-export `kind: unknown` (advisory), and app-local Next.js component exports (BOUNDS-016 residual). All non-blocking.
+- **Fix:** **Fixed** — the floods (orphan, test-case, framework) are eliminated; remaining issues are genuine or advisory. Convergence numbers above are the current honest baseline.
 
 ### BOUNDS-014 — `discover` listed every `test_*` case as a public export (manifest bloat)
 - **Severity / Status:** medium / **Fixed**
@@ -147,6 +159,23 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Root cause:** `discover._exposes_for` emitted every exported, non-private symbol regardless of whether the file was a test file.
 - **Fix:** `agent-plugins-aliases-benchmark` — `_exposes_for` excludes `test_*` functions and `Test*` classes in test files (`_is_test_file`/`_is_test_symbol`), keeping genuine helpers. Verified: click `tests.yaml` 818→70 lines (exposes 397→31).
 - **Test:** `tests/discover/test_discover.py::test_discover_excludes_test_cases_from_exposes`.
+
+### BOUNDS-015 — test cases re-surfaced as `E_STRUCTURAL_DRIFT` "undeclared export" noise (BOUNDS-014 regression)
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-01 via post-fix OSS re-measurement (click showed **476** structural-drift issues on a fresh `discover → validate`, contradicting the documented `206→3`).
+- **Symptom:** every `test_*` function / `Test*` class in a test subsystem produced an info-severity `E_STRUCTURAL_DRIFT` ("subsystem 'tests' exports 'test_…' which is not declared in exposes") — hundreds per repo — flooding `validate` output (click 476, every repo with a tests dir affected). `ok` stayed `true` (info severity) but the noise re-created exactly what BOUNDS-014 removed.
+- **Root cause:** asymmetry introduced by BOUNDS-014. Discover *excludes* test cases from `exposes`, but `validate.checks.check_structural_drift`'s "undeclared public surface" branch still compared the full exported set (which includes `test_*`) against the (test-case-free) `exposes`, flagging each test case. The prior session measured BOUNDS-014 by manifest size, not by re-running `validate`, so the drift regression slipped in.
+- **Fix:** `gen9-correctness-mapping-100pct` — `check_structural_drift` now excludes test cases symmetrically, using the shared `scan.is_test_file`/`scan.is_test_symbol` predicates (the same ones discover uses), gated on the file actually being a test file (a `test_*`-named symbol in non-test source still flags). Verified: click structural-drift **476→0** (fresh `discover → validate`: 479→3 issues, all genuine: 2 boundary + 1 coverage), chalk unaffected.
+- **Test:** `tests/validate/test_checks.py::test_drift_excludes_test_cases_from_undeclared_export_noise`, `::test_drift_test_named_symbol_in_non_test_file_still_flags`.
+
+### BOUNDS-016 — Next.js framework-entry exports flood `E_STRUCTURAL_DRIFT` (undeclared-export noise)
+- **Severity / Status:** medium / **Fixed** (entry-file conventions; app-local component exports remain by design)
+- **Found:** 2026-06-01 via post-fix OSS re-measurement (zod's bundled docs site produced ~165 info drifts: `GET`, `Page`, `generateMetadata`, `generateStaticParams`, `revalidate`, `dynamic`, `config`, `layout`…). Directly relevant to the Next.js + Postgres/Supabase target stack.
+- **Symptom:** every Next.js App-/Pages-Router **entry file** (`page`/`layout`/`route`/…) exports symbols the framework invokes by convention (the default component, `GET`/`POST` route handlers, route-segment config). Nothing imports them, yet the drift check flagged each as an "undeclared export" — the same noise class as test cases (BOUNDS-015), hitting every real Next.js app.
+- **Root cause:** the undeclared-surface drift branch (and discover's `exposes`) treated framework-invoked entry exports as a consumable surface.
+- **Fix:** `gen9-correctness-mapping-100pct` — `scan.is_framework_entry_file(rel)` recognizes a Next.js special file (`page`/`layout`/`loading`/`error`/`route`/`middleware`/… ) **only** when it sits under an `app/` or `pages/` segment (so an ordinary `lib/route.ts` is never mistaken for a route entry). Such a file's exports are excluded symmetrically from discover's `_exposes_for` and from `check_structural_drift`'s undeclared-surface branch. Verified: zod 166→155 issues (the framework-callback drifts gone).
+- **Residual (by design):** app-local **component** exports in ordinary `.tsx` files (e.g. `BlogCard`) are real module exports and still surface as info-drift; silencing them would risk hiding a genuine surface. A user curates `exposes` or `.boundsignore`s a bundled site.
+- **Test:** `tests/validate/test_checks.py::test_drift_excludes_nextjs_framework_entry_exports`, `::test_drift_route_file_outside_app_dir_still_flags`.
 
 ---
 

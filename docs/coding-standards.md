@@ -108,7 +108,7 @@ The thing Bounds preaches, applied to Bounds. **Do not define the same function/
       (O(1), no `O(files × imports × files)` scans). Build the suffix index **once** per call site
       and pass it into the loop.
 - [ ] Schema (SQL/Prisma) has fixed homes: `validate.schema` is the only migration fold —
-      `_fold_subsystem_schema` for tables/columns and `_fold_subsystem_objects` for the non-table
+      `_fold_subsystem_schema` for tables/columns and `fold_subsystem_objects` for the non-table
       surface (functions/views/indexes/triggers/types dedup; **policies + RLS are an ordered
       create/alter/drop / enable-disable-force fold**, never a flat dedup — a dropped policy must net
       out). `schema_objects` / `schema_rls_posture` read that fold; don't re-walk symbols to recount.

@@ -45,6 +45,7 @@ def _calver(node_date, distance=0, *, commit_count):
 # Shape: clean, year-first, numeric — no dev/post/local letters
 # ---------------------------------------------------------------------------
 def test_calver_is_clean_year_first_number():
+    """calver yields a clean PEP 440 YYYY.M.<count> with no dev/pre/post/local segment, so pipx upgrade always sees an orderable release."""
     v = _calver(datetime.date(2026, 6, 24), commit_count=24)
     assert v == "2026.6.24"
     # A valid PEP 440 release: no dev/pre/post/local segments, so no "letters".
@@ -58,6 +59,7 @@ def test_calver_is_clean_year_first_number():
 # THE same-day requirement: multiple updates on one day must not collide
 # ---------------------------------------------------------------------------
 def test_same_day_multiple_commits_do_not_collide():
+    """Same-day commits must get distinct, strictly-increasing versions (build = total commit count), or pipx upgrade can't tell them apart."""
     day = datetime.date(2026, 6, 24)
     v1 = _calver(day, commit_count=24)
     v2 = _calver(day, commit_count=25)  # a second commit/update the same day
@@ -71,6 +73,7 @@ def test_same_day_multiple_commits_do_not_collide():
 # Monotonic across month and year rollovers (build count never resets)
 # ---------------------------------------------------------------------------
 def test_monotonic_across_month_and_year():
+    """Version stays monotonic across month/year rollovers because the build count never resets, so upgrades never regress at a boundary."""
     june = _calver(datetime.date(2026, 6, 30), commit_count=100)
     july = _calver(datetime.date(2026, 7, 1), commit_count=101)
     dec = _calver(datetime.date(2026, 12, 31), commit_count=400)
@@ -82,6 +85,7 @@ def test_monotonic_across_month_and_year():
 # Resilient to tags: total count never resets, so no version regression after tagging
 # ---------------------------------------------------------------------------
 def test_no_regression_after_a_tag():
+    """Tagging resets scm distance to 1, but calver uses TOTAL commit count so the version still climbs — guards against post-tag version regression."""
     # Before a tag: distance large (e.g. 50). After a tag the scm distance resets to 1, but
     # because calver uses TOTAL commit count (not distance), the build keeps climbing.
     before = _calver(datetime.date(2026, 6, 24), distance=50, commit_count=50)
@@ -93,6 +97,7 @@ def test_no_regression_after_a_tag():
 # Fallback when git is unavailable (sdist without .git is baked at build, but be safe)
 # ---------------------------------------------------------------------------
 def test_commit_count_returns_none_when_git_missing(monkeypatch):
+    """When git is absent (OSError from subprocess), _commit_count fails soft to None rather than crashing the build."""
     def boom(*a, **k):
         raise OSError("git not found")
 
@@ -101,12 +106,14 @@ def test_commit_count_returns_none_when_git_missing(monkeypatch):
 
 
 def test_calver_falls_back_to_distance_without_git(monkeypatch):
+    """With no git commit count, calver falls back to scm distance as the build number so an sdist still produces a valid version."""
     monkeypatch.setattr(setup_mod, "_commit_count", lambda: None)
     v = setup_mod.calver(_FakeScmVersion(datetime.date(2026, 6, 24), distance=7))
     assert v == "2026.6.7"  # distance used as the build number when git is unavailable
 
 
 def test_calver_without_node_date_uses_a_date(monkeypatch):
+    """With no node_date, calver substitutes a date and still emits a well-formed numeric YYYY.M.N rather than crashing."""
     # No commit date available: must still produce a well-formed YYYY.M.N, never crash.
     monkeypatch.setattr(setup_mod, "_commit_count", lambda: 5)
     v = setup_mod.calver(_FakeScmVersion(None, distance=0))
@@ -119,6 +126,7 @@ def test_calver_without_node_date_uses_a_date(monkeypatch):
 # The actually-installed version reflects the scheme (no dev/local in real builds)
 # ---------------------------------------------------------------------------
 def test_installed_version_is_clean_calver_or_unknown():
+    """The real installed __version__ is either 'unknown' (raw source) or a clean year-first CalVer with no dev/local — the scheme actually takes effect."""
     from bounds import __version__
 
     if __version__ == "unknown":

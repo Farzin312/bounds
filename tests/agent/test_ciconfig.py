@@ -13,6 +13,7 @@ def _read(path):
 
 
 def test_all_targets_creates_three_files(tmp_path):
+    """Default (empty targets) must install all three CI gates (action/gitlab/precommit) with sorted `created`/`targets` lists — byte-stable output across runs (determinism)."""
     result = ciconfig.run_ci_install(tmp_path, targets=set())
 
     action = tmp_path / ".github/workflows/bounds.yml"
@@ -30,6 +31,7 @@ def test_all_targets_creates_three_files(tmp_path):
 
 
 def test_action_cache_key_and_preflight(tmp_path):
+    """The GitHub Action must key its cache on manifests/root (not the branch), run calibrate --check then preflight --ci, and install `bounds-cli` via pipx — never the squatted bare `bounds` PyPI name."""
     ciconfig.run_ci_install(tmp_path, targets={"action"})
     text = _read(tmp_path / ".github/workflows/bounds.yml")
 
@@ -48,6 +50,7 @@ def test_action_cache_key_and_preflight(tmp_path):
 
 
 def test_precommit_uses_quick_gate(tmp_path):
+    """The pre-commit hook must use `validate --quick --ci` (sub-200ms quick path) with pass_filenames False at the pre-commit stage — a local commit gate stays fast and repo-wide."""
     ciconfig.run_ci_install(tmp_path, targets={"precommit"})
     data = yaml.safe_load(_read(tmp_path / ".pre-commit-config.yaml"))
 
@@ -59,6 +62,7 @@ def test_precommit_uses_quick_gate(tmp_path):
 
 
 def test_gitlab_job_uses_preflight(tmp_path):
+    """The GitLab job must run preflight --ci on src/.bounds changes and install `bounds-cli` via pip (the slim image lacks pipx) — never pipx and never the bare squatted `bounds` package."""
     ciconfig.run_ci_install(tmp_path, targets={"gitlab"})
     data = yaml.safe_load(_read(tmp_path / ".gitlab-ci.yml"))
 
@@ -75,6 +79,7 @@ def test_gitlab_job_uses_preflight(tmp_path):
 
 
 def test_idempotent_rerun_reports_skipped(tmp_path):
+    """A second install must create nothing and report all three files (sorted) in `skipped` — re-running the installer is idempotent and never duplicates or clobbers CI config."""
     first = ciconfig.run_ci_install(tmp_path, targets=set())
     assert len(first["created"]) == 3
 
@@ -86,6 +91,7 @@ def test_idempotent_rerun_reports_skipped(tmp_path):
 
 
 def test_precommit_append_preserves_existing_hook(tmp_path):
+    """Installing into an existing .pre-commit-config.yaml must append the bounds hook while preserving the user's prior hooks (e.g. black) — never overwrite a hand-maintained config."""
     existing = {
         "repos": [
             {
@@ -114,6 +120,7 @@ def test_precommit_append_preserves_existing_hook(tmp_path):
 
 
 def test_precommit_append_idempotent(tmp_path):
+    """Re-installing the precommit target must report it skipped and leave exactly one bounds hook — appending is idempotent, never accumulating duplicate hooks across runs."""
     ciconfig.run_ci_install(tmp_path, targets={"precommit"})
     second = ciconfig.run_ci_install(tmp_path, targets={"precommit"})
     assert second["skipped"] == [".pre-commit-config.yaml"]
@@ -129,6 +136,7 @@ def test_precommit_append_idempotent(tmp_path):
 
 
 def test_precommit_missing_repos_list_raises(tmp_path):
+    """A pre-commit config lacking a `repos:` list must raise BoundsError E_USAGE — the installer fails loudly rather than guessing where to inject the hook (fail-soft/report-hard)."""
     path = tmp_path / ".pre-commit-config.yaml"
     path.write_text("default_language_version:\n  python: python3.12\n", encoding="utf-8")
     with pytest.raises(errors.BoundsError) as exc:
@@ -137,6 +145,7 @@ def test_precommit_missing_repos_list_raises(tmp_path):
 
 
 def test_gitlab_append_preserves_existing_jobs(tmp_path):
+    """Installing into an existing .gitlab-ci.yml must add the bounds job while preserving prior stages and jobs verbatim — never clobber a hand-maintained pipeline."""
     existing = {
         "stages": ["build", "test"],
         "build": {"stage": "build", "script": ["make"]},
@@ -156,6 +165,7 @@ def test_gitlab_append_preserves_existing_jobs(tmp_path):
 
 
 def test_gitlab_existing_bounds_job_skipped(tmp_path):
+    """A pre-existing `bounds` job in .gitlab-ci.yml must be reported skipped and left untouched — the installer never overwrites a job the user already customized."""
     path = tmp_path / ".gitlab-ci.yml"
     path.write_text(
         yaml.safe_dump({"bounds": {"script": ["custom"]}}, sort_keys=False),
@@ -169,6 +179,7 @@ def test_gitlab_existing_bounds_job_skipped(tmp_path):
 
 
 def test_single_target_writes_only_that_file(tmp_path):
+    """A single target must write only that file and leave the other two absent — `targets={action}` scopes the install precisely, not a kitchen-sink of all gates."""
     result = ciconfig.run_ci_install(tmp_path, targets={"action"})
     assert result["created"] == [".github/workflows/bounds.yml"]
     assert result["targets"] == ["action"]
@@ -178,6 +189,7 @@ def test_single_target_writes_only_that_file(tmp_path):
 
 
 def test_unknown_target_raises(tmp_path):
+    """An unknown CI target must raise BoundsError E_USAGE — an unsupported platform fails fast with the stable usage code rather than silently installing nothing."""
     with pytest.raises(errors.BoundsError) as exc:
         ciconfig.run_ci_install(tmp_path, targets={"jenkins"})
     assert exc.value.code == errors.E_USAGE

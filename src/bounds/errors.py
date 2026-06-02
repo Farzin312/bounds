@@ -23,6 +23,11 @@ E_EXTERNAL_SYMLINK = "E_EXTERNAL_SYMLINK"
 # mapped while a chunk of its source is dark. Goal is 100% mapping; the fix points at how to close
 # the gap (add a manifest, or it's a not-yet-supported language).
 E_COVERAGE_GAP = "E_COVERAGE_GAP"
+# Two subsystems declare the IDENTICAL path/file for the same source file at equal specificity, so
+# ownership is decided only by sorted-first subsystem name (the tie-break in scan.resolve_owners).
+# Warning (advisory): the file is still deterministically owned, but the ambiguity is a manifest smell
+# an agent should resolve (narrow one path / move it to `files:`) rather than rely on alphabetical luck.
+E_SUBSYSTEM_OVERLAP = "E_SUBSYSTEM_OVERLAP"
 
 # ---- Schema / extraction codes ----
 E_SCHEMA_INVALID = "E_SCHEMA_INVALID"
@@ -53,6 +58,7 @@ SEVERITY = {
     E_UNOWNED_FILE: "error",
     E_EXTERNAL_SYMLINK: "warning",
     E_COVERAGE_GAP: "warning",
+    E_SUBSYSTEM_OVERLAP: "warning",
     E_SCHEMA_INVALID: "error",
     E_SCHEMA_NO_ORDER: "warning",
     E_SCHEMA_UNPARSED: "warning",

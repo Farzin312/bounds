@@ -5,11 +5,20 @@ enforce: "off"
 # Root-level bootstrap files (globs) — exempt from `validate --fail-on-unowned`.
 entry_points: []
 subsystems:
-  - models
-  - manifest
-  - extract
   - cache
-  - validate
-  - gitutil
-  - output
   - cli
+  - config
+  - describe
+  - errors
+  - extract
+  - gitutil
+  - guide
+  - ignore
+  - locate
+  - manifest
+  - models
+  - output
+  - tsconfig
+  - update_check
+  - upgrade
+  - validate

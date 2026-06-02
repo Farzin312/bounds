@@ -25,6 +25,7 @@ def _init_bounds(tmp_path):
 
 
 def test_save_creates_binary_sqlite_not_json(tmp_path):
+    """Cache armor: cache.db must start with the SQLite magic, not JSON, so an agent can't cat it into context as tokens."""
     _init_bounds(tmp_path)
     state = store.State()
     state.put(_result("src/auth/login.py"), subsystem="auth")
@@ -38,6 +39,7 @@ def test_save_creates_binary_sqlite_not_json(tmp_path):
 
 
 def test_roundtrip_preserves_records_and_owner(tmp_path):
+    """A save/load round-trip must preserve subsystem owner, content_hash, exported symbols, and imports, or the cache is lossy."""
     _init_bounds(tmp_path)
     state = store.State()
     state.put(_result("src/auth/login.py"), subsystem="auth")
@@ -54,6 +56,7 @@ def test_roundtrip_preserves_records_and_owner(tmp_path):
 
 
 def test_partial_read_by_subsystem(tmp_path):
+    """Partial reads must return only the requested subsystem's records (and [] for unknown), backing token-lean targeted retrieval."""
     _init_bounds(tmp_path)
     state = store.State()
     state.put(_result("src/auth/a.py"), subsystem="auth")
@@ -66,6 +69,7 @@ def test_partial_read_by_subsystem(tmp_path):
 
 
 def test_migration_from_legacy_json(tmp_path):
+    """load_state must transparently read a legacy JSON cache, and cache --migrate must convert+remove it idempotently (second run is a no-op)."""
     _init_bounds(tmp_path)
     cfg = tmp_path / config.BOUNDS_DIR
     legacy = {
@@ -89,6 +93,7 @@ def test_migration_from_legacy_json(tmp_path):
 
 
 def test_prune_drops_missing_files(tmp_path):
+    """prune_missing must drop cache records whose source file no longer exists on disk and keep the live ones, preventing stale entries."""
     _init_bounds(tmp_path)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "live.py").write_text("x = 1", encoding="utf-8")
@@ -104,6 +109,7 @@ def test_prune_drops_missing_files(tmp_path):
 
 
 def test_inspect_is_counts_only(tmp_path):
+    """inspect must report counts only (backend/files/by_subsystem) and never leak symbols/imports, keeping the summary token-lean."""
     _init_bounds(tmp_path)
     state = store.State()
     state.put(_result("src/auth/a.py"), subsystem="auth")
@@ -118,12 +124,14 @@ def test_inspect_is_counts_only(tmp_path):
 
 
 def test_corrupt_cache_yields_empty_state(tmp_path):
+    """Fail soft: a corrupt cache.db must load as an empty state, never crash, so a bad cache degrades to a cold re-extract."""
     _init_bounds(tmp_path)
     (tmp_path / config.BOUNDS_DIR / config.CACHE_FILE).write_bytes(b"not a database")
     assert store.load_state(tmp_path).files == {}
 
 
 def test_partial_read_rejects_stale_schema_version(tmp_path):
+    """Partial and full reads must apply the same schema-version gate, so a stale-version cache reads empty on both paths, never disagreeing."""
     # The per-subsystem partial read must apply the same schema-version gate as the full
     # read, so the two paths never disagree on whether a stale cache is valid.
     import sqlite3

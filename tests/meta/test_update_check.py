@@ -35,6 +35,7 @@ def _stub_version(monkeypatch, value: str) -> None:
 # check(): the five branches + shape
 # ---------------------------------------------------------------------------
 def test_shape_is_stable_and_additive(monkeypatch):
+    """check() always returns the exact stable key set (additive JSON contract) with fix single-sourced from config, so consumers never see drift."""
     _stub_version(monkeypatch, "0.1.0")
     result = update_check.check(fetch=lambda: "0.1.0")
     assert set(result) == _EXPECTED_KEYS
@@ -42,6 +43,7 @@ def test_shape_is_stable_and_additive(monkeypatch):
 
 
 def test_outdated_when_current_behind_latest(monkeypatch):
+    """When the local version is below latest, check() reports status=outdated/needs_upgrade=True and surfaces the upgrade fix in the note."""
     _stub_version(monkeypatch, "0.1.0")
     result = update_check.check(fetch=lambda: "0.2.0")
     assert result["current"] == "0.1.0"
@@ -55,6 +57,7 @@ def test_outdated_when_current_behind_latest(monkeypatch):
 
 
 def test_up_to_date_when_equal(monkeypatch):
+    """Equal local and latest versions report status=up_to_date with needs_upgrade=False — no spurious upgrade nag when already current."""
     _stub_version(monkeypatch, "0.2.0")
     result = update_check.check(fetch=lambda: "0.2.0")
     assert result["latest"] == "0.2.0"
@@ -67,6 +70,7 @@ def test_up_to_date_when_equal(monkeypatch):
 
 
 def test_not_outdated_when_current_ahead(monkeypatch):
+    """A local version ahead of the published latest must not be flagged outdated — a maintainer's newer build never gets a bogus downgrade nag."""
     # A locally-built release newer than the published one must not report outdated.
     _stub_version(monkeypatch, "0.3.0")
     result = update_check.check(fetch=lambda: "0.2.0")
@@ -75,6 +79,7 @@ def test_not_outdated_when_current_ahead(monkeypatch):
 
 
 def test_dev_build_leaves_outdated_null(monkeypatch):
+    """A setuptools-scm dev version can't be ordered against a release, so outdated stays None (status=dev_build) instead of guessing."""
     # setuptools-scm dev version on a git/pipx install: cannot be ordered vs a release.
     _stub_version(monkeypatch, "0.1.dev18+gad1b4cc7e")
     result = update_check.check(fetch=lambda: "0.2.0")
@@ -88,6 +93,7 @@ def test_dev_build_leaves_outdated_null(monkeypatch):
 
 
 def test_no_release_published(monkeypatch):
+    """A NO_RELEASE sentinel (API answered but nothing to compare) yields latest=None/status=no_release, distinct from an unreachable network."""
     # The API answered but there is no release to compare against (e.g. a 404).
     _stub_version(monkeypatch, "0.1.0")
     result = update_check.check(fetch=lambda: update_check.NO_RELEASE)
@@ -100,6 +106,7 @@ def test_no_release_published(monkeypatch):
 
 
 def test_offline_or_timeout_fails_soft(monkeypatch):
+    """A failed fetch (None) fails soft: checked=False, status=unreachable, no crash — being offline is never an error (fail-soft)."""
     # The lookup never succeeded: checked=False, latest=None, no crash.
     _stub_version(monkeypatch, "0.1.0")
     result = update_check.check(fetch=lambda: None)
@@ -112,6 +119,7 @@ def test_offline_or_timeout_fails_soft(monkeypatch):
 
 
 def test_dev_build_offline_still_reports_dev(monkeypatch):
+    """A dev build is detected from the local version alone, so is_dev_build=True even when offline (checked=False) — no network needed to classify it."""
     # Even with no network, a dev build is detectable from the local version alone.
     _stub_version(monkeypatch, "0.1.dev1+gabc")
     result = update_check.check(fetch=lambda: None)
@@ -138,6 +146,7 @@ class _FakeResponse:
 
 
 def test_fetch_parses_tag_and_strips_v_prefix(monkeypatch):
+    """_fetch_latest_tag parses tag_name and strips the leading 'v' so 'v1.4.2' compares as the bare release '1.4.2'."""
     monkeypatch.setattr(
         update_check.urllib.request,
         "urlopen",
@@ -147,6 +156,7 @@ def test_fetch_parses_tag_and_strips_v_prefix(monkeypatch):
 
 
 def test_fetch_sends_user_agent(monkeypatch):
+    """Every request carries a User-Agent (GitHub rejects requests without one) and a finite timeout, so the check can't hang or be 403'd."""
     seen = {}
 
     def fake_urlopen(req, timeout=None):
@@ -161,6 +171,7 @@ def test_fetch_sends_user_agent(monkeypatch):
 
 
 def test_fetch_404_reports_no_release(monkeypatch):
+    """A 404 (no release yet) maps to the NO_RELEASE sentinel, distinguishing 'no release exists' from a connection failure (None)."""
     def fake_urlopen(req, timeout=None):
         raise update_check.urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
 
@@ -169,6 +180,7 @@ def test_fetch_404_reports_no_release(monkeypatch):
 
 
 def test_fetch_connection_error_returns_none(monkeypatch):
+    """A URLError (no route/DNS failure) returns None so the caller fails soft as unreachable rather than raising."""
     def fake_urlopen(req, timeout=None):
         raise update_check.urllib.error.URLError("no route to host")
 
@@ -177,6 +189,7 @@ def test_fetch_connection_error_returns_none(monkeypatch):
 
 
 def test_fetch_timeout_returns_none(monkeypatch):
+    """A TimeoutError returns None (fail soft), so a slow GitHub never makes the check hang or crash."""
     def fake_urlopen(req, timeout=None):
         raise TimeoutError("timed out")
 
@@ -185,6 +198,7 @@ def test_fetch_timeout_returns_none(monkeypatch):
 
 
 def test_fetch_bad_json_returns_none(monkeypatch):
+    """A non-JSON body (e.g. an HTML error page) returns None rather than raising — malformed responses fail soft."""
     monkeypatch.setattr(
         update_check.urllib.request,
         "urlopen",
@@ -194,6 +208,7 @@ def test_fetch_bad_json_returns_none(monkeypatch):
 
 
 def test_fetch_missing_tag_reports_no_release(monkeypatch):
+    """Valid JSON without a tag_name key maps to NO_RELEASE (release exists but unnamed), not None — distinct from a transport failure."""
     monkeypatch.setattr(
         update_check.urllib.request,
         "urlopen",
@@ -214,6 +229,7 @@ class _FakeStream:
 
 
 def test_interactive_human_defaults_to_tty(monkeypatch):
+    """_interactive_human defaults to JSON when stdout is piped (agent/script) and human only on a real TTY, with --human always overriding — protects the JSON-first contract."""
     # Piped/redirected (agent or script) → JSON contract; a real terminal → human announcement.
     monkeypatch.setattr(cli_mod.sys, "stdout", _FakeStream(tty=False))
     assert cli_mod._interactive_human(False) is False     # non-TTY → JSON
@@ -223,6 +239,7 @@ def test_interactive_human_defaults_to_tty(monkeypatch):
 
 
 def test_cli_json_outdated(monkeypatch):
+    """`bounds upgrade-check` emits one JSON object carrying the full stable key set with outdated=True — the default machine contract for agents."""
     _stub_version(monkeypatch, "0.1.0")
     monkeypatch.setattr(update_check, "_fetch_latest_tag", lambda: "0.2.0")
     res = CliRunner().invoke(main, ["upgrade-check"])
@@ -234,6 +251,7 @@ def test_cli_json_outdated(monkeypatch):
 
 
 def test_cli_human_outdated_line(monkeypatch):
+    """--human renders a short summary (newer-release line + fix) and emits no JSON braces — the human view re-renders the same data, never raw JSON."""
     _stub_version(monkeypatch, "0.1.0")
     monkeypatch.setattr(update_check, "_fetch_latest_tag", lambda: "0.2.0")
     res = CliRunner().invoke(main, ["upgrade-check", "--human"])
@@ -245,6 +263,7 @@ def test_cli_human_outdated_line(monkeypatch):
 
 
 def test_cli_human_up_to_date_line(monkeypatch):
+    """The -H short flag for --human prints the 'up to date' summary line when local equals latest — both human flag spellings are wired."""
     _stub_version(monkeypatch, "0.2.0")
     monkeypatch.setattr(update_check, "_fetch_latest_tag", lambda: "0.2.0")
     res = CliRunner().invoke(main, ["upgrade-check", "-H"])
@@ -253,6 +272,7 @@ def test_cli_human_up_to_date_line(monkeypatch):
 
 
 def test_cli_offline_exits_zero(monkeypatch):
+    """`bounds upgrade-check` exits 0 with checked=False when offline — being unable to check is informational, never a failure exit code."""
     # Being unable to check is informational, never an error.
     _stub_version(monkeypatch, "0.1.0")
     monkeypatch.setattr(update_check, "_fetch_latest_tag", lambda: None)
@@ -266,6 +286,7 @@ def test_cli_offline_exits_zero(monkeypatch):
 # bounds upgrade: opt-in self-upgrade command, no real subprocess in tests
 # ---------------------------------------------------------------------------
 def test_upgrade_dry_run_reports_command():
+    """A dry-run reports the exact pipx install --force git+... command without executing it, so users can preview the self-upgrade."""
     result = upgrade.run_upgrade(dry_run=True)
     assert result["ok"] is True
     assert result["dry_run"] is True
@@ -273,12 +294,14 @@ def test_upgrade_dry_run_reports_command():
 
 
 def test_upgrade_local_command_uses_editable_path(tmp_path):
+    """A local upgrade builds an editable install (pipx ... -e <path>) with source='local', so contributors upgrade from a working tree."""
     result = upgrade.run_upgrade(local=tmp_path, dry_run=True)
     assert result["source"] == "local"
     assert result["command"] == ["pipx", "install", "--force", "-e", str(tmp_path)]
 
 
 def test_upgrade_fallback_reinstalls_when_force_fails(monkeypatch):
+    """When pipx install --force fails (existing venv), the upgrade falls back to uninstall+reinstall in order and still reports ok — recovers a wedged venv."""
     calls = []
 
     def fake_run(command, capture_output=True, text=True, check=False, timeout=None):
@@ -345,6 +368,7 @@ def test_upgrade_failure_surfaces_stderr_only(monkeypatch):
 
 
 def test_upgrade_error_class_maps_pipx_not_found(monkeypatch):
+    """A missing pipx (OSError) surfaces as the stable semantic error='pipx_not_found' with fallback_used=True, so consumers never parse a raw return code."""
     # _run maps a missing pipx (OSError) to returncode 127; the JSON must carry the
     # stable semantic class so a consumer never interprets the raw number.
     def fake_run(command, capture_output=True, text=True, check=False, timeout=None):
@@ -358,6 +382,7 @@ def test_upgrade_error_class_maps_pipx_not_found(monkeypatch):
 
 
 def test_upgrade_timeout_error_class(monkeypatch):
+    """A TimeoutExpired during install reports the stable semantic error='timeout', so a hung pipx is classified, not surfaced as a raw code."""
     def fake_run(command, capture_output=True, text=True, check=False, timeout=None):
         raise upgrade.subprocess.TimeoutExpired(command, timeout)
 
@@ -367,6 +392,7 @@ def test_upgrade_timeout_error_class(monkeypatch):
 
 
 def test_upgrade_cli_dry_run(monkeypatch):
+    """`bounds upgrade --dry-run` exits 0 and emits JSON with dry_run=True and a pipx command — previewing never executes or errors."""
     res = CliRunner().invoke(main, ["upgrade", "--dry-run"])
     assert res.exit_code == 0
     data = json.loads(res.output)
@@ -375,6 +401,7 @@ def test_upgrade_cli_dry_run(monkeypatch):
 
 
 def test_upgrade_cli_failure_exits_blocked(monkeypatch):
+    """A failed upgrade (ok=False) makes the CLI exit 1, so a failed self-upgrade is a non-zero exit a caller can detect."""
     monkeypatch.setattr(
         upgrade,
         "run_upgrade",

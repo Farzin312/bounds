@@ -439,6 +439,33 @@ def overview_cmd(human: bool) -> None:
         ctx = CheckContext(root, rootm, subs, {}, {}, set(), set())
         cycle_issues = check_cycles(ctx)
         schema_errors = sum(1 for i in schema_issues if i.severity == "error")
+        # Fold a real validation pass into health so overview can never report ok=true while
+        # validate would block (BOUNDS-009): a clean manifest graph says nothing about whether
+        # the *source* still matches its contracts (drift) or respects boundaries. Run the
+        # existing full engine read-only (persist=False — overview is a read, never mutates the
+        # cache); reuse its error counts + mapping coverage rather than re-walking the tree.
+        with _progress("checking health..."):
+            report = validate_engine.run(root, mode="full", persist=False)
+        counts = Counter(i.code for i in report.issues)
+        cov = report.stats.get("coverage", {})
+        mapping = cov.get("mapping") or {}
+        validation = {
+            "ok": report.ok,
+            "errors": len(report.errors()),
+            "warnings": len(report.warnings()),
+            "structural_drift": counts.get(errors.E_STRUCTURAL_DRIFT, 0),
+            "boundary_violations": counts.get(errors.E_BOUNDARY_VIOLATION, 0),
+            "contract_gaps": counts.get(errors.E_CONTRACT_MISSING_EXPORT, 0),
+            "stale_interfaces": counts.get(errors.E_STALE_INTERFACE, 0),
+            "mapped_pct": mapping.get("mapped_pct", 0.0),
+        }
+        # Informational doc/test linkage (tracked, never a blocking gap) — carried so the human
+        # overview can re-render the same data the validate JSON exposes (JSON-first parity).
+        for label in ("tests", "docs"):
+            bucket = mapping.get(label) or {}
+            if bucket.get("total"):
+                validation[label] = {"linked": bucket.get("linked", 0),
+                                     "unlinked": bucket.get("unlinked", 0)}
         payload = {
             "project": rootm.project,
             "subsystems": len(subs),
@@ -448,9 +475,13 @@ def overview_cmd(human: bool) -> None:
             "cycles": [i.message for i in cycle_issues],
             "schema_issues": [i.to_dict() for i in schema_issues],
             "health": {
-                "ok": not cycle_issues and schema_errors == 0,
+                # ok is true only when nothing blocks: the validation pass is clean AND there
+                # are no graph cycles or schema errors (kept distinct so the human line and JSON
+                # still surface each signal independently).
+                "ok": report.ok and not cycle_issues and schema_errors == 0,
                 "schema_errors": schema_errors,
                 "cycles": len(cycle_issues),
+                "validation": validation,
             },
         }
         output.emit(payload, human)

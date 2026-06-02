@@ -11,9 +11,21 @@ exposes:
   - { name: resolve_import, kind: function }
   - { name: build_consumer_index, kind: function }
   - { name: transitive_consumers, kind: function }
+  - { name: index_extracts, kind: function }
+  - { name: schema_catalog, kind: function }
+  - { name: SCHEMA_LANGUAGES, kind: variable }
+  - { name: fold_subsystem_objects, kind: function }
+  - { name: hash_schema_catalog, kind: function }
+  - { name: schema_diagnostics, kind: function }
+  - { name: schema_objects, kind: function }
+  - { name: schema_rls_posture, kind: function }
 consumes:
   - { subsystem: models, via: models, interfaces: [RootManifest, SubsystemCompact, ExtractResult, Issue, ValidationReport] }
   - { subsystem: manifest, via: loader, interfaces: [load_all] }
-  - { subsystem: extract, via: extract, interfaces: [get_adapter, supported_extensions, content_hash] }
+  - { subsystem: extract, via: extract, interfaces: [get_adapter, supported_extensions, content_hash, is_test_file, is_test_symbol, is_framework_entry_file, strip_ext] }
   - { subsystem: cache, via: store, interfaces: [load_state, save_state, State, FileRecord] }
   - { subsystem: gitutil, via: gitutil, interfaces: [repo_root, changed_files] }
+tests:
+  - tests/validate
+docs:
+  - docs/coverage.md

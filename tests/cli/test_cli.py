@@ -14,6 +14,7 @@ def _json(result):
 
 
 def test_list(sample_project, monkeypatch):
+    """list emits the JSON-first contract: project name + the exact declared subsystem set, exit 0."""
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["list"])
     assert result.exit_code == 0
@@ -23,6 +24,7 @@ def test_list(sample_project, monkeypatch):
 
 
 def test_validate_clean_is_fresh(sample_project, monkeypatch):
+    """A clean project validates fresh+ok at exit 0; bidirectional drift (undeclared internal) stays info-only, non-blocking."""
     # The sample project has no errors/warnings, so it validates fresh + ok. Its database
     # subsystem deliberately exports an internal `UserRepository` it does not declare, which
     # (bidirectional drift) surfaces as a non-blocking info — fresh + exit 0 are unchanged.
@@ -36,6 +38,7 @@ def test_validate_clean_is_fresh(sample_project, monkeypatch):
 
 
 def test_validate_quick_mode(git_sample_project, monkeypatch):
+    """--quick (the git-diff fast path) must tag its output mode=quick so callers know it's the sub-200ms budgeted run."""
     monkeypatch.chdir(git_sample_project)
     result = CliRunner().invoke(main, ["validate", "--quick"])
     assert result.exit_code == 0
@@ -43,6 +46,7 @@ def test_validate_quick_mode(git_sample_project, monkeypatch):
 
 
 def test_describe_returns_manifest(sample_project, monkeypatch):
+    """describe <name> returns the subsystem's declared public surface (exposes) verified fresh against source."""
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["describe", "auth"])
     assert result.exit_code == 0
@@ -53,6 +57,7 @@ def test_describe_returns_manifest(sample_project, monkeypatch):
 
 
 def test_describe_deep_stub(sample_project, monkeypatch):
+    """--deep (the only LLM tier) is opt-in and stubbed in MVP: it must add a `semantic` key, never crash or call an LLM."""
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["describe", "auth", "--deep"])
     assert result.exit_code == 0
@@ -60,6 +65,7 @@ def test_describe_deep_stub(sample_project, monkeypatch):
 
 
 def test_describe_unknown_subsystem(sample_project, monkeypatch):
+    """An unknown subsystem name is a genuinely fatal condition: E_SUBSYSTEM_NOT_FOUND at exit 2, not a soft Issue."""
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["describe", "ghost"])
     assert result.exit_code == 2
@@ -67,6 +73,7 @@ def test_describe_unknown_subsystem(sample_project, monkeypatch):
 
 
 def test_describe_namespace_groups(py_project, monkeypatch):
+    """describe --namespace aggregates every subsystem in a namespace while still running the per-subsystem Tier-1 source-verify merge."""
     # Tag both subsystems into one namespace, then describe the group.
     for n in ("models", "svc"):
         p = py_project / ".bounds" / "manifests" / f"{n}.yaml"
@@ -83,6 +90,7 @@ def test_describe_namespace_groups(py_project, monkeypatch):
 
 
 def test_describe_unknown_namespace_is_empty(py_project, monkeypatch):
+    """An unknown namespace is not fatal (unlike an unknown subsystem): it returns an empty subsystems list at exit 0."""
     monkeypatch.chdir(py_project)
     result = CliRunner().invoke(main, ["describe", "--namespace", "ghost"])
     assert result.exit_code == 0
@@ -90,6 +98,7 @@ def test_describe_unknown_namespace_is_empty(py_project, monkeypatch):
 
 
 def test_describe_requires_a_target(sample_project, monkeypatch):
+    """describe with neither a name nor --namespace is a usage error: E_USAGE at exit 2, not an empty success."""
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["describe"])
     assert result.exit_code == 2
@@ -97,6 +106,7 @@ def test_describe_requires_a_target(sample_project, monkeypatch):
 
 
 def test_describe_rejects_name_and_namespace(sample_project, monkeypatch):
+    """A name and --namespace are mutually exclusive targets: passing both is E_USAGE at exit 2, never an arbitrary winner."""
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["describe", "auth", "--namespace", "x"])
     assert result.exit_code == 2
@@ -104,6 +114,7 @@ def test_describe_rejects_name_and_namespace(sample_project, monkeypatch):
 
 
 def test_validate_ci_output(sample_project, monkeypatch):
+    """--ci emits tab-delimited plaintext (never JSON), one severity-tagged line per issue, for grep-able CI logs."""
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["validate", "--ci"])
     assert result.exit_code == 0
@@ -114,6 +125,7 @@ def test_validate_ci_output(sample_project, monkeypatch):
 
 
 def test_validate_ci_clean_ok_line(py_project, monkeypatch):
+    """A clean project under --ci emits exactly one tab-delimited `ok\\t<status>` line and never falls back to JSON."""
     # A genuinely clean project emits the single tab-delimited "ok\t<status>" line.
     monkeypatch.chdir(py_project)
     result = CliRunner().invoke(main, ["validate", "--ci"])
@@ -123,6 +135,7 @@ def test_validate_ci_clean_ok_line(py_project, monkeypatch):
 
 
 def test_validate_ci_fatal_stays_plaintext(tmp_path, monkeypatch):
+    """Even a fatal (no .bounds/) under --ci stays tab-delimited `fatal\\tE_MANIFEST_NOT_FOUND\\t...` so CI parsing never breaks on errors."""
     # No .bounds/ is fatal; under --ci it must stay tab-delimited, not fall back to JSON.
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["validate", "--ci"])
@@ -132,6 +145,7 @@ def test_validate_ci_fatal_stays_plaintext(tmp_path, monkeypatch):
 
 
 def test_validate_fail_on_unowned(py_project, git_init, monkeypatch):
+    """An unowned source file is invisible by default; --fail-on-unowned promotes it to a blocking E_UNOWNED_FILE (exit 1)."""
     # A tracked source file outside every subsystem's paths is silently ignored by default,
     # but --fail-on-unowned promotes it to a blocking E_UNOWNED_FILE error.
     (py_project / "src" / "orphan.py").write_text("def stray():\n    pass\n", encoding="utf-8")
@@ -154,6 +168,7 @@ def _add_entry_points(root, *globs):
 
 
 def test_entry_point_exempt_from_fail_on_unowned(py_project, git_init, monkeypatch):
+    """A declared entry point downgrades its unowned E_UNOWNED_FILE to a soft warning while a real orphan stays a hard error."""
     # Two root-level unowned files: app.py is a declared entry point, orphan.py is not.
     (py_project / "app.py").write_text("def main():\n    pass\n", encoding="utf-8")
     (py_project / "orphan.py").write_text("def stray():\n    pass\n", encoding="utf-8")
@@ -170,6 +185,7 @@ def test_entry_point_exempt_from_fail_on_unowned(py_project, git_init, monkeypat
 
 
 def test_entry_point_alone_does_not_block(py_project, git_init, monkeypatch):
+    """When the only unowned file is a declared entry point, --fail-on-unowned passes clean (exit 0, no error-severity issues)."""
     # The only unowned file is a declared entry point -> --fail-on-unowned passes clean.
     (py_project / "manage.py").write_text("def main():\n    pass\n", encoding="utf-8")
     _add_entry_points(py_project, "manage.py")
@@ -184,6 +200,7 @@ def test_entry_point_alone_does_not_block(py_project, git_init, monkeypatch):
 
 
 def test_describe_flags_entry_point(py_project, monkeypatch):
+    """describe surfaces entry-point status: a subsystem-owned file matched by an entry_points glob is listed and its exports tagged entry_point=true."""
     # A subsystem-owned file matched by an entry-point glob is flagged in describe output.
     _add_entry_points(py_project, "'**/thing.py'")
     monkeypatch.chdir(py_project)
@@ -196,6 +213,7 @@ def test_describe_flags_entry_point(py_project, monkeypatch):
 
 
 def test_no_root_is_fatal(tmp_path, monkeypatch):
+    """No .bounds/ root is a genuinely fatal condition: list raises E_MANIFEST_NOT_FOUND at exit 2 rather than scanning blindly."""
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["list"])
     assert result.exit_code == 2
@@ -203,6 +221,7 @@ def test_no_root_is_fatal(tmp_path, monkeypatch):
 
 
 def test_preflight_summary(sample_project, monkeypatch):
+    """preflight reports the fast structural gate counts (cycle_detection, boundary_compliance both 0 on a clean repo)."""
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["preflight"])
     assert result.exit_code == 0
@@ -213,6 +232,7 @@ def test_preflight_summary(sample_project, monkeypatch):
 
 
 def test_overview(sample_project, monkeypatch):
+    """overview reports subsystem count, no cycles, and folds a real validation pass into health.ok (BOUNDS-009)."""
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["overview"])
     assert result.exit_code == 0
@@ -220,9 +240,103 @@ def test_overview(sample_project, monkeypatch):
     assert data["subsystems"] == 3
     assert data["health"]["ok"] is True
     assert data["cycles"] == []
+    # overview now folds a real validation pass into health (BOUNDS-009).
+    assert data["health"]["validation"]["ok"] is True
+
+
+def _drifted_project(root):
+    """Write a 2-subsystem python project under enforce=on with one blocking contract drift.
+
+    ``models`` declares a ``Missing`` export that does not exist in source, so a full
+    validation pass reports a blocking error — the case overview must reflect as not-ok.
+    """
+    (root / ".bounds" / "manifests").mkdir(parents=True)
+    (root / ".bounds" / "root.yaml").write_text(
+        'version: "1"\nproject: drift\nlanguages: [python]\nenforce: "on"\n'
+        "subsystems: [models, svc]\n",
+        encoding="utf-8",
+    )
+    (root / ".bounds" / "manifests" / "models.yaml").write_text(
+        "name: models\nrole: library\ncriticality: core\npaths: [src/models]\n"
+        "exposes:\n  - { name: Thing, kind: class }\n  - { name: Missing, kind: class }\n"
+        "consumes: []\n",
+        encoding="utf-8",
+    )
+    (root / ".bounds" / "manifests" / "svc.yaml").write_text(
+        "name: svc\nrole: service\ncriticality: leaf\npaths: [src/svc]\nexposes: []\n"
+        "consumes:\n  - { subsystem: models, via: models, interfaces: [Thing] }\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "models").mkdir(parents=True)
+    (root / "src" / "svc").mkdir(parents=True)
+    (root / "src" / "models" / "thing.py").write_text("class Thing:\n    pass\n", encoding="utf-8")
+    (root / "src" / "svc" / "main.py").write_text(
+        "from ..models.thing import Thing\n\n\ndef run():\n    return Thing()\n", encoding="utf-8"
+    )
+
+
+def test_overview_health_reflects_drift(tmp_path, monkeypatch):
+    """BOUNDS-009: overview health.ok must agree with the validate gate — drift under enforce=on forces health.ok=false."""
+    # BOUNDS-009: a project that validate would block (drift under enforce=on) must report
+    # health.ok=false in overview — health can no longer be ok while validate has errors.
+    root = tmp_path / "proj"
+    _drifted_project(root)
+    monkeypatch.chdir(root)
+
+    overview = CliRunner().invoke(main, ["overview"])
+    assert overview.exit_code == 0
+    health = _json(overview)["health"]
+    assert health["ok"] is False
+    assert health["validation"]["ok"] is False
+    assert health["validation"]["errors"] >= 1
+
+    # The folded signal must agree with the standalone validate gate.
+    val = CliRunner().invoke(main, ["validate"])
+    assert val.exit_code == 1  # blocked, not fatal
+
+
+def test_overview_health_clean_when_no_drift(py_project, monkeypatch):
+    """The BOUNDS-009 fold's clean side: a no-drift project keeps health.ok=true (the validate fold isn't a false alarm)."""
+    # A clean project (enforce=off, source matches contracts) stays health.ok=true.
+    monkeypatch.chdir(py_project)
+    result = CliRunner().invoke(main, ["overview"])
+    assert result.exit_code == 0
+    health = _json(result)["health"]
+    assert health["ok"] is True
+    assert health["validation"]["ok"] is True
+
+
+def test_validate_fatal_after_dry_run_discover_exits_2(tmp_path, git_init, monkeypatch):
+    """BOUNDS-011: a dry-run discover writes nothing to disk, so a following validate still raises fatal E_MANIFEST_NOT_FOUND (exit 2), unmasked."""
+    # BOUNDS-011: a no-op dry-run discover (no .bounds/ written) must not mask the fatal
+    # missing-manifest path — a subsequent validate still raises E_MANIFEST_NOT_FOUND and
+    # exits config.EXIT_FATAL (2), never 0.
+    (tmp_path / "a.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    git_init(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    discover = CliRunner().invoke(main, ["discover", "--dry-run"])
+    assert discover.exit_code == 0  # preview succeeds without writing manifests
+    assert not (tmp_path / ".bounds").exists()  # truly a no-op on disk
+
+    result = CliRunner().invoke(main, ["validate"])
+    assert result.exit_code == 2
+    assert _json(result)["error"]["code"] == "E_MANIFEST_NOT_FOUND"
+
+
+def test_validate_blocked_exits_1(tmp_path, monkeypatch):
+    """A drifted (but loadable) project is blocked, not fatal: exit 1 with ok=false, keeping the 1-vs-2 exit-code contract distinct."""
+    # A normal validate on a drifted project exits 1 (blocked), distinct from the fatal 2.
+    root = tmp_path / "proj"
+    _drifted_project(root)
+    monkeypatch.chdir(root)
+    result = CliRunner().invoke(main, ["validate"])
+    assert result.exit_code == 1
+    assert _json(result)["ok"] is False
 
 
 def test_human_output_is_not_json(sample_project, monkeypatch):
+    """--human re-renders the same data as prose ('status:'), not raw JSON — the JSON-first/human-mirror contract."""
     monkeypatch.chdir(sample_project)
     result = CliRunner().invoke(main, ["validate", "--human"])
     assert result.exit_code == 0
@@ -230,6 +344,7 @@ def test_human_output_is_not_json(sample_project, monkeypatch):
 
 
 def test_init_root_then_subsystem(tmp_path, monkeypatch):
+    """init --root then --subsystem scaffolds the hidden .bounds/ (root.yaml + manifest) so the project becomes discoverable by list."""
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
@@ -248,6 +363,7 @@ def test_init_root_then_subsystem(tmp_path, monkeypatch):
 
 
 def test_init_requires_a_flag(tmp_path, monkeypatch):
+    """Bare init with no --root/--subsystem is E_USAGE at exit 2 — it must never guess and silently scaffold the wrong thing."""
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["init"])
     assert result.exit_code == 2
@@ -255,6 +371,7 @@ def test_init_requires_a_flag(tmp_path, monkeypatch):
 
 
 def test_init_root_idempotent(tmp_path, monkeypatch):
+    """init --root is idempotent: a second run reports skipped (exit 0) and never clobbers the existing root.yaml."""
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     runner.invoke(main, ["init", "--root"])

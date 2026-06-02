@@ -14,19 +14,113 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import errors
+from . import errors, gitutil
 from .extract import scan, supported_extensions
-from .ignore import IgnoreMatcher
-from .models import SubsystemCompact, ValidationReport
+from .ignore import IgnoreMatcher, load_matcher
+from .manifest import loader as manifest_loader
+from .models import Issue, SubsystemCompact, ValidationReport
 from .validate import engine as validate_engine
 from .validate.schema import (
-    _fold_subsystem_objects,
+    fold_subsystem_objects,
     hash_schema_catalog,
     schema_catalog,
     schema_diagnostics,
     schema_objects,
     schema_rls_posture,
 )
+
+
+def _ignore_ctx(root: Path) -> tuple[dict[str, SubsystemCompact], IgnoreMatcher, Path]:
+    """The ignore-aware ``(subsystems, .boundsignore matcher, git repo root)`` describe shares with
+    validate, so describe's file/doc/test selection matches exactly what ``validate`` scans.
+
+    Loading the manifest set is genuinely fatal if it's missing/broken — it **propagates** rather than
+    degrading to a single-subsystem view, which would silently re-introduce the cross-subsystem
+    double-counting BOUNDS-006 fixed (and ``describe`` is only reached after the root already loaded).
+    """
+    _root, subs, _issues = manifest_loader.load_all(root)
+    return subs, load_matcher(root), gitutil.repo_root(root) or root
+
+
+def _owned_files(root: Path, sub: SubsystemCompact) -> list[str]:
+    """Repo-relative posix paths this subsystem owns under most-specific-path-wins (BOUNDS-006).
+
+    Reuses :func:`scan.resolve_owners` — the single project-wide ownership home shared with the
+    validation engine — **ignore-aware** (``.boundsignore`` + ``.gitignore``), and filters to files
+    whose winning owner is ``sub``, instead of walking the subsystem's own paths blindly (which
+    double-counted any file a more-specific sibling owns AND counted files validate would skip). This
+    makes describe's ``file_count``/``files`` AGREE with validate on exactly which files belong here.
+    """
+    subs, matcher, repo = _ignore_ctx(root)
+    owners = scan.resolve_owners(root, subs, supported_extensions(), matcher, repo)
+    return sorted(rel for rel, (owner, _abs) in owners.items() if owner == sub.name)
+
+
+def _linked_docs_tests(root: Path, sub: SubsystemCompact) -> tuple[list[str], list[str]]:
+    """The doc/test files (rel-posix, sorted) this subsystem links — explicit ``docs:``/``tests:``
+    plus convention auto-detection (BOUNDS-010 hybrid model).
+
+    Resolves against the full project's subsystems (most-specific declaration wins, same as validate),
+    **ignore-aware** (``.boundsignore`` + ``.gitignore`` via the shared matcher/repo), so describe and
+    validate/coverage agree on which docs/tests belong here. Returns ``(docs, tests)``.
+    """
+    subs, matcher, repo = _ignore_ctx(root)
+    doc_owners = scan.resolve_doc_owners(root, subs, matcher, repo)
+    test_owners = scan.resolve_test_owners(root, subs, matcher, repo)
+    docs = sorted(rel for rel, owner in doc_owners.items() if owner == sub.name)
+    tests = sorted(rel for rel, owner in test_owners.items() if owner == sub.name)
+    return docs, tests
+
+
+def subsystem_overlaps(root: Path, sub: SubsystemCompact) -> list[Issue]:
+    """Genuine same-path conflicts touching ``sub``: files another subsystem declares identically.
+
+    A true ambiguity is two subsystems declaring the *identical* path/file for a source file at
+    EQUAL specificity, where :func:`scan.resolve_owners` can only break the tie by sorted-first
+    subsystem name (so ownership rides on alphabetical luck, not intent). For each such file this
+    emits one non-fatal ``E_SUBSYSTEM_OVERLAP`` :class:`Issue` (warning) naming the colliding
+    subsystems and the file, so an agent can narrow a path or move it to ``files:`` rather than
+    depend on the tie-break. Nested paths (different specificity) are NOT overlaps — the deepest path
+    legitimately wins (BOUNDS-001), so they never surface here. Sorted for deterministic output.
+    """
+    exts = supported_extensions()
+    try:
+        subs, matcher, repo = _ignore_ctx(root)
+    except errors.BoundsError:
+        return []
+    # Only files validate would actually scan: the ignore-aware owned set (.boundsignore + .gitignore)
+    # gates the claim map, so an overlap is never reported for a file validate skips by default.
+    scanned = scan.resolve_owners(root, subs, exts, matcher, repo)
+    # file -> {specificity -> sorted set of claiming subsystem names}, built from the same primitives
+    # resolve_owners uses (iter_subsystem_files + path_specificity); no second walk concept.
+    claims: dict[str, dict[int, set[str]]] = {}
+    for name in sorted(subs):
+        s = subs[name]
+        for abs_path in scan.iter_subsystem_files(root, s, exts):
+            rel = abs_path.relative_to(root).as_posix()
+            if rel not in scanned:  # dropped by .boundsignore/.gitignore/symlink — not scanned
+                continue
+            spec = scan.path_specificity(rel, s.paths, s.files)
+            claims.setdefault(rel, {}).setdefault(spec, set()).add(name)
+    issues: list[Issue] = []
+    for rel in sorted(claims):
+        by_spec = claims[rel]
+        top = max(by_spec)
+        contenders = by_spec[top]
+        if sub.name not in contenders or len(contenders) < 2:
+            continue  # this subsystem isn't tied at the winning specificity → no genuine overlap
+        others = sorted(c for c in contenders if c != sub.name)
+        issues.append(Issue(
+            code=errors.E_SUBSYSTEM_OVERLAP,
+            severity=errors.SEVERITY[errors.E_SUBSYSTEM_OVERLAP],
+            message=(f"'{rel}' is claimed at equal specificity by {sorted(contenders)}; "
+                     f"ownership is decided only by sorted-first name ({min(contenders)})"),
+            subsystem=sub.name,
+            file=rel,
+            fix=(f"narrow one path or move '{rel}' to `files:` so a single subsystem owns it "
+                 f"(currently overlaps with {others})"),
+        ))
+    return issues
 
 
 def extract_owned(
@@ -45,19 +139,17 @@ def extract_owned(
     is **not** counted here — the catalog-incompleteness signal lives in ``schema_diagnostics``,
     which reports only files that lost real DDL (``E_SCHEMA_UNPARSED``), never no-DDL files.
 
-    File selection is the shared owned-file walk, so describe and validate own the same set.
+    File selection is most-specific-path-wins ownership (:func:`scan.resolve_owners` via
+    :func:`_owned_files`), the SAME map validate uses, so describe and validate own the identical
+    set — a file a more-specific sibling subsystem owns is no longer double-counted here (BOUNDS-006).
     """
-    exts = supported_extensions()
     extracted_symbols: dict[str, str] = {}  # symbol_name -> owning file (rel posix)
     extracts = {}
     file_owner = {}
-    owned_files: list[str] = []
+    owned_files: list[str] = _owned_files(root, sub)
     unparsed_files: list[str] = []
 
-    for abs_path in scan.iter_subsystem_files(root, sub, exts):
-        rel = abs_path.relative_to(root).as_posix()
-        if rel not in owned_files:
-            owned_files.append(rel)
+    for rel in owned_files:
         result, _ = scan.extract_file(root, rel)
         if result is None:  # supported source file that didn't yield a result → genuine failure
             unparsed_files.append(rel)
@@ -74,7 +166,7 @@ def extract_owned(
     schema_hash = hash_schema_catalog(catalog) if catalog else ""  # reuse the fold above; don't re-fold
     # Fold the non-table surface ONCE and feed both readers (objects + posture), instead of
     # each re-folding (which would also re-run order_migrations).
-    objects_fold = _fold_subsystem_objects(sub.name, extracts, file_owner)
+    objects_fold = fold_subsystem_objects(sub.name, extracts, file_owner)
     objects = schema_objects(sub.name, extracts, file_owner, fold=objects_fold)
     diagnostics = [
         {"code": code, "message": message, "file": file}
@@ -111,6 +203,11 @@ def describe_one(
     # gate that roster behind --full, so drop the model's key to avoid a stale empty ``files: []``
     # sitting next to ``file_count``.
     payload.pop("files", None)
+    # docs/tests are surfaced as the RESOLVED set (explicit + convention) under --full, mirroring
+    # the file roster — drop the model's raw declared lists so they're never shown un-gated and a
+    # default describe stays token-lean (BOUNDS-010 parity).
+    payload.pop("docs", None)
+    payload.pop("tests", None)
     (extracted_symbols, owned_files, unparsed_files, catalog, schema_hash,
      objects, diagnostics, posture) = extract_owned(root, sub)
     for expose in payload.get("exposes", []):
@@ -123,8 +220,22 @@ def describe_one(
     # per-kind counts. ``--full`` restores both. This keeps `describe` cheaper than reading
     # source even on a 289-migration subsystem, honoring the token-first thesis.
     payload["file_count"] = len(owned_files)
+    # JSON-first parity (BOUNDS-010): the human renderer (output._render_subsystem_human) lists the
+    # file roster exactly when ``payload["files"]`` is present and non-empty, so the JSON MUST carry
+    # the same ``files`` under the same gate — never render a list the JSON omitted. ``--full`` is
+    # that gate for both: default stays token-lean (count only), ``--full`` populates the roster in
+    # the JSON and the human view alike. owned_files is already sorted by _owned_files.
     if full:
-        payload["files"] = sorted(owned_files)
+        payload["files"] = owned_files
+        # Linked docs/tests (explicit `docs:`/`tests:` + convention auto-detection) — gated under
+        # --full like the file roster for JSON/human parity (BOUNDS-010): a default describe stays
+        # token-lean, --full surfaces exactly which docs/tests cover this subsystem in BOTH views.
+        # Resolved here (one tree walk) only when --full is set, so the default path stays cheap.
+        docs, tests = _linked_docs_tests(root, sub)
+        if docs:
+            payload["docs"] = docs
+        if tests:
+            payload["tests"] = tests
     # Always present for a stable shape; the human renderer hides it when empty.
     payload["entry_points"] = sorted(
         f for f in owned_files if entry_matcher and entry_matcher.matches(f)
@@ -133,6 +244,16 @@ def describe_one(
     # agent never mistakes an unreadable/oversized file for "symbol absent from source".
     if unparsed_files:
         payload["unparsed_files"] = sorted(unparsed_files)
+    # Additive (only when non-empty), and gated behind --full like the file/doc/test roster: a genuine
+    # same-path ownership ambiguity touching this subsystem — two manifests declaring the identical
+    # path/file at equal specificity, where the winner rides only on sorted-first name (BOUNDS-006).
+    # Non-fatal warning Issues so an agent can disambiguate; the file is still deterministically owned.
+    # --full-gated because the check walks every subsystem's files: the default describe stays token-
+    # AND compute-lean (the contract is what the default returns; diagnostics live under --full).
+    if full:
+        overlaps = subsystem_overlaps(root, sub)
+        if overlaps:
+            payload["overlaps"] = [i.to_dict() for i in overlaps]
     _attach_schema_payload(payload, catalog, schema_hash, objects, posture, diagnostics,
                            unparsed_files, full)
     payload["validation_status"] = subsystem_status(report, sub.name)

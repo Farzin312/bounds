@@ -10,3 +10,5 @@ exposes:
   - { name: load_root, kind: function }
 consumes:
   - { subsystem: models, via: models, interfaces: [RootManifest, SubsystemCompact, Issue] }
+tests:
+  - tests/validate/test_loader.py

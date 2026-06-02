@@ -310,7 +310,28 @@ before → after:
 - **BOUNDS-005** — mapping coverage is now measured + surfaced loudly (see below).
 - **BOUNDS-012** — orphan-export no longer floods libraries (click 183→0): orphan detection needs interface-level contracts, which `discover`'s coarse edges don't provide.
 
-The dominant residual is **BOUNDS-008** (TypeScript `export type`/re-export under-detection) — the next correctness lever for clean fresh-discover on TS-heavy repos.
+### Update — branch `gen9-correctness-mapping-100pct` (re-measured 2026-06-01, tiktoken)
+
+A re-measurement after merging the above to `main` exposed that the *documented* "click → 3" had
+silently regressed: **BOUNDS-014** (excluding test cases from a tests subsystem's `exposes`) was
+measured by manifest size, not by re-running `validate`, so the drift check kept flagging every
+`test_*`/`Test*` as an "undeclared export" — click was actually **479** issues (476 info-drifts), not
+3. Three further fixes landed; the floods are now genuinely gone (all `ok: true`):
+
+| Repo | now | what's left (genuine / advisory) |
+|------|----:|----------------------------------|
+| click | **3** | 2 boundary violations (tests import internals) + 1 coverage note; **0 drift** |
+| requests | **6** | 3 drift + 2 boundary + 1 coverage |
+| express | **1** | 1 coverage note; 0 errors, 0 drift |
+| flask | **19** | 11 drift + 5 boundary + 1 coverage |
+| axios | **59** | 37 boundary edges + 22 cross-module re-export `kind` (advisory) |
+| zod | **155** | app-local Next.js *component* exports (info-drift; framework entry files now excluded) |
+
+- **BOUNDS-008** (TS `export type`/interface/enum/re-export + overload collapse + `enum→enum` kind) — **fixed**: chalk drift ~4, no false drift on type-heavy modules.
+- **BOUNDS-015** (test-case drift flood — the BOUNDS-014 regression) — **fixed**: `check_structural_drift` excludes test cases symmetrically (click 479→3).
+- **BOUNDS-016** (Next.js framework-entry exports flood) — **fixed**: a `page`/`layout`/`route` file under `app/`|`pages/` is a framework entry, its exports excluded like test cases (zod 166→155). App-local *component* exports remain as info-drift by design.
+
+Lesson locked in: **a manifest-shape change is only "fixed" once `validate` is re-run** — size is not a proxy for drift. See [docs/known-issues.md](../../docs/known-issues.md) BOUNDS-008/013/015/016.
 
 ### New: honest mapping coverage (BOUNDS-005)
 

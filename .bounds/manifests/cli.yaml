@@ -16,7 +16,13 @@ exposes:
   - { name: run_ci_install, kind: function }
 consumes:
   - { subsystem: manifest, via: loader, interfaces: [find_root, load_all, load_root] }
-  - { subsystem: validate, via: engine, interfaces: [run, CheckContext, check_cycles, resolve_import, build_consumer_index, transitive_consumers] }
-  - { subsystem: extract, via: scan, interfaces: [get_adapter, supported_extensions, extract_file, iter_repo_source, strip_ext] }
+  - { subsystem: validate, via: engine, interfaces: [run, CheckContext, check_cycles, resolve_import, build_consumer_index, transitive_consumers, index_extracts, schema_catalog, SCHEMA_LANGUAGES] }
+  - { subsystem: extract, via: scan, interfaces: [get_adapter, supported_extensions, extract_file, iter_repo_source, strip_ext, extract_project, adapter_for_language, is_test_file, is_test_symbol, is_framework_entry_file, mapping_coverage, resolve_doc_owners, resolve_test_owners] }
   - { subsystem: cache, via: store, interfaces: [inspect, migrate_json_to_sqlite, prune_missing] }
   - { subsystem: output, via: output, interfaces: [emit] }
+tests:
+  - tests/cli
+  - tests/agent
+  - tests/discover
+docs:
+  - docs/cli-reference.md

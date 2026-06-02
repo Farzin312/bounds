@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased] — 2026-06-02
+
+### Fixed (correctness — found by re-running the OSS cross-language benchmark + internal Next.js/Supabase dogfood)
+
+- **TS type/re-export extraction (BOUNDS-008).** `export type`/`interface`/`enum`, `export * as ns`, and local vs cross-module re-exports are now detected with correct `kind` (`enum_declaration`→`enum`, not `const`; overload signatures collapse to one `function` symbol); discover and validate agree, so a fresh `discover → validate` no longer shows false `E_STRUCTURAL_DRIFT` on type-heavy TS modules (chalk drift ~4).
+- **Test cases re-flagged as drift (BOUNDS-015).** A tests subsystem's `test_*`/`Test*` cases — excluded from `exposes` by BOUNDS-014 — were still flagged as "undeclared exports", flooding `validate` (click had silently regressed to **479** issues / 476 info-drifts). `check_structural_drift` now excludes them symmetrically; click is back to **3** (0 drift).
+- **Next.js framework-entry exports flooded drift (BOUNDS-016).** `page`/`layout`/`route`/… files under `app/`|`pages/` export framework-invoked callbacks (the default component, `GET`/`POST`, `generateMetadata`, `revalidate`, …); these are no longer flagged as undeclared exports (zod 166→155). Directly improves the TS + Postgres/Supabase target stack.
+- **`describe` file counting (BOUNDS-006)** now uses `scan.resolve_owners` (most-specific-path-wins) so it agrees with `validate` — no more double-counting a nested child's files — and emits an `E_SUBSYSTEM_OVERLAP` warning (`describe --full`) for genuine same-path conflicts.
+- **`bounds where <path>` (BOUNDS-007)** — a path-shaped argument now returns the file's owning subsystem + every symbol it defines, instead of 0 results.
+- **`describe` JSON/human parity (BOUNDS-010)** — `files[]` is populated in JSON under the same `--full` gate the human view uses.
+- **`overview` health (BOUNDS-009)** — `health.ok` folds a real `validate` pass (+ a `health.validation` block) so the dashboard can't read "healthy" while `validate` would block.
+- **`validate` fatal exit code (BOUNDS-011)** — a fatal `E_MANIFEST_NOT_FOUND` exits `2` (regression-guarded).
+- **OpenCode command path** — written to `.opencode/commands/` (plural) per current OpenCode docs; the synced `/bounds` command now loads.
+
+### Added
+
+- **Subsystem ↔ docs/tests linkage.** Optional `docs:`/`tests:` manifest fields (human-curated, authoritative) + convention auto-detection (`tests/<area>/` → `<area>`, `docs/<name>.*` → `<name>`); `bounds discover` auto-populates them. `bounds validate`/`overview` coverage gains informational `tests`/`docs` buckets, and **test files are excluded from the source denominator** so a repo's tests never read as an unmapped gap. `describe --full` shows a subsystem's linked docs + tests. Coverage stays "100%-or-guidance": an unmapped library file fires `E_COVERAGE_GAP` with the exact fix; tests/docs are tracked but never block. See [docs/coverage.md](docs/coverage.md).
+
+### Changed
+
+- **Docs mirrored** — ARCHITECTURE.md §3/§5/§7/§8/§9, README (honest post-fix convergence + specialization), benchmark report, and `known-issues.md` (BOUNDS-006…016) updated in the same change. Every test now carries a meaningful docstring; `tests/validate/test_validate.py` split by concern.
+
 ## [Unreleased] — 2026-05-31
 
 ### Fixed

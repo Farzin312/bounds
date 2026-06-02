@@ -79,7 +79,7 @@ shared by engine + extract_project so validate/where/impact/calibrate never disa
 table refs) · `cache/store.py` SQLite `cache.db` (+ migration/partial-read/inspect) ·
 `validate/{engine,propagation,checks,schema}` (`checks.resolve_import`/`build_suffix_index` = the one
 import resolver; `schema.py` folds SQL migrations into the live surface — `_fold_subsystem_schema` =
-tables/columns, `_fold_subsystem_objects` = the one ordered fold for functions/views/indexes/triggers/
+tables/columns, `fold_subsystem_objects` = the one ordered fold for functions/views/indexes/triggers/
 types + **policies/RLS** (create/alter/drop, enable/disable/force net out), `schema_objects`/
 `schema_rls_posture` read it, `hash_schema_catalog` hashes an already-built catalog without re-folding;
 `extract/sql.py` is the one SQL extractor — grammar-native DDL descends into transaction blocks,
