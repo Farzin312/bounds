@@ -73,8 +73,10 @@ SCHEMA_VERSION = "1"
 # and canonicalises table names (see extract/sql.py, validate/schema.py). v3: PythonAdapter honours
 # a literal `__all__` for the export surface and resolves same-file Django-model inheritance
 # transitively (see extract/python.py). v4: cache records persist the per-file generated-code flag
-# so validate can skip generated exports without rereading source on the quick path.
-STATE_VERSION = "4"
+# so validate can skip generated exports without rereading source on the quick path. v5: shell (bash)
+# adapter added — `.sh`/`.bash`/`.zsh` now extract function symbols instead of being skipped, so a
+# cache built before it must rebuild to pick up the new surface (see extract/shell.py).
+STATE_VERSION = "5"
 
 # The documented command to refresh a stale git/pipx install. Surfaced by `upgrade-check`
 # and embedded in the generated agent contract; kept here as the single source so the two
