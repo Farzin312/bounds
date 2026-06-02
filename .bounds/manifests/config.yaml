@@ -1,38 +1,74 @@
 name: config
 role: library
 criticality: core
-description: Global constants, defaults, enumerations, and config-directory resolution — depends on nothing but the stdlib so every module can import it without a cycle.
+description: "Global constants, defaults, enumerations, and config-directory resolution\
+  \ \u2014 depends on nothing but the stdlib so every module can import it without\
+  \ a cycle."
 paths:
-  - src/bounds/config.py
+- src/bounds/config.py
 exposes:
-  - { name: BOUNDS_DIR, kind: const }
-  - { name: BUILTIN_CRITICALITY, kind: const }
-  - { name: BUILTIN_CRITICALITY_DEPTH, kind: const }
-  - { name: BUILTIN_ROLES, kind: const }
-  - { name: CACHE_FILE, kind: const }
-  - { name: DEFAULT_IGNORES, kind: const }
-  - { name: DOC_EXTS, kind: const }
-  - { name: DRIFT_BASELINE_FILE, kind: const }
-  - { name: EXIT_BLOCKED, kind: const }
-  - { name: EXIT_FATAL, kind: const }
-  - { name: EXIT_OK, kind: const }
-  - { name: KNOWN_SOURCE_EXTS, kind: const }
-  - { name: LEGACY_DIR, kind: const }
-  - { name: MANIFESTS_DIR, kind: const }
-  - { name: MAX_FILE_BYTES, kind: const }
-  - { name: PROPAGATION_DEPTH, kind: const }
-  - { name: ROLE_BASE_BEHAVIOR, kind: const }
-  - { name: ROOT_FILE, kind: const }
-  - { name: SCHEMA_VERSION, kind: const }
-  - { name: STATE_FILE, kind: const }
-  - { name: STATE_VERSION, kind: const }
-  - { name: SUBSYS_DIR, kind: const }
-  - { name: SUBSYS_FILE, kind: const }
-  - { name: UPGRADE_INSTALL_CMD, kind: const }
-  - { name: VALID_CRITICALITY, kind: const }
-  - { name: VALID_ENFORCE, kind: const }
-  - { name: VALID_MODES, kind: const }
-  - { name: VALID_ROLES, kind: const }
-  - { name: config_dir, kind: function }
-  - { name: uses_legacy_layout, kind: function }
+- name: BOUNDS_DIR
+  kind: const
+- name: BUILTIN_CRITICALITY
+  kind: const
+- name: BUILTIN_CRITICALITY_DEPTH
+  kind: const
+- name: BUILTIN_ROLES
+  kind: const
+- name: CACHE_FILE
+  kind: const
+- name: DEFAULT_IGNORES
+  kind: const
+- name: DOC_EXTS
+  kind: const
+- name: DRIFT_BASELINE_FILE
+  kind: const
+- name: EXIT_BLOCKED
+  kind: const
+- name: EXIT_FATAL
+  kind: const
+- name: EXIT_OK
+  kind: const
+- name: KNOWN_SOURCE_EXTS
+  kind: const
+- name: LEGACY_DIR
+  kind: const
+- name: MANIFESTS_DIR
+  kind: const
+- name: MAX_FILE_BYTES
+  kind: const
+- name: PROPAGATION_DEPTH
+  kind: const
+- name: ROLE_BASE_BEHAVIOR
+  kind: const
+- name: ROOT_FILE
+  kind: const
+- name: SCHEMA_VERSION
+  kind: const
+- name: STATE_FILE
+  kind: const
+- name: STATE_VERSION
+  kind: const
+- name: SUBSYS_DIR
+  kind: const
+- name: SUBSYS_FILE
+  kind: const
+- name: UPGRADE_INSTALL_CMD
+  kind: const
+- name: VALID_CRITICALITY
+  kind: const
+- name: VALID_ENFORCE
+  kind: const
+- name: VALID_MODES
+  kind: const
+- name: VALID_ROLES
+  kind: const
+- name: config_dir
+  kind: function
+- name: uses_legacy_layout
+  kind: function
+- name: SDD_AGENTS
+  kind: const
+- name: SDD_PHASES
+  kind: const
 consumes: []

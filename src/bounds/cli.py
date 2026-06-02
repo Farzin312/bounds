@@ -38,6 +38,8 @@ from .manifest import loader as manifest_loader
 from .validate import engine as validate_engine
 from .validate.checks import CheckContext, check_cycles
 
+__all__ = ["main"]
+
 # ---- shared option ----
 _human = click.option("--human", "-H", "human", is_flag=True, default=False,
                       help="Human-readable output instead of JSON.")
@@ -236,14 +238,16 @@ def main() -> None:
 # guide
 # ===========================================================================
 @main.command("guide", short_help="Setup checklist: get Bounds working in this project")
+@click.option("--sdd", "sdd", is_flag=True, default=False,
+              help="Include the optional Spec-Driven Development track even if root.yaml has not enabled it.")
 @_human
-def guide_cmd(human: bool) -> None:
+def guide_cmd(sdd: bool, human: bool) -> None:
     """Show the setup steps (init → discover → agent --sync → ci) with what's already done, plus
     the daily commands and the single next action. Read-only; safe to run anywhere."""
     human = _interactive_human(human)
 
     def go() -> None:
-        output.emit(guide_mod.run_guide(Path.cwd()), human)
+        output.emit(guide_mod.run_guide(Path.cwd(), sdd=sdd), human)
 
     _run(human, go)
 

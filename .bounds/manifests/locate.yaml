@@ -1,12 +1,26 @@
 name: locate
 role: library
 criticality: connector
-description: Symbol- and dependency-location queries backing `bounds where` and `bounds impact` — blast radius from declared consumes edges, optional resolved-import verification, and file/symbol lookup. Zero LLM, fresh extraction (never a stale cache), sorted output.
+description: "Symbol- and dependency-location queries backing `bounds where` and `bounds\
+  \ impact` \u2014 blast radius from declared consumes edges, optional resolved-import\
+  \ verification, and file/symbol lookup. Zero LLM, fresh extraction (never a stale\
+  \ cache), sorted output."
 paths:
-  - src/bounds/locate.py
+- src/bounds/locate.py
 exposes:
-  - { name: run_impact, kind: function }
-  - { name: run_where, kind: function }
-consumes: []
+- name: run_impact
+  kind: function
+- name: run_where
+  kind: function
+consumes:
+- subsystem: extract
+- subsystem: ignore
+  interfaces:
+  - load_matcher
+- subsystem: manifest
+- subsystem: validate
+  interfaces:
+  - index_extracts
+  - resolve_import
 tests:
-  - tests/cli/test_where_path_arg.py
+- tests/cli/test_where_path_arg.py

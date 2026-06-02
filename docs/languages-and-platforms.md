@@ -90,8 +90,9 @@ honestly rather than ignored:
 >   expand the target file's symbols into the barrel's public surface.
 > - **TS/JS — `.pyi`-style decl files & namespaces.** TypeScript `namespace` blocks are not descended,
 >   and only **top-level** imports/exports are captured (nested or conditional ones are skipped).
-> - **Python — `.pyi` stubs** are not analyzed, and **`__all__` is not honored** — the extractor reports
->   the actual top-level definitions rather than an `__all__`-declared surface.
+> - **Python — `.pyi` stubs** are not analyzed. For regular `.py` files, a module-level literal
+>   `__all__` is honored as the exported surface; dynamic `__all__` expressions fall back to the
+>   underscore convention because Bounds does not guess.
 > - **SQL — migration ordering.** Migrations are ordered by filename numeric/timestamp prefix, an
 >   embedded `revision`/`down_revision` header chain (Alembic-style offline SQL), or an explicit
 >   `-- bounds:order N` header; an order that can't be determined deterministically is folded in

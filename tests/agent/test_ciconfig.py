@@ -94,6 +94,28 @@ def test_action_cache_key_and_preflight(tmp_path):
     assert "[skip bounds]" in text
 
 
+def test_existing_action_with_pypi_install_is_migrated(tmp_path):
+    """Existing generated Bounds workflows with the unpublished PyPI install line must be migrated in place."""
+    path = tmp_path / ".github" / "workflows" / "bounds.yml"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "name: bounds\n"
+        "jobs:\n"
+        "  bounds:\n"
+        "    steps:\n"
+        "      - run: pipx install bounds-cli\n"
+        "      - run: bounds preflight --ci\n",
+        encoding="utf-8",
+    )
+
+    result = ciconfig.run_ci_install(tmp_path, targets={"action"})
+    text = _read(path)
+
+    assert result["created"] == [".github/workflows/bounds.yml"]
+    assert 'pipx install "git+https://github.com/Farzin312/bounds.git"' in text
+    assert "pipx install bounds-cli" not in text
+
+
 def test_precommit_uses_quick_gate(tmp_path):
     """The pre-commit hook must use `validate --quick --ci` (sub-200ms quick path) with pass_filenames False at the pre-commit stage — a local commit gate stays fast and repo-wide."""
     ciconfig.run_ci_install(tmp_path, targets={"precommit"})

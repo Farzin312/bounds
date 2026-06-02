@@ -90,3 +90,31 @@ class BoundsError(Exception):
 # Deprecated alias for the pre-rename name. Kept so external callers importing
 # ``CompactError`` keep working; prefer ``BoundsError`` in new code.
 CompactError = BoundsError
+
+__all__ = [
+    "BoundsError",
+    "CompactError",
+    "E_ADAPTER_CONTRACT",
+    "E_BOUNDARY_VIOLATION",
+    "E_CONTRACT_MISSING_EXPORT",
+    "E_COVERAGE_GAP",
+    "E_CYCLE_DETECTED",
+    "E_EXTERNAL_SYMLINK",
+    "E_EXTRACTION_FAILED",
+    "E_INTERNAL",
+    "E_MANIFEST_NOT_FOUND",
+    "E_MANIFEST_PARSE_ERROR",
+    "E_ORPHAN_EXPORT",
+    "E_SCHEMA_INVALID",
+    "E_SCHEMA_NO_ORDER",
+    "E_SCHEMA_UNPARSED",
+    "E_STALE_INTERFACE",
+    "E_STRUCTURAL_DRIFT",
+    "E_SUBSYSTEM_NOT_FOUND",
+    "E_SUBSYSTEM_OVERLAP",
+    "E_UNOWNED_FILE",
+    "E_UNRESOLVED_REFERENCE",
+    "E_UNSUPPORTED_LANGUAGE",
+    "E_USAGE",
+    "SEVERITY",
+]

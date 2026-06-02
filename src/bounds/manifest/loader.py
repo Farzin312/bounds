@@ -22,6 +22,8 @@ from .. import config, errors
 from ..models import Issue, RootManifest, SubsystemCompact
 from . import schema
 
+__all__ = ["find_root", "load_all", "load_root"]
+
 
 def find_root(start: Path) -> Path | None:
     """Walk ``start`` and its parents for the first dir holding ``.bounds/root.yaml``.

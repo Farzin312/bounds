@@ -66,13 +66,65 @@ SCHEMA_VERSION = "1"
 # serving stale symbols. v2: SQL adapter recovers transaction-wrapped DDL + folds policies/RLS
 # and canonicalises table names (see extract/sql.py, validate/schema.py). v3: PythonAdapter honours
 # a literal `__all__` for the export surface and resolves same-file Django-model inheritance
-# transitively (see extract/python.py).
-STATE_VERSION = "3"
+# transitively (see extract/python.py). v4: cache records persist the per-file generated-code flag
+# so validate can skip generated exports without rereading source on the quick path.
+STATE_VERSION = "4"
 
 # The documented command to refresh a stale git/pipx install. Surfaced by `upgrade-check`
 # and embedded in the generated agent contract; kept here as the single source so the two
 # can never drift.
 UPGRADE_INSTALL_CMD = "pipx install --force git+https://github.com/Farzin312/bounds.git"
+
+# Optional Spec-Driven Development integration. These are guidance/config labels only; Bounds
+# still provides deterministic structural facts and gates, while the user's agent runs any prose
+# SDD workflow. Keep the phases in canonical order for stable guide/agent rendering.
+SDD_PHASES = ("specify", "clarify", "plan", "tasks", "analyze", "implement", "verify")
+SDD_AGENTS = (
+    "claude",
+    "codex",
+    "gemini",
+    "opencode",
+    "copilot",
+    "cursor",
+    "windsurf",
+    "aider",
+    "generic",
+)
+
+__all__ = [
+    "BOUNDS_DIR",
+    "BUILTIN_CRITICALITY",
+    "BUILTIN_CRITICALITY_DEPTH",
+    "BUILTIN_ROLES",
+    "CACHE_FILE",
+    "DEFAULT_IGNORES",
+    "DOC_EXTS",
+    "DRIFT_BASELINE_FILE",
+    "EXIT_BLOCKED",
+    "EXIT_FATAL",
+    "EXIT_OK",
+    "KNOWN_SOURCE_EXTS",
+    "LEGACY_DIR",
+    "MANIFESTS_DIR",
+    "MAX_FILE_BYTES",
+    "PROPAGATION_DEPTH",
+    "ROLE_BASE_BEHAVIOR",
+    "ROOT_FILE",
+    "SCHEMA_VERSION",
+    "SDD_AGENTS",
+    "SDD_PHASES",
+    "STATE_FILE",
+    "STATE_VERSION",
+    "SUBSYS_DIR",
+    "SUBSYS_FILE",
+    "UPGRADE_INSTALL_CMD",
+    "VALID_CRITICALITY",
+    "VALID_ENFORCE",
+    "VALID_MODES",
+    "VALID_ROLES",
+    "config_dir",
+    "uses_legacy_layout",
+]
 
 # ---- Enumerations ----
 # The four built-in roles are *behavior classes*, not just labels. Developers may define

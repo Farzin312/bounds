@@ -145,6 +145,28 @@ def test_drift_route_file_outside_app_dir_still_flags():
     assert any(i.severity == "info" and "GET" in i.message for i in issues)
 
 
+def test_drift_excludes_generated_file_exports():
+    """BOUNDS-021: generated files are skipped by calibrate, so validate must not report their undeclared exports."""
+    subs = {"a": Sub(name="a", paths=["src"], exposes=[Interface("public")])}
+    extracts = {
+        "src/public.py": ExtractResult(
+            "src/public.py", "python", [Symbol("public", "function", 1, True)]
+        ),
+        "src/generated.py": ExtractResult(
+            "src/generated.py", "python", [Symbol("GeneratedClient", "class", 1, True)]
+        ),
+    }
+    issues = check_structural_drift(
+        _ctx(
+            subs,
+            extracts,
+            {"src/public.py": "a", "src/generated.py": "a"},
+            generated_files={"src/generated.py"},
+        )
+    )
+    assert issues == [], [i.message for i in issues]
+
+
 def test_drift_skips_declared_expose_for_unsupported_language_owner():
     """A subsystem owning an UNSUPPORTED-language file (Go/Rust/Java) has exposes Bounds can't
     verify — it has no adapter, extracted nothing, so a declared-but-absent expose is NOT

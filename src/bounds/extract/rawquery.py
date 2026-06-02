@@ -24,6 +24,8 @@ from pathlib import Path
 from .registry import is_language_file
 from .scan import read_source_bytes
 
+__all__ = []
+
 try:
     import tree_sitter as ts
     import tree_sitter_python as tspy

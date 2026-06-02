@@ -48,6 +48,8 @@ except Exception as exc:  # pragma: no cover - exercised only when the wheel is 
 from ..models import ExtractResult, Issue, Symbol
 from .base import LanguageAdapter, canonical_columns, make_result
 
+__all__ = []
+
 _LANG = None
 
 # `-- revision: abc` / `-- down_revision: xyz` / `-- bounds:order 5` header lines.

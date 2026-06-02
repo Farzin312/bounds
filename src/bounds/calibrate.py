@@ -38,6 +38,8 @@ from .ignore import load_matcher
 from .manifest import loader as manifest_loader
 from .validate.checks import index_extracts, resolve_import
 
+__all__ = ["run_calibrate"]
+
 
 def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bool = False) -> dict:
     """Reconcile manifests against source; return the proposed diff (and apply it if asked)."""
@@ -147,16 +149,30 @@ def _calibrate_one(
         else:
             remove_exposes.append(s)
 
-    # CONSUMES reconciliation.
-    actual_owners: set[str] = set()
+    # CONSUMES reconciliation. A direct named import from a provider maps to an interface-level
+    # consume when the provider exposes that name; namespace/module imports still record only the
+    # provider edge. This keeps orphan checks useful after calibration instead of leaving real
+    # cross-subsystem APIs looking unconsumed.
+    actual_consumes: dict[str, set[str]] = {}
     for rel in own_files:
         for imp in extracts[rel].imports:
             target = resolve_import(rel, imp.module, known_noext, suffix_index, aliases)
             owner = file_owner.get(target) if target else None
             if owner and owner != name and owner in subs:
-                actual_owners.add(owner)
-    declared_consumes = {c.subsystem for c in sub.consumes}
-    add_consumes = sorted(actual_owners - declared_consumes)
+                provider_exposes = subs[owner].expose_names()
+                actual_consumes.setdefault(owner, set()).update(
+                    nm for nm in imp.names if nm in provider_exposes
+                )
+    declared_consumes = {c.subsystem: set(c.interfaces) for c in sub.consumes}
+    add_consumes = [
+        {"subsystem": provider, "interfaces": sorted(actual_consumes[provider])}
+        for provider in sorted(set(actual_consumes) - set(declared_consumes))
+    ]
+    add_consume_interfaces = [
+        {"subsystem": provider, "interfaces": sorted(ifaces - declared_consumes[provider])}
+        for provider, ifaces in sorted(actual_consumes.items())
+        if provider in declared_consumes and ifaces - declared_consumes[provider]
+    ]
 
     remove_consumes: list[dict] = []
     for c in sub.consumes:
@@ -172,12 +188,22 @@ def _calibrate_one(
         "remove_exposes": remove_exposes,
         "needs_review": needs_review,
         "add_consumes": add_consumes,
+        "add_consume_interfaces": add_consume_interfaces,
         "remove_consumes": remove_consumes,
     }
 
 
 def _has_changes(p: dict) -> bool:
-    return any(p[k] for k in ("add_exposes", "remove_exposes", "add_consumes", "remove_consumes"))
+    return any(
+        p[k]
+        for k in (
+            "add_exposes",
+            "remove_exposes",
+            "add_consumes",
+            "add_consume_interfaces",
+            "remove_consumes",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +227,12 @@ def drift_keys(proposals: dict[str, dict]) -> list[str]:
         for name in p.get("remove_exposes", []):
             keys.add(_KEY_SEP.join((sub, "remove_expose", str(name))))
         for prov in p.get("add_consumes", []):
-            keys.add(_KEY_SEP.join((sub, "add_consume", str(prov))))
+            provider = prov.get("subsystem") if isinstance(prov, dict) else str(prov)
+            ifaces = ",".join(prov.get("interfaces") or []) if isinstance(prov, dict) else ""
+            keys.add(_KEY_SEP.join((sub, "add_consume", f"{provider}:{ifaces}")))
+        for aci in p.get("add_consume_interfaces", []):
+            for iface in aci.get("interfaces", []):
+                keys.add(_KEY_SEP.join((sub, "add_consume_interface", f"{aci['subsystem']}:{iface}")))
         for rc in p.get("remove_consumes", []):
             for iface in rc.get("interfaces", []):
                 keys.add(_KEY_SEP.join((sub, "remove_consume", f"{rc['subsystem']}:{iface}")))
@@ -308,6 +339,11 @@ def _summarize(proposals: dict[str, dict]) -> dict:
         "removed": sum(len(p["remove_exposes"]) for p in proposals.values()),
         "needs_review": sum(len(p["needs_review"]) for p in proposals.values()),
         "consumes_added": sum(len(p["add_consumes"]) for p in proposals.values()),
+        "consume_interfaces_added": sum(
+            len(aci.get("interfaces", []))
+            for p in proposals.values()
+            for aci in p.get("add_consume_interfaces", [])
+        ),
         "consumes_removed": sum(len(p["remove_consumes"]) for p in proposals.values()),
     }
 
@@ -344,8 +380,27 @@ def _apply_proposal(sub, proposal: dict) -> None:
                 entry["interfaces"] = ifaces
             else:
                 entry.pop("interfaces", None)
+    add_ifaces_by_provider = {
+        aci["subsystem"]: set(aci.get("interfaces") or [])
+        for aci in proposal.get("add_consume_interfaces", [])
+    }
+    for entry in consumes:
+        if not isinstance(entry, dict):
+            continue
+        provider = entry.get("subsystem")
+        if provider not in add_ifaces_by_provider:
+            continue
+        merged = sorted(set(entry.get("interfaces") or []) | add_ifaces_by_provider[provider])
+        if merged:
+            entry["interfaces"] = merged
     for prov in proposal["add_consumes"]:
-        consumes.append({"subsystem": prov})
+        if isinstance(prov, dict):
+            entry = {"subsystem": prov["subsystem"]}
+            if prov.get("interfaces"):
+                entry["interfaces"] = list(prov["interfaces"])
+            consumes.append(entry)
+        else:
+            consumes.append({"subsystem": prov})
     if consumes:
         raw["consumes"] = consumes
 

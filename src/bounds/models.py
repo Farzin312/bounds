@@ -17,6 +17,16 @@ from dataclasses import dataclass, field
 
 from . import config
 
+__all__ = [
+    "ExtractResult",
+    "ImportRef",
+    "Issue",
+    "RootManifest",
+    "SubsystemCompact",
+    "Symbol",
+    "ValidationReport",
+]
+
 
 # ===========================================================================
 # Manifest tier (declared)
@@ -143,6 +153,7 @@ class RootManifest:
     # lazily via role_registry()/criticality_registry(). Empty -> built-in enums apply.
     roles: dict = field(default_factory=dict)
     criticality: dict = field(default_factory=dict)
+    sdd: dict = field(default_factory=dict)
     source_path: str = ""
 
     def to_dict(self) -> dict:
@@ -158,6 +169,8 @@ class RootManifest:
             d["roles"] = self.roles
         if self.criticality:
             d["criticality"] = self.criticality
+        if self.sdd:
+            d["sdd"] = self.sdd
         return d
 
     @classmethod
@@ -171,6 +184,7 @@ class RootManifest:
             entry_points=[str(g) for g in (data.get("entry_points") or [])],
             roles=dict(data.get("roles") or {}),
             criticality=dict(data.get("criticality") or {}),
+            sdd=dict(data.get("sdd") or {}),
             source_path=source_path,
         )
 
@@ -273,9 +287,10 @@ class ExtractResult:
     content_hash: str = ""
     structure_hash: str = ""
     error: str | None = None
+    generated: bool = False
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "path": self.path,
             "language": self.language,
             "symbols": [s.to_dict() for s in self.symbols],
@@ -284,6 +299,9 @@ class ExtractResult:
             "structure_hash": self.structure_hash,
             "error": self.error,
         }
+        if self.generated:
+            d["generated"] = True
+        return d
 
     def exported_names(self) -> set[str]:
         return {s.name for s in self.symbols if s.exported}

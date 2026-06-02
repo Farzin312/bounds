@@ -20,6 +20,8 @@ import tree_sitter_python as tspy
 from ..models import ExtractResult, ImportRef, Symbol
 from .base import LanguageAdapter, make_result
 
+__all__ = []
+
 # Built lazily and cached so the Language/Parser are reused across files.
 _LANG: ts.Language | None = None
 

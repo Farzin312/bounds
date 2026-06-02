@@ -1,32 +1,60 @@
 name: errors
-role: library
+role: service
 criticality: core
-description: Stable error-code registry, the BoundsError exception, and the per-code severity map — a public contract (codes are never renumbered or repurposed, only added).
+description: "Stable error-code registry, the BoundsError exception, and the per-code\
+  \ severity map \u2014 a public contract (codes are never renumbered or repurposed,\
+  \ only added)."
 paths:
-  - src/bounds/errors.py
+- src/bounds/errors.py
 exposes:
-  - { name: BoundsError, kind: class }
-  - { name: CompactError, kind: variable }
-  - { name: E_ADAPTER_CONTRACT, kind: const }
-  - { name: E_BOUNDARY_VIOLATION, kind: const }
-  - { name: E_CONTRACT_MISSING_EXPORT, kind: const }
-  - { name: E_COVERAGE_GAP, kind: const }
-  - { name: E_CYCLE_DETECTED, kind: const }
-  - { name: E_EXTERNAL_SYMLINK, kind: const }
-  - { name: E_EXTRACTION_FAILED, kind: const }
-  - { name: E_MANIFEST_NOT_FOUND, kind: const }
-  - { name: E_MANIFEST_PARSE_ERROR, kind: const }
-  - { name: E_ORPHAN_EXPORT, kind: const }
-  - { name: E_SCHEMA_INVALID, kind: const }
-  - { name: E_SCHEMA_NO_ORDER, kind: const }
-  - { name: E_SCHEMA_UNPARSED, kind: const }
-  - { name: E_STALE_INTERFACE, kind: const }
-  - { name: E_STRUCTURAL_DRIFT, kind: const }
-  - { name: E_SUBSYSTEM_NOT_FOUND, kind: const }
-  - { name: E_SUBSYSTEM_OVERLAP, kind: const }
-  - { name: E_UNOWNED_FILE, kind: const }
-  - { name: E_UNRESOLVED_REFERENCE, kind: const }
-  - { name: E_UNSUPPORTED_LANGUAGE, kind: const }
-  - { name: E_USAGE, kind: const }
-  - { name: SEVERITY, kind: const }
+- name: BoundsError
+  kind: class
+- name: CompactError
+  kind: variable
+- name: E_ADAPTER_CONTRACT
+  kind: const
+- name: E_BOUNDARY_VIOLATION
+  kind: const
+- name: E_CONTRACT_MISSING_EXPORT
+  kind: const
+- name: E_COVERAGE_GAP
+  kind: const
+- name: E_CYCLE_DETECTED
+  kind: const
+- name: E_EXTERNAL_SYMLINK
+  kind: const
+- name: E_EXTRACTION_FAILED
+  kind: const
+- name: E_MANIFEST_NOT_FOUND
+  kind: const
+- name: E_MANIFEST_PARSE_ERROR
+  kind: const
+- name: E_ORPHAN_EXPORT
+  kind: const
+- name: E_SCHEMA_INVALID
+  kind: const
+- name: E_SCHEMA_NO_ORDER
+  kind: const
+- name: E_SCHEMA_UNPARSED
+  kind: const
+- name: E_STALE_INTERFACE
+  kind: const
+- name: E_STRUCTURAL_DRIFT
+  kind: const
+- name: E_SUBSYSTEM_NOT_FOUND
+  kind: const
+- name: E_SUBSYSTEM_OVERLAP
+  kind: const
+- name: E_UNOWNED_FILE
+  kind: const
+- name: E_UNRESOLVED_REFERENCE
+  kind: const
+- name: E_UNSUPPORTED_LANGUAGE
+  kind: const
+- name: E_USAGE
+  kind: const
+- name: SEVERITY
+  kind: const
+- name: E_INTERNAL
+  kind: const
 consumes: []

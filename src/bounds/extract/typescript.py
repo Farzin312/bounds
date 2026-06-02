@@ -46,6 +46,8 @@ import tree_sitter_typescript as tsts
 from ..models import ExtractResult, ImportRef, Symbol
 from .base import LanguageAdapter, make_result
 
+__all__ = []
+
 # Grammars are built lazily and cached so Language objects are reused.
 _TS_LANG: ts.Language | None = None
 _TSX_LANG: ts.Language | None = None

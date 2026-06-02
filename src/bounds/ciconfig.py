@@ -63,6 +63,8 @@ import yaml
 
 from bounds import errors
 
+__all__ = ["run_ci_install"]
+
 # Recognized targets. These are the canonical file destinations each CI host
 # mandates and cannot be relocated (GitHub Actions => .github/workflows/, GitLab
 # => root .gitlab-ci.yml, pre-commit => root .pre-commit-config.yaml). Public so the
@@ -114,6 +116,13 @@ jobs:
       - run: bounds preflight --ci
 """
 
+_OLD_ACTION_PYPI_INSTALL = "      - run: pipx install bounds-cli\n"
+_ACTION_GIT_INSTALL = """\
+      # Installs from git (works today; GitHub runners preinstall pipx).
+      # switch to `bounds-cli` (pipx) once published to PyPI.
+      - run: pipx install "git+https://github.com/Farzin312/bounds.git"
+"""
+
 # The pre-commit hook block (a single `repo: local` entry). Fast quick-mode gate.
 _PRECOMMIT_REPO = {
     "repo": "local",
@@ -158,6 +167,13 @@ def _install_action(project_root: Path) -> bool:
     """Write the GitHub Actions workflow. Return True if created, False if skipped."""
     path = project_root / _TARGET_PATHS["action"]
     if path.exists():
+        text = path.read_text(encoding="utf-8")
+        if _OLD_ACTION_PYPI_INSTALL in text:
+            path.write_text(
+                text.replace(_OLD_ACTION_PYPI_INSTALL, _ACTION_GIT_INSTALL),
+                encoding="utf-8",
+            )
+            return True
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_ACTION_YML, encoding="utf-8")

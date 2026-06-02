@@ -195,6 +195,7 @@ class RootManifest:
     entry_points: list[str] = []   # root-level bootstrap globs exempt from --fail-on-unowned
     roles: dict = {}               # optional custom-role defs; resolved via role_registry()
     criticality: dict = {}         # optional custom-criticality defs; resolved via criticality_registry()
+    sdd: dict = {}                 # optional Spec-Driven Development settings (enabled/agent/phases)
     source_path: str = ""
 
     # custom role/criticality resolution helpers:
@@ -230,6 +231,7 @@ class ExtractResult:
     content_hash: str = ""
     structure_hash: str = ""
     error: str | None = None       # set if parse failed (file still counted, soft-fail)
+    generated: bool = False        # header marked generated; cached for validate/calibrate parity
 
 # ---- Validation tier ----
 @dataclass
@@ -290,10 +292,10 @@ STATE_FILE = "state.json"        # legacy JSON cache; read once for auto-migrati
 GITIGNORE_FILE = ".gitignore"    # scaffolded under .bounds/ so the regenerable cache stays uncommitted
 DRIFT_BASELINE_FILE = "drift-baseline.json"   # accepted-drift baseline; `calibrate --check` flags only drift above it
 SCHEMA_VERSION = "1"
-STATE_VERSION = "3"              # cache schema version, mirrored in PRAGMA user_version
+STATE_VERSION = "4"              # cache schema version, mirrored in PRAGMA user_version
                                  # (v3: honor Python __all__ in the export surface +
-                                 #  same-file Django ORM inheritance — any extraction-output
-                                 #  change for unchanged source forces a cache rebuild)
+                                 #  same-file Django ORM inheritance; v4: persist generated-file
+                                 #  flags so quick validation need not reread unchanged source)
 
 # Built-in role/criticality enums. With no custom block in root.yaml these are the
 # valid sets (backward compatible); a custom block replaces them via the root registries.
@@ -415,6 +417,7 @@ class FileRecord:
     language: str
     symbols: list[dict] = []; imports: list[dict] = []
     subsystem: str = ""                     # owning subsystem (partial reads)
+    generated: bool = False                 # cached generated-code marker for quick validate
     def to_result(self) -> ExtractResult
     @classmethod
     def from_result(cls, r: ExtractResult, subsystem: str = "") -> "FileRecord"
@@ -642,12 +645,15 @@ def check_drift(project_root, *, subsystem=None) -> dict
 
 ### `guide.py` — read-only setup checklist (`bounds guide`)
 ```python
-def run_guide(project_root: Path) -> dict
+def run_guide(project_root: Path, *, sdd: bool = False) -> dict
     # State-aware setup walkthrough; pure detection, never mutates and never raises on a
     # half-set-up/empty project (a missing .bounds/ just reads early steps as not-done).
     # → {mode:"guide", steps:[{id,title,command,why,done}], daily:[{command,use}],
-    #    agents_detected:bool, next:<next undone command or null>, complete:bool}
-    #   step ids (ordered): init / discover / agents / ci. Human view renders a checklist.
+    #    next:<next undone command or null>, complete:bool, sdd?:{enabled,agent,phases,forced,
+    #    steps:[{phase,command,use}], freshness:{...}}}
+    #   setup step ids (ordered): init / discover / coverage / agents / ci. The optional SDD
+    #   block appears when root.yaml has sdd.enabled=true or the caller passes sdd=True
+    #   (`bounds guide --sdd`). Human view renders only this same payload.
 ```
 
 ### `agentsync.py` — cross-agent config generation
@@ -657,7 +663,9 @@ def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
     # mode "sync"   → write the canonical AGENTS.md (marked block, always) + per-agent pointer
     #                 files (dedicated files overwritten; shared files get a marked block;
     #                 hand-written configs left untouched) + per-agent NATIVE command/skill
-    #                 artifacts (below). All marker-managed + idempotent.
+    #                 artifacts (below). When root.yaml has sdd.enabled=true, generated bodies
+    #                 also carry the Bounds-at-each-SDD-phase contract. All marker-managed +
+    #                 idempotent.
     #                 → {created, updated, unchanged, skipped_custom, skip_reasons, canonical}
     #                   (artifact paths also appear in created/updated/unchanged);
     #                   skip_reasons maps path → "authored" (human-written file already mentions
@@ -741,6 +749,15 @@ roles:
 criticality:
   foundational: { depth: -1 }              # propagates unbounded, like built-in `core`
   edge: { depth: 0 }                       # no propagation, like built-in `leaf`
+
+# Optional Spec-Driven Development guidance. Absent = current behavior. When enabled,
+# `bounds guide` includes the phase track and `bounds agent --sync` appends SDD-aware
+# Bounds command guidance to generated agent files. Bounds still runs zero-LLM structural
+# commands; the user's agent owns the prose SDD workflow.
+sdd:
+  enabled: true
+  agent: codex                               # claude|codex|gemini|opencode|copilot|cursor|windsurf|aider|generic
+  phases: [specify, clarify, plan, tasks, analyze, implement, verify]
 ```
 
 **`.bounds/manifests/extract.yaml`**
@@ -839,10 +856,14 @@ The scan-bearing commands (`validate`, `preflight`) also accept `--include-ignor
 `--follow-symlinks`, `--fail-on-unowned`, and `--ci` (tab-delimited CI output).
 
 ```
-bounds guide                       → {mode:"guide", steps:[{id,title,command,why,done}],
-                                       daily:[{command,use}], agents_detected, next, complete}
+bounds guide [--sdd]               → {mode:"guide", steps:[{id,title,command,why,done}],
+                                       daily:[{command,use}], next, complete, sdd?}
                                        # read-only state-aware setup checklist (ids: init/discover/
-                                       # agents/ci); next = the next undone command or null
+                                       # coverage/agents/ci); next = the next undone command or null.
+                                       # sdd? appears when root.yaml enables it or --sdd is passed:
+                                       # {enabled,agent,phases,forced,steps:[{phase,command,use}],
+                                       #  freshness:{contract,during_implementation,ci_gate,
+                                       #             intentional_change}}
 bounds list [--namespace NS]       → {project, subsystems:[{name, role, criticality, namespace?,
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count, entry_points, validation_status,
@@ -960,6 +981,7 @@ CREATE TABLE cache (
     language       TEXT NOT NULL,
     symbols        TEXT,                        -- JSON array of Symbol dicts (sort_keys)
     imports        TEXT,                        -- JSON array of ImportRef dicts (sort_keys)
+    generated      INTEGER NOT NULL DEFAULT 0,  -- cached generated-code marker
     updated_at     TEXT NOT NULL DEFAULT ''     -- ALWAYS written empty (see determinism note)
 );
 CREATE INDEX idx_cache_subsystem ON cache(subsystem);

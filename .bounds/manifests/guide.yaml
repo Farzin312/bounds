@@ -1,14 +1,31 @@
 name: guide
 role: library
 criticality: leaf
-description: "`bounds guide` — a state-aware setup walkthrough (init, discover, agent sync, CI gate) that marks each step done/to-do from what is already present, plus daily commands and the single next action. Pure detection, zero mutation."
+description: "`bounds guide` \u2014 a state-aware setup walkthrough (init, discover,\
+  \ agent sync, CI gate) that marks each step done/to-do from what is already present,\
+  \ plus daily commands and the single next action. Pure detection, zero mutation."
 paths:
-  - src/bounds/guide.py
+- src/bounds/guide.py
 exposes:
-  - { name: run_guide, kind: function }
+- name: run_guide
+  kind: function
 consumes:
-  - { subsystem: manifest, via: loader, interfaces: [find_root, load_all] }
-  - { subsystem: extract, via: scan, interfaces: [supported_extensions, mapping_coverage] }
-  - { subsystem: ignore, via: ignore, interfaces: [load_matcher] }
+- subsystem: manifest
+  via: loader
+  interfaces:
+  - find_root
+  - load_all
+- subsystem: extract
+  via: scan
+  interfaces:
+  - supported_extensions
+  - mapping_coverage
+- subsystem: ignore
+  via: ignore
+  interfaces:
+  - load_matcher
+- subsystem: models
+  interfaces:
+  - RootManifest
 tests:
-  - tests/cli/test_guide.py
+- tests/cli/test_guide.py

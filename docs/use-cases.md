@@ -175,5 +175,42 @@ mis-folding — a dozen migration files, with no way to know if it missed one.
 
 ---
 
+## 5. Make Spec-Driven Development architecture-aware
+
+Spec-Driven Development gives agents structured artifacts, but the architecture facts in those
+artifacts can still be stale or guessed. Bounds is the optional verified architecture layer for that
+loop: it grounds the early phases in the real subsystem map and turns intentional contract changes
+into manifest updates, not mystery drift.
+
+```bash
+bounds guide --sdd             # preview the SDD phase track
+bounds overview                # specify: current map, coverage, trust notes
+bounds describe checkout       # clarify: verified current contract
+bounds impact payments         # plan/tasks: blast radius and consumers
+bounds validate --quick        # implement: catch accidental drift after edits
+bounds preflight --ci          # verify: final deterministic gate
+```
+
+### Walkthrough
+
+Your team uses Spec Kit or a custom SDD prompt chain to add a new checkout capability:
+
+1. During `specify`, the agent runs `bounds overview` and `bounds list` so the spec names real
+   subsystems and visible coverage gaps.
+2. During `clarify`, it runs `bounds describe checkout` and `bounds where create_order` to answer
+   what the current contract actually is.
+3. During `plan`, `bounds impact payments` shows which consumers and interfaces the change touches,
+   so affected boundaries appear in the plan instead of surprising review later.
+4. During `implement`, each intentional surface change updates the manifest in the same spec change.
+   Accidental changes fail `bounds validate --quick`.
+5. During `verify`, `bounds preflight --ci` and `bounds calibrate --check` distinguish accidental
+   drift from a committed intentional re-baseline.
+
+This is intentionally agent-agnostic. Claude, Codex, Gemini, OpenCode, Copilot, Cursor, Windsurf,
+and Aider all wire project guidance differently, so Bounds provides composable commands and
+per-agent generated guidance rather than a single mandated SDD runner. See [./sdd.md](./sdd.md).
+
+---
+
 See also: [./cli-reference.md](./cli-reference.md) for every command and flag, and
 [./team-workflow.md](./team-workflow.md) for adopting these across a team.

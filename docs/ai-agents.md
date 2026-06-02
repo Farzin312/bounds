@@ -31,6 +31,13 @@ The contract Bounds writes leads with this mapping so the agent knows exactly wh
 | Confirm an edit didn't drift the contract | `bounds validate --quick` |
 | Project health at a glance | `bounds overview` |
 
+If the project opts into Spec-Driven Development with `sdd.enabled: true` in root.yaml, the same
+generated files also include the SDD phase map: `overview`/`list` for `specify`,
+`describe`/`where` for `clarify`, `impact` for `plan` and `tasks`, `validate`/`preflight` for
+`analyze`, `validate --quick` for `implement`, and `preflight --ci` for `verify`. Bounds still does
+not run the prose workflow or call a model; it provides verified facts and gates. See
+[./sdd.md](./sdd.md).
+
 ## Compliance is advisory, not enforced
 
 Bounds **writes these instructions** into the config files agents already read, but it **cannot
@@ -99,6 +106,10 @@ agents already read) plus a short pointer file for **eight** coding agents — t
 | **Cursor** | `.cursor/rules/bounds.mdc` |
 | **Aider** | `.aider.conf.yml` |
 | **Windsurf** | `.windsurf/rules/bounds.md` |
+
+When SDD is enabled in the root manifest, the generated block in each of these files also documents
+how Bounds grounds and checks each SDD phase. Without that opt-in, the generated files stay focused
+on the general Bounds command contract.
 
 Shared files (`AGENTS.md`, `GEMINI.md`) get a marked Bounds block that leaves your other content
 intact; hand-written configs are never clobbered. The pointer is only the *instruction* layer — it

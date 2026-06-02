@@ -19,6 +19,8 @@ import re
 from ..models import ExtractResult, Issue, Symbol
 from .base import LanguageAdapter, canonical_columns, make_result
 
+__all__ = []
+
 _MODEL_RE = re.compile(r"^\s*model\s+([A-Za-z_]\w*)\s*\{")
 _MAP_RE = re.compile(r'@@map\(\s*"([^"]+)"\s*\)')
 _FIELD_RE = re.compile(r'^\s*([A-Za-z_]\w*)\s+([A-Za-z_]\w*(?:\[\])?\??)')  # `name  Type[]/Type? ...`

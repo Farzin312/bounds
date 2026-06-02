@@ -49,6 +49,8 @@ from .models import SubsystemCompact
 from .validate.checks import index_extracts, resolve_import
 from .validate.schema import SCHEMA_LANGUAGES, schema_catalog
 
+__all__ = ["run_discover"]
+
 
 def run_discover(
     project_root: Path,

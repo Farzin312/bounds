@@ -79,6 +79,27 @@ def test_canonical_contract_scopes_source_reading_instead_of_forbidding_it(tmp_p
     assert "never read the raw source" not in body
 
 
+def test_sync_adds_sdd_phase_contract_when_enabled(tmp_path):
+    """When root.yaml opts into SDD, generated agent files carry the phase map and check mode uses the same expected body."""
+    root = _mk_root(tmp_path)
+    (root / ".bounds" / "root.yaml").write_text(
+        'version: "1"\nproject: x\nsdd:\n'
+        "  enabled: true\n  agent: codex\n  phases: [specify, plan, implement, verify]\n",
+        encoding="utf-8",
+    )
+
+    report = agentsync.run_agent(root, mode="sync", only={"codex"})
+    body = (root / "AGENTS.md").read_text(encoding="utf-8")
+    assert "Bounds in Spec-Driven Development" in body
+    assert "**specify**" in body and "**verify**" in body
+    assert "**clarify**" not in body
+    assert report["canonical"] == "AGENTS.md"
+
+    check = agentsync.run_agent(root, mode="check", only={"codex"})
+    assert check["ok"] is True
+    assert check["configured"] == ["codex"]
+
+
 def test_every_generated_block_is_marked_and_stamped(tmp_path):
     """Every synced file carries BOUNDS markers + a version/hash stamp (not the literal version
     — we assert structure, since the version string is volatile)."""
