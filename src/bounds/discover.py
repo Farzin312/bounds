@@ -159,8 +159,11 @@ def run_discover(
 
     # Mapping coverage: how much SOURCE the proposal actually covers — surfaced right here so a
     # polyglot repo can't look fully discovered while an unsupported language sits unmapped.
-    owned = {rel for rel, cand in file_to_candidate.items() if cand in set(kept)}
-    coverage = mapping_coverage(project_root, owned, matcher)
+    owned = {rel for rel, cand in file_to_candidate.items() if cand in kept_set}
+    coverage = mapping_coverage(
+        project_root, owned, matcher,
+        repo=gitutil.repo_root(project_root) or project_root,
+    )
 
     result = {
         "mode": "discover",

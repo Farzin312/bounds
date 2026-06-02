@@ -155,15 +155,20 @@ def iter_subsystem_files(project_root: Path, sub: SubsystemCompact, exts: set[st
     return sorted(out, key=lambda p: p.as_posix())
 
 
-def path_specificity(rel: str, paths) -> int:
-    """How specifically a subsystem's declared ``paths`` cover ``rel`` — deeper match = higher.
+def path_specificity(rel: str, paths, files=None) -> int:
+    """How specifically a subsystem's declared ``paths``/``files`` cover ``rel`` — deeper = higher.
 
     Used so that when two subsystems' paths nest (a parent dir and a sub-package), the *deepest*
-    declared path owns the file, the same longest-prefix rule the tsconfig resolver uses. An exact
-    file path beats a directory prefix; a glob contributes the depth of its literal prefix; a
-    root/catch-all (``.`` or pure glob) is least specific (0). Returns 0 when no path covers ``rel``.
+    declared path owns the file, the same longest-prefix rule the tsconfig resolver uses. An explicit
+    ``files:`` entry naming ``rel`` exactly is the strongest intent a manifest can express and
+    outranks any directory prefix; an exact file path in ``paths`` ties it; a glob contributes the
+    depth of its literal prefix; a root/catch-all (``.`` or pure glob) is least specific (0). Returns
+    0 when nothing covers ``rel``.
     """
     best = 0
+    for raw in files or []:
+        if rel == str(raw).strip("/"):
+            best = max(best, rel.count("/") + 2)   # explicit single-file declaration: most specific
     for raw in paths or []:
         lit = re.split(r"[*?\[]", str(raw).strip("/"), maxsplit=1)[0].rstrip("/")
         if not lit or lit == ".":
@@ -193,7 +198,7 @@ def resolve_owners(
         sub = subsystems[name]
         for abs_path in iter_subsystem_files(project_root, sub, exts):
             rel = abs_path.relative_to(project_root).as_posix()
-            spec = path_specificity(rel, sub.paths)
+            spec = path_specificity(rel, sub.paths, sub.files)
             prev = claims.get(rel)
             if prev is None or spec > prev[0]:  # strictly-greater keeps the sorted-first tie winner
                 claims[rel] = (spec, name, abs_path)
@@ -204,6 +209,8 @@ def mapping_coverage(
     project_root: Path,
     owned: set[str],
     matcher: IgnoreMatcher | None = None,
+    repo: Path | None = None,
+    include_gitignored: bool = False,
 ) -> dict:
     """How much of the repo's *source code* Bounds actually mapped, and an honest breakdown of what
     it could not — the metric that stops a polyglot repo from looking fully mapped while half of it
@@ -218,12 +225,15 @@ def mapping_coverage(
       - **unsupported** — no adapter for that language yet (fix: hand-author/AI-author a manifest, or
         it waits for an adapter).
     Returns counts, ``mapped_pct``, and a sorted by-language breakdown of the unmapped source.
-    Deterministic; safe to skip on the ``--quick`` hot path (callers gate it).
+    Deterministic; safe to skip on the ``--quick`` hot path (callers gate it). Honors ``.gitignore``
+    when ``repo`` is given and ``include_gitignored`` is False, so the denominator matches the
+    gitignore-aware file universe the rest of validation uses (a gitignored owned file is excluded
+    from both numerator and denominator, never miscounted as unmapped).
     """
     supported = supported_extensions()
-    mapped = unowned_supported = unsupported = 0
-    by_lang: dict[str, int] = {}
-    unsupported_langs: set[str] = set()
+    # Collect source-code candidates first so gitignore can be applied in one batched call (parity
+    # with the engine's owned-file gitignore filtering).
+    candidates: list[tuple[str, str, str]] = []  # (rel, ext, lang)
     for abs_path in walk_supported(project_root, None):  # None => every file
         ext = abs_path.suffix
         lang = config.KNOWN_SOURCE_EXTS.get(ext)
@@ -232,6 +242,16 @@ def mapping_coverage(
         rel = abs_path.relative_to(project_root).as_posix()
         if matcher and matcher.matches(rel):
             continue
+        candidates.append((rel, ext, lang))
+    if not include_gitignored and repo is not None:
+        from .. import gitutil  # lazy: keep extract/ free of a top-level gitutil import
+        ignored = gitutil.gitignored(repo, [c[0] for c in candidates])
+        candidates = [c for c in candidates if c[0] not in ignored]
+
+    mapped = unowned_supported = unsupported = 0
+    by_lang: dict[str, int] = {}
+    unsupported_langs: set[str] = set()
+    for rel, ext, lang in candidates:
         if rel in owned:
             mapped += 1
             continue
@@ -242,11 +262,14 @@ def mapping_coverage(
             unsupported += 1
             unsupported_langs.add(lang)
     total = mapped + unowned_supported + unsupported
+    pct = round(mapped / total * 100, 1) if total else 100.0
+    if total and mapped < total and pct >= 100.0:
+        pct = 99.9  # never display a rounded 100% while a gap remains
     return {
         "files_source_total": total,
         "files_mapped": mapped,
         "files_unmapped": unowned_supported + unsupported,
-        "mapped_pct": round(mapped / total * 100, 1) if total else 100.0,
+        "mapped_pct": pct,
         "unmapped_unowned_supported": unowned_supported,
         "unmapped_unsupported_language": unsupported,
         "unmapped_by_language": dict(sorted(by_lang.items())),

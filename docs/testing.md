@@ -16,7 +16,7 @@ any snapshot/version/baseline. A green suite after a silent baseline bump is not
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"   # first time
 .venv/bin/pytest -q                 # everything
-.venv/bin/pytest tests/test_discover.py -q                  # one file
+.venv/bin/pytest tests/discover/ -q                         # one area
 .venv/bin/pytest -k tsconfig -q                             # by keyword
 .venv/bin/pytest -q -rxX             # show xfail/xpass reasons (see below)
 ```
@@ -27,11 +27,32 @@ absent (`requires_git`). Nothing in the suite hits the network — the cross-rep
 
 ---
 
+## Layout — tests are grouped by area
+
+Tests live in `tests/<area>/` so a file stays focused on one subsystem instead of growing into one
+giant catch-all. Shared fixtures (`sample_project`, `py_project`, `git_init`, …) live in the single
+root `tests/conftest.py`, which pytest makes available to every subfolder.
+
+| Folder | Covers |
+|--------|--------|
+| `tests/extract/` | language adapters, the import resolver, tsconfig aliases, SQL/schema folds |
+| `tests/validate/` | the validation engine, checks, file ownership, mapping coverage, schema flex |
+| `tests/discover/` | bootstrap: `discover` + `calibrate` |
+| `tests/cli/` | the CLI surface (commands, `guide`) |
+| `tests/agent/` | `agent --sync` artifacts + CI config generation |
+| `tests/cache/` | the binary SQLite cache |
+| `tests/meta/` | versioning + the update/upgrade checks |
+
+Put a new test in the folder for the code it exercises. Keep each file to one area; if a file grows
+past a few hundred lines, split it by concern (e.g. `validate/` splits checks vs engine). Give each
+test a one-line docstring saying what it pins (and *why*, if non-obvious) — the name says "what," the
+docstring says "why this matters."
+
 ## How tests are written here
 
 - **Build a throwaway project under `tmp_path`.** Write source files + a `.bounds/` (root.yaml +
-  manifests) and run the real code against it. See `tests/test_discover.py::_project` and
-  `tests/test_regression_nested_paths.py::_nested_project` for the pattern. `git`-init the fixture
+  manifests) and run the real code against it. See `tests/discover/test_discover.py::_project` and
+  `tests/validate/test_regression_nested_paths.py::_nested_project` for the pattern. `git`-init the fixture
   (`_git_init`) when the code under test consults `.gitignore`; or pass `include_gitignored=True`.
 - **Call the in-process entry points, not the CLI**, where you can: `bounds.discover.run_discover`,
   `bounds.validate.engine.run(root, mode="full")`, `bounds.describe.*`. Reserve `subprocess` for
@@ -68,7 +89,7 @@ breaks one is a blocking failure even if every other test is green.
    posix.
 6. **Most-specific-wins resolution.** Both tsconfig alias resolution and (once BUG-1 is fixed)
    file-ownership follow the same rule: the longest/deepest matching prefix wins. New resolver code
-   must keep a longest-prefix test (see `tests/test_tsconfig.py::test_overlapping_aliases_prefer_longest_prefix`).
+   must keep a longest-prefix test (see `tests/extract/test_tsconfig.py::test_overlapping_aliases_prefer_longest_prefix`).
 
 ---
 
@@ -88,7 +109,7 @@ def test_nested_child_keeps_its_own_exports(tmp_path):
 `strict=True` is the key: while the bug exists the test `XFAIL`s (suite stays green); the moment
 someone fixes it, the test passes, which under strict xfail is reported as an **`XPASS` failure**.
 That failure is the signal — the fixer deletes the `xfail` marker and the test becomes a permanent
-regression guard. `tests/test_regression_nested_paths.py` is the worked example. List open ones in
+regression guard. `tests/validate/test_regression_nested_paths.py` is the worked example. List open ones in
 the cross-language report's bug section so they're discoverable.
 
 ---

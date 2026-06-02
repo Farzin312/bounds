@@ -15,8 +15,11 @@ from pathlib import Path
 from packaging.version import Version
 
 # Load setup.py as a module WITHOUT triggering setup() (it's guarded by __name__=="__main__",
-# and we load it under a different module name).
-_SETUP_PATH = Path(__file__).resolve().parents[1] / "setup.py"
+# and we load it under a different module name). Find it by walking up to the repo root so this
+# test keeps working regardless of how deep under tests/ it lives.
+_SETUP_PATH = next(
+    p / "setup.py" for p in Path(__file__).resolve().parents if (p / "setup.py").is_file()
+)
 _spec = importlib.util.spec_from_file_location("bounds_setup", _SETUP_PATH)
 setup_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(setup_mod)

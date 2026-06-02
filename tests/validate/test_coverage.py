@@ -96,3 +96,25 @@ def test_quick_mode_skips_coverage_scan(tmp_path):
     report = engine.run(tmp_path, mode="quick", include_gitignored=True)
     assert "mapping" not in report.stats["coverage"]
     assert [i for i in report.issues if i.code == errors.E_COVERAGE_GAP] == []
+
+
+def test_gitignored_owned_file_not_counted_as_unmapped(tmp_path):
+    """Gitignore parity: a gitignored file owned by a subsystem is excluded from both numerator and
+    denominator, so it never falsely registers as unmapped or fires a spurious coverage gap."""
+    svc = tmp_path / "svc"
+    svc.mkdir()
+    (svc / "real.py").write_text("def f():\n    pass\n")
+    (svc / "gen.py").write_text("def g():\n    pass\n")     # owned by svc/ but gitignored
+    (tmp_path / ".gitignore").write_text("svc/gen.py\n")
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        'version: "1"\nproject: gi\nlanguages: [python]\nsubsystems: [svc]\n'
+    )
+    (cfg / config.MANIFESTS_DIR / "svc.yaml").write_text(
+        "name: svc\nrole: library\ncriticality: leaf\npaths:\n  - svc\nexposes: []\n"
+    )
+    _git_init(tmp_path)
+    report = engine.run(tmp_path, mode="full")  # default include_gitignored=False
+    assert report.stats["coverage"]["mapping"]["mapped_pct"] == 100.0
+    assert [i for i in report.issues if i.code == errors.E_COVERAGE_GAP] == []

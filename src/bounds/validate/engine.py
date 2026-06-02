@@ -248,7 +248,10 @@ def run(
     # gap surfaces as one loud, advisory E_COVERAGE_GAP warning with a next step, never silently.
     mapping = None
     if mode != "quick":
-        mapping = scan.mapping_coverage(project_root, set(file_owner), matcher)
+        mapping = scan.mapping_coverage(
+            project_root, set(file_owner), matcher,
+            repo=repo, include_gitignored=include_gitignored,
+        )
         if mapping["files_unmapped"] > 0:
             issues.append(_coverage_gap_issue(mapping))
 

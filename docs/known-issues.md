@@ -55,7 +55,7 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Symptom:** a fresh `discover → validate` reported `E_STRUCTURAL_DRIFT` ("declares X but no source file exports it") for symbols `describe` simultaneously marked `[verified]` — the tool contradicting itself on unchanged source (click: 20 false drifts; flask: ~133).
 - **Root cause:** ownership was "first declared owner wins" over `sorted(subsystems)` (`engine.py`, `scan.py`), so an alphabetically-earlier *parent* swallowed a nested child's files, starving the child.
 - **Fix:** `agent-plugins-aliases-benchmark` — centralized ownership in `scan.resolve_owners` with **most-specific-path-wins** (deepest declared path owns the file); `engine.py` + `extract_project` both use it. Verified: click structural-drift 20→0, flask ~133→11.
-- **Test:** `tests/test_regression_nested_paths.py`.
+- **Test:** `tests/validate/test_regression_nested_paths.py`.
 
 ### BOUNDS-002 — `discover` wrote `consumes` edges to subsystems it never materialized
 - **Severity / Status:** medium / **Fixed**
@@ -63,14 +63,14 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Symptom:** a fresh `discover → validate` raised self-inflicted `E_UNRESOLVED_REFERENCE` ("consumes unknown subsystem 'complex'").
 - **Root cause:** a consume-edge could point at a low-score candidate that was dropped (not kept), so the referenced subsystem was never written.
 - **Fix:** `agent-plugins-aliases-benchmark` — `discover` filters each candidate's `consumes` to the final kept set before writing (`discover.py`). Verified: click `E_UNRESOLVED_REFERENCE` 1→0.
-- **Test:** covered by `tests/test_discover.py` (consume-edge tests); fresh-discover-validate-clean asserted via the click re-measure.
+- **Test:** covered by `tests/discover/test_discover.py` (consume-edge tests); fresh-discover-validate-clean asserted via the click re-measure.
 
 ### BOUNDS-003 — `init`/`discover` hardcoded `languages: [python]`
 - **Severity / Status:** medium / **Fixed**
 - **Found:** 2026-06-01 via benchmark (documenso — pure TS/Prisma — and every unsupported-language repo declared `languages: [python]`).
 - **Root cause:** `cli.py` `_ROOT_TEMPLATE` wrote a static `[python]` and `discover` never overwrote it.
 - **Fix:** `agent-plugins-aliases-benchmark` — `discover` derives `languages` from extracted source and writes it authoritatively (`discover.py`). Verified: chalk→`[typescript]`, requests→`[python]`.
-- **Test:** `tests/test_discover.py::test_discover_overwrites_hardcoded_python_default_for_ts`.
+- **Test:** `tests/discover/test_discover.py::test_discover_overwrites_hardcoded_python_default_for_ts`.
 
 ### BOUNDS-004 — tsconfig overlapping `paths` aliases ignored TypeScript's longest-prefix rule
 - **Severity / Status:** medium / **Fixed**
@@ -78,7 +78,7 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Symptom:** with overlapping `@/*` and `@/foo/*`, an import like `@/foo/bar` resolved to the broad `@/*` target (patterns were sorted alphabetically; `*` sorts before `f`), misattributing imports across subsystems in `boundary`/`discover`/`where`.
 - **Root cause:** `_compile` stored patterns with `sorted(patterns.items())` and `candidate_stems` emitted them in that order.
 - **Fix:** `agent-plugins-aliases-benchmark` — `_pattern_specificity` orders patterns most-specific first (exact, then longest literal prefix before `*`, then longest suffix, then the pattern string), matching TypeScript.
-- **Test:** `tests/test_tsconfig.py::test_overlapping_aliases_prefer_longest_prefix`, `::test_exact_alias_wins_over_wildcard`, `::test_resolve_prefers_specific_alias_target`.
+- **Test:** `tests/extract/test_tsconfig.py::test_overlapping_aliases_prefer_longest_prefix`, `::test_exact_alias_wins_over_wildcard`, `::test_resolve_prefers_specific_alias_target`.
 
 ### BOUNDS-005 — polyglot repos silently mapped only the supported languages
 - **Severity / Status:** high / **Fixed**
@@ -86,14 +86,14 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Symptom:** no command reported how much source went unmapped; a partial map looked complete.
 - **Root cause:** every walk/owner was scoped to supported extensions; there was no repo-wide source denominator.
 - **Fix:** `agent-plugins-aliases-benchmark` — `scan.mapping_coverage` (mapped %, by-language breakdown of the unmapped) feeds `validate` (`stats.coverage.mapping` + a loud non-blocking `E_COVERAGE_GAP` with a next step) and `discover` (`coverage` + `next_step`). See [coverage.md](coverage.md).
-- **Test:** `tests/test_coverage.py`.
+- **Test:** `tests/validate/test_coverage.py`.
 
 ### BOUNDS-006 — `discover` can emit overlapping subsystem paths with no diagnostic
 - **Severity / Status:** medium / **Mitigated**
 - **Found:** 2026-06-01 via benchmark (lodash/zod `root=.` catch-alls; nested package dirs).
 - **Status detail:** BOUNDS-001 makes nesting *correct* (deepest path owns the file), so the false drift is gone. **Residual (Open):** a genuine same-path conflict still has no warning, and `describe`'s `file_count` can double-count a file that a more-specific sibling now owns.
 - **Fix:** proposed — a manifest-load overlap/ambiguity diagnostic; make `describe` file counting use `scan.resolve_owners` so it agrees with `validate`.
-- **Test:** `tests/test_regression_nested_paths.py` covers the ownership half; describe-consistency test still to add.
+- **Test:** `tests/validate/test_regression_nested_paths.py` covers the ownership half; describe-consistency test still to add.
 
 ### BOUNDS-007 — `bounds where <file-path>` returns 0 results for a manifest-owned file
 - **Severity / Status:** low / **Mitigated**
@@ -132,7 +132,7 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Symptom:** a library's public API is consumed by external users, not a sibling subsystem, so every export read as "consumed by nothing" — the dominant noise on the most common use case (point Bounds at a library).
 - **Root cause:** `discover` records `consumes` edges at *subsystem* granularity with no `interfaces` (`discover.py`), but `check_orphans` judged orphans *per interface* — so with no interface data, every export looked unconsumed.
 - **Fix:** `agent-plugins-aliases-benchmark` — `check_orphans` now only judges orphans for subsystems that have **interface-level** consumption recorded (curated contracts); subsystem-granularity edges (what `discover` emits) no longer flood. Verified: click orphan 183→0 (total validate issues 206→3, `ok: True`), flask 314→19, requests 146→6, express 53→1, zod 3,025→166.
-- **Test:** `tests/test_validate.py::test_orphans_not_flagged_without_interface_level_consumption`.
+- **Test:** `tests/validate/test_validate.py::test_orphans_not_flagged_without_interface_level_consumption`.
 
 ### BOUNDS-013 — fresh `discover → validate` was far from clean on real repos
 - **Severity / Status:** medium / **Mitigated**
@@ -146,7 +146,7 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Symptom:** a test subsystem's `exposes` listed every `test_*` function / `Test*` class — symbols a test runner finds by convention, that nothing imports — bloating the manifest (and `describe` token cost) and misrepresenting them as a public surface.
 - **Root cause:** `discover._exposes_for` emitted every exported, non-private symbol regardless of whether the file was a test file.
 - **Fix:** `agent-plugins-aliases-benchmark` — `_exposes_for` excludes `test_*` functions and `Test*` classes in test files (`_is_test_file`/`_is_test_symbol`), keeping genuine helpers. Verified: click `tests.yaml` 818→70 lines (exposes 397→31).
-- **Test:** `tests/test_discover.py::test_discover_excludes_test_cases_from_exposes`.
+- **Test:** `tests/discover/test_discover.py::test_discover_excludes_test_cases_from_exposes`.
 
 ---
 

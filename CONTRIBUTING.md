@@ -64,7 +64,7 @@ bounds/
 │   ├── calibrate.py        # Manifest↔source reconciliation
 │   ├── agentsync.py        # Cross-agent config generation
 │   └── ciconfig.py         # CI config generation
-├── tests/                  # Pytest test suite (10 files; CI reports the live count)
+├── tests/                  # Pytest suite, grouped by area: extract/ validate/ discover/ cli/ agent/ cache/ meta/
 ├── docs/                   # Deep-dive documentation (linked from the README entrance)
 ├── ARCHITECTURE.md         # Engineering contract
 ├── CONTRIBUTING.md         # This file
@@ -170,14 +170,13 @@ All tests must pass. If you add a new feature, include tests.
 
 ### Writing Tests
 
-- Tests live in `tests/` and are grouped by feature area (10 files; run the full suite — CI reports the count):
-  `test_extract.py`, `test_validate.py`, `test_schema_flex.py` (roles/criticality),
-  `test_cache_sqlite.py`, `test_discover.py`, `test_calibrate.py`, `test_agentsync.py`,
-  `test_ciconfig.py`, `test_cli.py`, and `test_commands_cli.py`.
-- Use `pytest` fixtures from `tests/conftest.py` for temporary projects: `sample_project`
-  (multi-subsystem TS+Py), `py_project` (minimal Python project), `git_sample_project` /
-  `git_init` (git-backed variants for quick-mode tests).
-- CLI tests use CliRunner from Click.
+- Tests live in `tests/<area>/` grouped by subsystem — `extract/`, `validate/`, `discover/`, `cli/`,
+  `agent/`, `cache/`, `meta/`. Put a new test in the folder for the code it exercises, and give it a
+  one-line docstring. The full map is in [docs/testing.md](docs/testing.md#layout--tests-are-grouped-by-area).
+- Use `pytest` fixtures from the single root `tests/conftest.py` (visible to every subfolder):
+  `sample_project` (multi-subsystem TS+Py), `py_project` (minimal Python project),
+  `git_sample_project` / `git_init` (git-backed variants for quick-mode tests).
+- CLI tests use CliRunner from Click. Run everything with `.venv/bin/pytest -q`.
 
 ## Branching and PR Workflow
 
@@ -200,7 +199,7 @@ Tree-sitter adapters live in `src/bounds/extract/`. To add a new language:
    `base.make_result(...)` so both the content and structure hashes are computed consistently.
 4. Register the adapter in `src/bounds/extract/registry.py`.
 5. Add the tree-sitter grammar to `pyproject.toml` dependencies.
-6. Write tests in `tests/test_extract.py`.
+6. Write tests in `tests/extract/test_extract.py`.
 
 ## Release Process & Source of Truth
 
