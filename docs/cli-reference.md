@@ -28,7 +28,7 @@ only make the loop easier to trigger.
 
 1. **Orient:** `bounds list` to find the subsystem, or `bounds overview` if the question is project
    health.
-2. **Scope:** `bounds describe <name>` to read the verified public API/table surface before opening
+2. **Scope:** `bounds describe <name>` to read the verified public surface (symbols + tables) before opening
    implementation files.
 3. **Locate:** `bounds where <symbol|path>` when you need an owner, file, or symbol definition.
 4. **Assess risk:** `bounds impact <name>` before changing an exported interface, shared subsystem,

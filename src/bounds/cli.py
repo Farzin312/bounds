@@ -293,7 +293,7 @@ def list_cmd(namespace: str | None, human: bool) -> None:
 # ===========================================================================
 # describe
 # ===========================================================================
-@main.command("describe", short_help="Show one subsystem's verified API/table contract")
+@main.command("describe", short_help="Show one subsystem's verified surface/table contract")
 @click.argument("name", required=False)
 @click.option("--namespace", default=None,
               help="Describe every subsystem in this namespace instead of one by name.")
@@ -302,7 +302,7 @@ def list_cmd(namespace: str | None, human: bool) -> None:
               help="Include the full file roster and schema-object list (default shows counts).")
 @_human
 def describe_cmd(name: str | None, namespace: str | None, deep: bool, full: bool, human: bool) -> None:
-    """Return one verified subsystem API/table contract as JSON."""
+    """Return one verified subsystem surface/table contract as JSON."""
 
     def go() -> None:
         if name is None and namespace is None:

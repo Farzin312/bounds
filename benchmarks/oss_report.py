@@ -79,7 +79,7 @@ def render(bench: dict, feats: dict) -> str:
     out.append(f"| `bounds describe {key}` tokens | {_fmt_int(bench.get('describe_tok'))} |")
     out.append(f"| `bounds impact {key}` tokens | {_fmt_int(bench.get('impact_tok'))} |")
     out.append(f"| `{key}` source tokens | {_fmt_int(bench.get('sub_source_tok'))} |")
-    out.append(f"| API reduction (`describe` vs source) | {_fmt_pct(bench.get('api_reduction_pct'))} |")
+    out.append(f"| Surface reduction (`describe` vs source) | {_fmt_pct(bench.get('surface_reduction_pct'))} |")
     out.append("")
     out.append("Per-subsystem `describe` distribution (the honest spread — it scales with exposed "
                "API, not files):")

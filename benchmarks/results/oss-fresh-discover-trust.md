@@ -25,7 +25,7 @@ Fresh temp clone of `https://github.com/pallets/click`.
 | Key subsystem | `click` |
 | `bounds describe click` tokens | 6,954 |
 | `click` source tokens | 93,020 |
-| API reduction | **92.5%** |
+| Surface reduction | **92.5%** |
 | Fresh validation errors | **0** |
 | Fresh boundary violations | **0** |
 | Fresh warnings | 1 (`E_COVERAGE_GAP`) |
