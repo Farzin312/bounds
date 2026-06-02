@@ -54,6 +54,8 @@ Every `describe` and `validate` payload carries a machine-readable `validation_s
 | `stale` | Structural drift or cross-subsystem impact detected; the manifest needs updating. | Run `bounds calibrate --apply` and commit the manifest change with the code. |
 | `unresolved` | Forward references to subsystems/interfaces that don't exist yet (incremental adoption; warning-level). | Fine mid-adoption; resolve as you declare the missing pieces. |
 
+When both apply — real drift *and* an unresolved forward reference — `validation_status` reports **`stale`**. The actionable state (errors you must fix) always outranks the benign one, so a status of `unresolved` never hides drift; the forward references remain in the full `issues` list regardless.
+
 ### Make it enforced, not optional
 
 Everything above works by convention until you wire it into the pipeline. Agent compliance is **advisory** — Bounds can suggest the right behavior but cannot force it — so the one hard enforcement point is CI. Install it:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from bounds import errors
 from bounds.cache import store
-from bounds.models import ExtractResult, ImportRef, Symbol
+from bounds.models import ExtractResult, ImportRef, Issue, Symbol
 from bounds.models import SubsystemCompact as Sub
 from bounds.models import Consumes
 from bounds.validate import engine
@@ -295,3 +295,19 @@ def test_engine_entry_point_alone_is_clean(py_project, git_init):
     assert report.ok is True
     assert report.stats["entry_points"] == ["manage.py"]
     assert report.errors() == []
+
+
+# ===========================================================================
+# status precedence — a warning-level "unresolved" must never mask real errors
+# ===========================================================================
+def test_status_error_outranks_unresolved_reference():
+    """When real drift (error) and a forward reference (warning-level E_UNRESOLVED_REFERENCE)
+    coexist, the headline status must be 'stale', not 'unresolved'. 'unresolved' means "fine
+    mid-adoption" (docs/team-workflow.md) — reporting it while errors hide tells an agent/CI to do
+    nothing about drift it must actually calibrate away. Regression for the spex_backend dogfood
+    case: 275 errors were headlined 'unresolved' behind 19 forward refs."""
+    drift = Issue(errors.E_BOUNDARY_VIOLATION, "error", "x imports unexposed Y")
+    fwd = Issue(errors.E_UNRESOLVED_REFERENCE, "warning", "consumes unknown subsystem 'z'")
+    assert engine._status([drift, fwd]) == "stale"   # error wins over the forward ref
+    assert engine._status([fwd]) == "unresolved"      # forward ref alone is still surfaced
+    assert engine._status([]) == "fresh"
