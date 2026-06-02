@@ -95,6 +95,60 @@ def test_discover_namespace_tag(tmp_path):
     assert all(c["namespace"] == "backend" for c in kept)
 
 
+# --- languages detection (regression for the hardcoded `languages: [python]` bug) ---
+def test_discover_writes_detected_languages(tmp_path):
+    """root.yaml's `languages` reflects the extracted source, not a hardcoded default."""
+    _project(tmp_path)  # pure-Python fixture
+    run_discover(tmp_path, apply=True)
+    root_doc = yaml.safe_load((tmp_path / config.BOUNDS_DIR / config.ROOT_FILE).read_text())
+    assert root_doc["languages"] == ["python"]
+
+
+def test_discover_excludes_test_cases_from_exposes(tmp_path):
+    """BOUNDS-014: a test runner finds `test_*` by convention — nothing imports them, so they are
+    not a public surface and must not bloat a test subsystem's `exposes`."""
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_thing.py").write_text(
+        "def test_one():\n    pass\n"
+        "def test_two():\n    pass\n"
+        "class TestSuite:\n    pass\n"
+        "def make_fixture():\n    return 1\n"  # a genuine helper — kept
+    )
+    for i in range(4):  # pad so the dir is kept as a candidate
+        (tests / f"test_pad{i}.py").write_text(f"def test_pad{i}():\n    pass\n")
+    result = run_discover(tmp_path)
+    cand = next(c for c in result["candidates"] if not c["dropped"])
+    names = {e["name"] for e in cand["exposes"]}
+    assert "make_fixture" in names              # real helper kept
+    assert not any(n.startswith("test_") for n in names)  # no test_* functions
+    assert "TestSuite" not in names             # no Test* classes
+
+
+def test_discover_overwrites_hardcoded_python_default_for_ts(tmp_path):
+    """REGRESSION (BUG-4): a pure-TS repo must NOT keep init's `languages: [python]` placeholder.
+
+    `bounds init` seeds root.yaml with `languages: [python]`; discovering a TS-only repo must
+    overwrite that with the detected language, or a non-Python project lies about itself.
+    """
+    cfg = tmp_path / config.BOUNDS_DIR
+    cfg.mkdir()
+    # Simulate what `init` wrote: the hardcoded python placeholder.
+    (cfg / config.ROOT_FILE).write_text(
+        'version: "1"\nproject: app\nlanguages: [python]\nsubsystems: []\n'
+    )
+    svc = tmp_path / "src" / "svc"
+    svc.mkdir(parents=True)
+    (svc / "a.ts").write_text("export function alpha() {}\nexport class Beta {}\n")
+    for i in range(4):
+        (svc / f"m{i}.ts").write_text(f"export const k{i} = {i};\n")
+
+    run_discover(tmp_path, apply=True)
+    root_doc = yaml.safe_load((cfg / config.ROOT_FILE).read_text())
+    assert root_doc["languages"] == ["typescript"]  # overwritten, not the stale [python]
+    assert "python" not in root_doc["languages"]
+
+
 def test_discover_folds_module_subparts_into_parent(tmp_path):
     # A NestJS-shaped module (auth.module.ts directly + dto/ and services/ subdirs) becomes ONE
     # `auth` subsystem, not auth + auth-dto + auth-services (the spex_backend over-fragmentation).

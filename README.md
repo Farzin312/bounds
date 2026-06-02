@@ -120,24 +120,42 @@ The token win *widens* with size.
 
 ### Verified on real open-source repos
 
-These are measured, reproducible numbers (token counts via a deterministic ~4-chars/token estimate;
-re-run with tiktoken for exact cl100k figures — the order of magnitude is the same). The harness
-shallow-clones each repo at a cited commit, runs `bounds discover`, and counts tokens (Bounds output
-vs the equivalent source):
+Exact `tiktoken cl100k_base` counts (not an estimate) from a **16-repo, cross-language sweep**. The
+harness shallow-clones each repo at a cited commit, runs `bounds init` + `bounds discover`, and
+counts tokens (Bounds output vs the equivalent source). Full corpus, full-command coverage, and the
+bugs it surfaced: **[benchmarks/results/oss-cross-language.md](benchmarks/results/oss-cross-language.md)**.
 
 | Repo | Whole-repo orientation (`bounds list`) | One subsystem's API (`bounds describe`) |
 |------|----------------------------------------|-----------------------------------------|
-| [click](https://github.com/pallets/click) (Python) | 205 vs 208,242 tok — **99.9% less** | 5,971 vs 103,392 tok — **94.2% less** |
-| [axios](https://github.com/axios/axios) (TypeScript) | 814 vs 573,740 tok — **99.9% less** | 901 vs 50,483 tok — **98.2% less** |
+| [click](https://github.com/pallets/click) (Python) | 243 vs 196,257 tok — **99.9% less** | `click` (505 exports): 6,955 vs 93,020 — **92.5% less** |
+| [axios](https://github.com/axios/axios) (TypeScript) | 977 vs 526,284 tok — **99.8% less** | `lib`: 1,007 vs 47,092 — **97.9% less** |
+| [nest](https://github.com/nestjs/nest) (TS, 199 subsystems) | 15,742 vs 1,305,335 tok — **98.8% less** | `packages-common`: 8,036 vs 116,149 — **93.1% less** |
+| [zod](https://github.com/colinhacks/zod) (TypeScript) | 1,285 vs 1,772,284 tok — **99.9% less** | `core` (831 exports): 35,493 vs 117,947 — **69.9% less** |
+
+Across all 13 supported-language repos, whole-repo `bounds list` is **98.7–100%** smaller than
+reading every file, and a single `bounds describe` is **54–100%** smaller than its subsystem's
+source. The `describe` spread is real and tracks how much public API a subsystem *exposes*: a typical
+one is a **median of a few hundred tokens**, while a fat-API subsystem (zod's `core`, 831 exports)
+is ~35k. *Honest caveat:* "vs all source" is a generous baseline — nobody reads a whole repo — so
+read 99% as "orientation is near-free," and the **54–100% `describe`** range as the number that
+matters for real work.
 
 A same-model **capability head-to-head** on click (answer "what's the public API and what depends on
-it?") cost ~6,149 tokens and was tree-sitter-verified *with* Bounds, versus ~103k tokens of source
-the model must read and infer the public surface from *without* it — ~17× cheaper and more reliable.
-(Bounds is a navigation layer, not a comprehension layer — you still read source to understand
-*behavior*.) Reproduce it all: `python benchmarks/oss_run.py`.
+it?") cost ~7.2k tokens (`describe` + `impact`) and was tree-sitter-verified *with* Bounds, versus
+~93k tokens of source the model must read and infer the public surface from *without* it — **~13×
+cheaper** and more reliable. (Bounds is a navigation layer, not a comprehension layer — you still
+read source to understand *behavior*.)
 
-**Contributors welcome:** run `make benchmark` (or `python benchmarks/oss_run.py`), then add your
-model/tokenizer's numbers via [`benchmarks/TEMPLATE.md`](benchmarks/TEMPLATE.md) — see
+> **Honest scope.** Those numbers are extraction + retrieval economics, which generalize. The
+> auto-`discover` contracts are a **starting draft to curate** — on these repos a fresh `discover`
+> does *not* produce a clean `bounds validate` (it surfaces real drift plus library orphan-export
+> noise), so treat the drift gate as something you reach *after* refining contracts, not a
+> one-command guarantee. The [cross-language report](benchmarks/results/oss-cross-language.md)
+> documents this in full, including the bugs it found.
+
+**Contributors welcome:** run `python benchmarks/oss_bench.py --repo <path>` (token economics) and
+`python benchmarks/oss_features.py --repo <path>` (full-command matrix), or add your model/tokenizer's
+numbers via [`benchmarks/TEMPLATE.md`](benchmarks/TEMPLATE.md) — see
 [benchmarks/README.md](benchmarks/README.md). See [docs/token-economics.md](docs/token-economics.md)
 for the scaling argument and the context-rot effect.
 

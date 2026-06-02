@@ -499,6 +499,21 @@ def test_service_exposes_are_not_orphans():
     assert check_orphans(_ctx(subs)) == []
 
 
+def test_orphans_not_flagged_without_interface_level_consumption():
+    """BOUNDS-012: a subsystem consumed only at subsystem granularity (no declared interfaces — what
+    `discover` emits) must not flood orphan-export; every public export would otherwise look
+    orphaned. Orphan detection needs interface-level contracts to judge 'unused'."""
+    subs = {
+        "lib": Sub(name="lib", role="library", exposes=[Interface("a"), Interface("b")]),
+        "user": Sub(name="user", consumes=[Consumes("lib")]),  # subsystem-level edge, no interfaces
+    }
+    assert check_orphans(_ctx(subs)) == []
+    # But once a consumer declares the interfaces it uses, a genuinely-unused export is still flagged.
+    subs["user"] = Sub(name="user", consumes=[Consumes("lib", interfaces=["a"])])
+    flagged = check_orphans(_ctx(subs))
+    assert any("'b'" in i.message for i in flagged) and not any("'a'" in i.message for i in flagged)
+
+
 # ===========================================================================
 # Propagation
 # ===========================================================================

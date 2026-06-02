@@ -162,6 +162,12 @@ bounds validate --quick
 
 All tests must pass. If you add a new feature, include tests.
 
+> **Read [docs/testing.md](docs/testing.md)** for the full guide: the invariants every change must
+> preserve (determinism, fail-soft, JSON-first, stable error codes, posix paths), how to write a
+> regression test, the `xfail(strict=True)` pattern for known-but-unfixed bugs, and — importantly —
+> **how to tell an intended behavior change from a regression and update the right baseline**
+> (`config.STATE_VERSION` bumps, `calibrate --dump-baseline`, append-only `errors.py`).
+
 ### Writing Tests
 
 - Tests live in `tests/` and are grouped by feature area (10 files; run the full suite — CI reports the count):

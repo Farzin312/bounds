@@ -1,5 +1,10 @@
 # OSS token-economics + capability head-to-head
 
+> **Superseded (2026-06-01).** This is the original two-repo run using the `~4 chars/token`
+> *estimate*. It is kept for history. The current, larger run — **16 repos across Python/TS/JS with
+> exact `tiktoken cl100k_base` counts, full-command coverage, and the bugs it surfaced** — is
+> [`oss-cross-language.md`](oss-cross-language.md). Cite that one.
+
 Cross-repo run of the deterministic harness (`benchmarks/oss_run.py`) on real, third-party
 open-source projects — so the headline numbers aren't measured only on Bounds itself — plus a
 same-model capability head-to-head (does the model answer an architecture question *correctly*,

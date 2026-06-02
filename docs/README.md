@@ -19,8 +19,9 @@ command reference, and the deep dives on how Bounds works and why it pays off.
 ## Deep dives
 
 - [how-it-works.md](how-it-works.md) — the three-tier data model, the validation engine and its architecture diagram, quick mode, and the binary cache.
-- [token-economics.md](token-economics.md) — measured token costs, the scaling tables, and the context-rot argument (one repo, one data point).
+- [token-economics.md](token-economics.md) — measured token costs (16-repo cross-language corpus, exact tiktoken), the scaling tables, and the context-rot argument.
 - [comparison.md](comparison.md) — Bounds vs. code graphs, and what Bounds deliberately does *not* do.
+- [testing.md](testing.md) — how to write tests here, the invariants that must never regress, the `xfail` pattern for known bugs, and how to update baselines for *intended* behavior changes.
 
 ---
 

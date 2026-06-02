@@ -43,29 +43,31 @@ These percentages follow from the single-repo measurements above; the same cavea
 
 ### Verified across real OSS repos (not just this repo)
 
-To answer the obvious "but you measured your own repo" objection, the same deterministic harness was run on real, third-party projects cloned at a cited commit — [`benchmarks/oss_run.py`](../benchmarks/oss_run.py) shallow-clones each repo, runs `bounds discover`, and measures tokens (Bounds output vs the equivalent source). Full table and methodology: [`benchmarks/results/oss-token-economics.md`](../benchmarks/results/oss-token-economics.md).
+To answer the obvious "but you measured your own repo" objection, the harness was run on **16 real third-party repos** across Python/TS/JS, cloned at cited commits, with **exact `tiktoken cl100k_base`** counts. Full corpus, per-repo numbers, full-command coverage, and the bugs it surfaced: **[`benchmarks/results/oss-cross-language.md`](../benchmarks/results/oss-cross-language.md)** (the older two-repo `~4 chars/token` run lives in [`oss-token-economics.md`](../benchmarks/results/oss-token-economics.md) and is superseded).
 
 | Repo | Commit | `bounds list` | All source | Map reduction | `bounds describe` | Subsystem source | API reduction |
 |------|--------|-------------:|-----------:|--------------:|------------------:|-----------------:|--------------:|
-| click (Python) | `c480210` | 205 | 208,242 | **99.9%** | 5,971 (`click`) | 103,392 | **94.2%** |
-| axios (TypeScript) | `4306df2` | 814 | 573,740 | **99.9%** | 901 (`lib`) | 50,483 | **98.2%** |
+| click (Python) | `c480210` | 243 | 196,257 | **99.9%** | 6,955 (`click`, 505 exports) | 93,020 | **92.5%** |
+| axios (TypeScript) | `4306df2` | 977 | 526,284 | **99.8%** | 1,007 (`lib`) | 47,092 | **97.9%** |
+| nest (TS, 199 subs) | `5ae73ad` | 15,742 | 1,305,335 | **98.8%** | 8,036 (`packages-common`) | 116,149 | **93.1%** |
+| zod (TypeScript) | `bbc68f9` | 1,285 | 1,772,284 | **99.9%** | 35,493 (`core`, 831 exports) | 117,947 | **69.9%** |
 
-- **Map reduction** is the whole-system `bounds list` figure (orient on the entire repo) vs reading every subsystem's source — that's the 99.9% headline.
-- **API reduction** is one subsystem's `bounds describe` contract vs reading *that* subsystem's source; it tracks subsystem size, so it varies (axios `lib` 98.2%, click `click` 94.2%). The whole-map `list` reduction is the stable headline; per-`describe` reductions vary with the exposed surface.
-- The axios (TypeScript) edges only resolve correctly because of the dotted-filename + tsconfig path-alias resolver fixes on this branch.
+- **Map reduction** (whole-repo `bounds list` vs reading every subsystem's source) is **98.7–100%** across the 13 supported repos. *But the baseline is generous* — nobody reads a whole repo — so read it as "orientation is near-free," not a literal per-task saving.
+- **API reduction** (`bounds describe` vs that subsystem's source) ranges **54–100%** (median ~92.5%) and tracks the exposed surface: zod's `core` (831 exports) is a 35k-token contract → only 69.9%. Per-`describe` cost is a **median of a few hundred tokens** with a heavy tail; cite the range, not a flat number.
+- **Honest scope:** these are extraction + retrieval economics, which generalize. The auto-`discover` contracts are a *draft to curate* — a fresh `discover` did **not** validate clean on any of the 13 repos (real drift + library orphan-export noise). See the cross-language report.
 
-Same estimate basis as above (~4 chars/token; tiktoken not installed in the recorded run). The numbers are **reproducible**: re-clone each repo at the cited commit and re-run `python benchmarks/oss_run.py`.
+The numbers are **reproducible**: re-clone each repo at the cited commit and re-run `python benchmarks/oss_bench.py --repo <path>` (token economics) / `python benchmarks/oss_features.py --repo <path>` (full-command matrix).
 
 ### Capability head-to-head (same model, with vs without)
 
 Tokens are only half the story — does the agent actually answer the architecture question *correctly*? On click @ `c480210`, the same model (**Claude Opus 4.8**) was asked: "what is the public API, and what depends on it?"
 
-- **With Bounds** (`bounds describe click` → `bounds impact click`): **~6,149 tokens**, and the public surface is tree-sitter-verified against source (183 exported symbols; consumers identified) rather than inferred.
-- **Without Bounds** (read `src/click/*.py`, infer which symbols are public, grep for importers): **~103,392+ tokens**, and the public-surface inference is the error-prone step Bounds removes.
+- **With Bounds** (`bounds describe click` → `bounds impact click`): **~7.2k tokens** (cl100k exact), and the public surface is tree-sitter-verified against source (505 exported symbols; consumers identified) rather than inferred.
+- **Without Bounds** (read `src/click/*.py`, infer which symbols are public, grep for importers): **~93,000 tokens**, and the public-surface inference is the error-prone step Bounds removes.
 
-That's **~17× cheaper** for the "orient + find the contract + find dependents" class of task, *and* more reliable because the surface and dependency edges are extracted deterministically, not inferred from a large, context-rot-prone source dump. **Honest caveat:** this is one model's observation on one task — the token figures are deterministic, the "correct?" judgment is the author's. And as throughout this page, Bounds is a *navigation* layer, not a *comprehension* one: for tasks that need behavior ("*how* does this function work"), you still read the source.
+That's **~13× cheaper** for the "orient + find the contract + find dependents" class of task, *and* more reliable because the surface and dependency edges are extracted deterministically, not inferred from a large, context-rot-prone source dump. **Honest caveat:** this is one model's observation on one task — the token figures are deterministic, the "correct?" judgment is the author's. And as throughout this page, Bounds is a *navigation* layer, not a *comprehension* one: for tasks that need behavior ("*how* does this function work"), you still read the source.
 
-**Contribute your own numbers.** Run `make benchmark` (or `python benchmarks/oss_run.py`) and submit your model's/tokenizer's results per [`benchmarks/TEMPLATE.md`](../benchmarks/TEMPLATE.md) — exact tokenizer counts (cl100k, Claude, Gemini) all show the same order-of-magnitude reduction.
+**Contribute your own numbers.** Run `python benchmarks/oss_bench.py --repo <path>` and submit your model's/tokenizer's results per [`benchmarks/TEMPLATE.md`](../benchmarks/TEMPLATE.md) — exact tokenizer counts (cl100k, Claude, Gemini) all show the same order-of-magnitude reduction.
 
 ## How retrieval scales (and why it matters more as you grow)
 
@@ -82,7 +84,7 @@ The table below tracks the dimension that matters for the contract — *internal
 | Medium (dozens of files) | many thousands of tokens | roughly unchanged if the exposed API/table count is unchanged |
 | Large (hundreds of files) | tens of thousands of tokens | still driven by exposed API/table count, not internal file count |
 
-**Measured range (single-source data point, not a guarantee).** On a 185-manifest TypeScript repo, a `describe` contract measured **~170–570 tokens for a small, well-factored subsystem**, rising to **~1.5k–13k tokens** for large or poorly-factored ones (median ~3,240; max ~13,360 for a 255-export subsystem). The driver is the export count, not the line count — the takeaway is *factor your subsystems*, not *every contract is ~400 tokens*.
+**Measured range (16-repo cross-language corpus, exact cl100k).** Across the supported repos a `describe` contract's **median is a few hundred tokens** (lodash 139, axios 149, date-fns 161, zod 200, documenso 239), with a **heavy max tail**: zod's `core` (831 exports) is **35,493 tokens**, click 19,632, httpie 15,908, flask 13,852. A subsystem's *minimum* can be as low as ~90 tokens. The driver is the **export count, not the line count** — the takeaway is *factor your subsystems*, not *every contract is ~400 tokens*. Full per-repo spread: [`benchmarks/results/oss-cross-language.md`](../benchmarks/results/oss-cross-language.md).
 
 ### The context-rot risk (framed as risk, not a guaranteed fix)
 

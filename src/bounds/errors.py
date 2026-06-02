@@ -18,6 +18,11 @@ E_ORPHAN_EXPORT = "E_ORPHAN_EXPORT"
 E_UNRESOLVED_REFERENCE = "E_UNRESOLVED_REFERENCE"
 E_UNOWNED_FILE = "E_UNOWNED_FILE"
 E_EXTERNAL_SYMLINK = "E_EXTERNAL_SYMLINK"
+# Source code Bounds did not map — unsupported-language files and/or supported files in no
+# subsystem. Warning (advisory): an honest coverage signal so a polyglot repo can't look fully
+# mapped while a chunk of its source is dark. Goal is 100% mapping; the fix points at how to close
+# the gap (add a manifest, or it's a not-yet-supported language).
+E_COVERAGE_GAP = "E_COVERAGE_GAP"
 
 # ---- Schema / extraction codes ----
 E_SCHEMA_INVALID = "E_SCHEMA_INVALID"
@@ -47,6 +52,7 @@ SEVERITY = {
     E_UNRESOLVED_REFERENCE: "warning",
     E_UNOWNED_FILE: "error",
     E_EXTERNAL_SYMLINK: "warning",
+    E_COVERAGE_GAP: "warning",
     E_SCHEMA_INVALID: "error",
     E_SCHEMA_NO_ORDER: "warning",
     E_SCHEMA_UNPARSED: "warning",

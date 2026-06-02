@@ -514,8 +514,16 @@ def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
 # ===========================================================================
 def check_orphans(ctx: CheckContext) -> list[Issue]:
     consumed: set[tuple[str, str]] = set()
+    # Subsystems for which at least one consumer declared the *specific* interfaces it uses. Orphan
+    # detection compares an export against this interface-level data; without it (e.g. the
+    # subsystem-granularity edges `discover` emits) every public export of a library would read as
+    # orphaned — it is consumed by external users, not a sibling subsystem. So we only judge orphans
+    # for subsystems that actually have interface-level consumption recorded (curated contracts).
+    iface_tracked: set[str] = set()
     for sub in ctx.subsystems.values():
         for c in sub.consumes:
+            if c.interfaces:
+                iface_tracked.add(c.subsystem)
             for iface in c.interfaces:
                 consumed.add((c.subsystem, iface))
 
@@ -523,6 +531,8 @@ def check_orphans(ctx: CheckContext) -> list[Issue]:
     for name in sorted(ctx.subsystems):
         sub = ctx.subsystems[name]
         if ctx.role_exposes_orphans(name):  # service-like roles expose unconsumed entrypoints
+            continue
+        if name not in iface_tracked:  # no interface-level consumption to judge against — skip
             continue
         for iface in sorted(sub.expose_names()):
             if (name, iface) not in consumed:

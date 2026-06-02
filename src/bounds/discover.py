@@ -32,7 +32,7 @@ import yaml
 
 from . import config, errors, gitutil, tsconfig
 from .extract import adapter_for_language
-from .extract.scan import extract_file, iter_repo_source
+from .extract.scan import extract_file, iter_repo_source, mapping_coverage
 from .ignore import load_matcher
 from .validate.checks import index_extracts, resolve_import
 from .validate.schema import SCHEMA_LANGUAGES, schema_catalog
@@ -132,6 +132,14 @@ def run_discover(
             cand["namespace"] = namespace
         candidates.append(cand)
 
+    # Drop consume-edges to candidates that were not kept (low-score, dropped): writing a
+    # `consumes: <name>` for a subsystem discover never materializes would make `validate` raise a
+    # self-inflicted E_UNRESOLVED_REFERENCE on a fresh run. Only edges between kept subsystems stand.
+    kept_set = set(kept)
+    for cand in candidates:
+        if cand.get("consumes"):
+            cand["consumes"] = [c for c in cand["consumes"] if c in kept_set]
+
     # Languages actually present in the extracted source — so root.yaml reflects the repo instead
     # of init's hardcoded `[python]` default (a pure-TS/Prisma repo must not claim to be Python).
     detected_languages = sorted({r.language for r in extracts.values() if getattr(r, "language", None)})
@@ -149,14 +157,30 @@ def run_discover(
         written, skipped = _write(project_root, root_proposal, candidates)
         applied = True
 
+    # Mapping coverage: how much SOURCE the proposal actually covers — surfaced right here so a
+    # polyglot repo can't look fully discovered while an unsupported language sits unmapped.
+    owned = {rel for rel, cand in file_to_candidate.items() if cand in set(kept)}
+    coverage = mapping_coverage(project_root, owned, matcher)
+
     result = {
         "mode": "discover",
         "applied": applied,
         "root": root_proposal,
         "candidates": candidates,
+        "coverage": coverage,
         "written": sorted(written),
         "skipped": sorted(skipped),
     }
+    if coverage["files_unmapped"] > 0:
+        result["next_step"] = (
+            f"mapped {coverage['mapped_pct']}% of source; "
+            f"{coverage['files_unmapped']} file(s) unmapped"
+            + (f" in unsupported languages ({', '.join(coverage['unsupported_languages'])})"
+               if coverage["unsupported_languages"] else "")
+            + ". To reach 100%: `bounds init --subsystem <name>` and add the files to its `paths`, "
+            "or have an AI author the manifest in the same format — then `bounds validate`. "
+            "See docs/coverage.md."
+        )
     notice = _apply_notice(applied, written, skipped)
     if notice is not None:
         result["notice"] = notice
@@ -401,15 +425,43 @@ def _infer_criticality(consumed_by: int) -> str:
     return "leaf"
 
 
+_TEST_DIR_PARTS = {"tests", "test", "__tests__", "spec", "specs", "e2e"}
+
+
+def _is_test_file(rel: str) -> bool:
+    """A test file by directory or filename convention (pytest / Jest / Vitest / Mocha)."""
+    parts = rel.split("/")
+    if any(p in _TEST_DIR_PARTS for p in parts[:-1]):
+        return True
+    stem = parts[-1]
+    return (stem.startswith("test_") or stem.startswith("test.")
+            or "_test." in stem or ".test." in stem or ".spec." in stem or "_spec." in stem
+            or "conftest." in stem)
+
+
+def _is_test_symbol(name: str, kind: str) -> bool:
+    """A test case, not public API: a ``test_*`` function or a ``Test*`` class (xUnit/pytest)."""
+    return name.startswith("test_") or (kind == "class" and name.startswith("Test"))
+
+
 def _exposes_for(files: list[str], extracts: dict, generated: set[str]) -> list[dict]:
-    """Every exported, non-private symbol across a candidate's files, verified by tree-sitter."""
+    """Every exported, non-private symbol across a candidate's files, verified by tree-sitter.
+
+    Test cases (``test_*`` functions / ``Test*`` classes in a test file) are excluded: a test runner
+    discovers them by naming convention, nothing *imports* them, so listing all of them as a public
+    surface is wrong and bloats the manifest (a 400-test dir would yield an 800-line `exposes`).
+    """
     seen: dict[str, dict] = {}
     for rel in files:
         if rel in generated or rel not in extracts:
             continue
+        is_test = _is_test_file(rel)
         for sym in extracts[rel].symbols:
-            if sym.exported and not sym.name.startswith("_") and sym.name not in seen:
-                seen[sym.name] = {"name": sym.name, "kind": sym.kind, "file": rel, "verified": True}
+            if not sym.exported or sym.name.startswith("_") or sym.name in seen:
+                continue
+            if is_test and _is_test_symbol(sym.name, sym.kind):
+                continue  # a test case is not a consumable interface
+            seen[sym.name] = {"name": sym.name, "kind": sym.kind, "file": rel, "verified": True}
     return [seen[n] for n in sorted(seen)]
 
 
