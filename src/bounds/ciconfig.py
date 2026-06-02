@@ -85,6 +85,18 @@ _TARGET_PATHS = {
 
 # ---- Generated file/templates -------------------------------------------------
 
+_ACTION_INSTALL = """\
+      # External repos install Bounds from git until `bounds-cli` is published on PyPI.
+      # The Bounds repo itself installs the checked-out PR, not the default branch.
+      - name: Install Bounds
+        run: |
+          if [ -f pyproject.toml ] && grep -q '^name = "bounds-cli"' pyproject.toml; then
+            pipx install .
+          else
+            pipx install "git+https://github.com/Farzin312/bounds.git"
+          fi
+"""
+
 # GitHub Actions workflow. The cache key hashes root.yaml + manifests (not the
 # branch) so a new branch reuses main's warmed cache. Runs the strict preflight gate.
 _ACTION_YML = """\
@@ -106,9 +118,7 @@ jobs:
         with:
           path: .bounds/cache.db
           key: bounds-${{ hashFiles('.bounds/root.yaml', '.bounds/manifests/**') }}
-      # Installs from git (works today; GitHub runners preinstall pipx).
-      # switch to `bounds-cli` (pipx) once published to PyPI.
-      - run: pipx install "git+https://github.com/Farzin312/bounds.git"
+""" + _ACTION_INSTALL + """\
       # Freshness gate: flag NEW manifest-vs-source drift above the committed baseline.
       # Non-blocking by default (|| true) until you commit a baseline and trust the signal;
       # drop the `|| true` to make new drift fail the build.
@@ -117,7 +127,7 @@ jobs:
 """
 
 _OLD_ACTION_PYPI_INSTALL = "      - run: pipx install bounds-cli\n"
-_ACTION_GIT_INSTALL = """\
+_OLD_ACTION_GIT_INSTALL = """\
       # Installs from git (works today; GitHub runners preinstall pipx).
       # switch to `bounds-cli` (pipx) once published to PyPI.
       - run: pipx install "git+https://github.com/Farzin312/bounds.git"
@@ -170,7 +180,13 @@ def _install_action(project_root: Path) -> bool:
         text = path.read_text(encoding="utf-8")
         if _OLD_ACTION_PYPI_INSTALL in text:
             path.write_text(
-                text.replace(_OLD_ACTION_PYPI_INSTALL, _ACTION_GIT_INSTALL),
+                text.replace(_OLD_ACTION_PYPI_INSTALL, _ACTION_INSTALL),
+                encoding="utf-8",
+            )
+            return True
+        if _OLD_ACTION_GIT_INSTALL in text:
+            path.write_text(
+                text.replace(_OLD_ACTION_GIT_INSTALL, _ACTION_INSTALL),
                 encoding="utf-8",
             )
             return True
