@@ -241,6 +241,9 @@ def resolve_owners(
     project_root: Path,
     subsystems: dict[str, SubsystemCompact],
     exts: set[str],
+    matcher: IgnoreMatcher | None = None,
+    repo: Path | None = None,
+    include_gitignored: bool = False,
 ) -> dict[str, tuple[str, Path]]:
     """Map every owned file (rel-posix) → ``(owning_subsystem, abs_path)`` — most-specific path wins.
 
@@ -249,6 +252,11 @@ def resolve_owners(
     sub-package keeps its own code instead of the alphabetically-first parent swallowing it (which
     used to starve the child and report false structural drift). Ties in specificity break to the
     sorted-first subsystem name for determinism.
+
+    Optionally **ignore-aware**: pass ``matcher`` (``.boundsignore``) and/or ``repo`` (the git root,
+    for ``.gitignore``) to drop files the validation engine would skip, so a caller like ``describe``
+    that wants parity with ``validate`` counts exactly the same set. Omit both for the raw ownership
+    map (the engine applies its own filter + symlink handling on top).
     """
     claims: dict[str, tuple[int, str, Path]] = {}
     for name in sorted(subsystems):
@@ -259,7 +267,15 @@ def resolve_owners(
             prev = claims.get(rel)
             if prev is None or spec > prev[0]:  # strictly-greater keeps the sorted-first tie winner
                 claims[rel] = (spec, name, abs_path)
-    return {rel: (name, abs_path) for rel, (_spec, name, abs_path) in claims.items()}
+    result = {rel: (name, abs_path) for rel, (_spec, name, abs_path) in claims.items()}
+    if matcher is not None:
+        result = {rel: v for rel, v in result.items() if not matcher.matches(rel)}
+    if repo is not None and not include_gitignored and result:
+        from .. import gitutil  # lazy: keep extract/ free of a top-level gitutil import
+        ignored = gitutil.gitignored(repo, list(result))
+        if ignored:
+            result = {rel: v for rel, v in result.items() if rel not in ignored}
+    return result
 
 
 def _gitignore_filter(

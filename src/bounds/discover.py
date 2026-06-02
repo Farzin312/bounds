@@ -431,9 +431,9 @@ def _collapse_link_paths(files: list[str], owners: dict[str, str | None], owner:
     files_by_dir: dict[str, list[str]] = {}
     for rel in files:
         files_by_dir.setdefault(Path(rel).parent.as_posix(), []).append(rel)
-    all_by_dir: dict[str, list[str]] = {}
+    all_by_dir: dict[str, list[tuple[str, str | None]]] = {}
     for rel, o in owners.items():
-        all_by_dir.setdefault(Path(rel).parent.as_posix(), []).append((rel, o))  # type: ignore[arg-type]
+        all_by_dir.setdefault(Path(rel).parent.as_posix(), []).append((rel, o))
     out: list[str] = []
     for d in sorted(files_by_dir):
         siblings = all_by_dir.get(d, [])

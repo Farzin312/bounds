@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import errors
+from . import errors, gitutil
 from .extract import scan, supported_extensions
-from .ignore import IgnoreMatcher
+from .ignore import IgnoreMatcher, load_matcher
 from .manifest import loader as manifest_loader
 from .models import Issue, SubsystemCompact, ValidationReport
 from .validate import engine as validate_engine
@@ -30,21 +30,29 @@ from .validate.schema import (
 )
 
 
+def _ignore_ctx(root: Path) -> tuple[dict[str, SubsystemCompact], IgnoreMatcher, Path]:
+    """The ignore-aware ``(subsystems, .boundsignore matcher, git repo root)`` describe shares with
+    validate, so describe's file/doc/test selection matches exactly what ``validate`` scans.
+
+    Loading the manifest set is genuinely fatal if it's missing/broken — it **propagates** rather than
+    degrading to a single-subsystem view, which would silently re-introduce the cross-subsystem
+    double-counting BOUNDS-006 fixed (and ``describe`` is only reached after the root already loaded).
+    """
+    _root, subs, _issues = manifest_loader.load_all(root)
+    return subs, load_matcher(root), gitutil.repo_root(root) or root
+
+
 def _owned_files(root: Path, sub: SubsystemCompact) -> list[str]:
     """Repo-relative posix paths this subsystem owns under most-specific-path-wins (BOUNDS-006).
 
     Reuses :func:`scan.resolve_owners` — the single project-wide ownership home shared with the
-    validation engine — and filters to files whose winning owner is ``sub``, instead of walking the
-    subsystem's own paths blindly (which double-counted any file a more-specific sibling owns). This
+    validation engine — **ignore-aware** (``.boundsignore`` + ``.gitignore``), and filters to files
+    whose winning owner is ``sub``, instead of walking the subsystem's own paths blindly (which
+    double-counted any file a more-specific sibling owns AND counted files validate would skip). This
     makes describe's ``file_count``/``files`` AGREE with validate on exactly which files belong here.
-    Falls soft to the plain owned-file walk if manifests can't be loaded for the cross-subsystem view.
     """
-    exts = supported_extensions()
-    try:
-        _root, subs, _issues = manifest_loader.load_all(root)
-    except errors.BoundsError:
-        subs = {sub.name: sub}
-    owners = scan.resolve_owners(root, subs, exts)
+    subs, matcher, repo = _ignore_ctx(root)
+    owners = scan.resolve_owners(root, subs, supported_extensions(), matcher, repo)
     return sorted(rel for rel, (owner, _abs) in owners.items() if owner == sub.name)
 
 
@@ -52,16 +60,13 @@ def _linked_docs_tests(root: Path, sub: SubsystemCompact) -> tuple[list[str], li
     """The doc/test files (rel-posix, sorted) this subsystem links — explicit ``docs:``/``tests:``
     plus convention auto-detection (BOUNDS-010 hybrid model).
 
-    Resolves against the full project's subsystems (most-specific declaration wins, same as validate)
-    so describe and validate agree on which docs/tests belong here. Falls soft to a single-subsystem
-    view if manifests can't be loaded. Returns ``(docs, tests)``.
+    Resolves against the full project's subsystems (most-specific declaration wins, same as validate),
+    **ignore-aware** (``.boundsignore`` + ``.gitignore`` via the shared matcher/repo), so describe and
+    validate/coverage agree on which docs/tests belong here. Returns ``(docs, tests)``.
     """
-    try:
-        _root, subs, _issues = manifest_loader.load_all(root)
-    except errors.BoundsError:
-        subs = {sub.name: sub}
-    doc_owners = scan.resolve_doc_owners(root, subs)
-    test_owners = scan.resolve_test_owners(root, subs)
+    subs, matcher, repo = _ignore_ctx(root)
+    doc_owners = scan.resolve_doc_owners(root, subs, matcher, repo)
+    test_owners = scan.resolve_test_owners(root, subs, matcher, repo)
     docs = sorted(rel for rel, owner in doc_owners.items() if owner == sub.name)
     tests = sorted(rel for rel, owner in test_owners.items() if owner == sub.name)
     return docs, tests
@@ -80,9 +85,12 @@ def subsystem_overlaps(root: Path, sub: SubsystemCompact) -> list[Issue]:
     """
     exts = supported_extensions()
     try:
-        _root, subs, _issues = manifest_loader.load_all(root)
+        subs, matcher, repo = _ignore_ctx(root)
     except errors.BoundsError:
         return []
+    # Only files validate would actually scan: the ignore-aware owned set (.boundsignore + .gitignore)
+    # gates the claim map, so an overlap is never reported for a file validate skips by default.
+    scanned = scan.resolve_owners(root, subs, exts, matcher, repo)
     # file -> {specificity -> sorted set of claiming subsystem names}, built from the same primitives
     # resolve_owners uses (iter_subsystem_files + path_specificity); no second walk concept.
     claims: dict[str, dict[int, set[str]]] = {}
@@ -90,6 +98,8 @@ def subsystem_overlaps(root: Path, sub: SubsystemCompact) -> list[Issue]:
         s = subs[name]
         for abs_path in scan.iter_subsystem_files(root, s, exts):
             rel = abs_path.relative_to(root).as_posix()
+            if rel not in scanned:  # dropped by .boundsignore/.gitignore/symlink — not scanned
+                continue
             spec = scan.path_specificity(rel, s.paths, s.files)
             claims.setdefault(rel, {}).setdefault(spec, set()).add(name)
     issues: list[Issue] = []

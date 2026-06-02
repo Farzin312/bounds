@@ -141,7 +141,7 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Symptom:** a library's public API is consumed by external users, not a sibling subsystem, so every export read as "consumed by nothing" — the dominant noise on the most common use case (point Bounds at a library).
 - **Root cause:** `discover` records `consumes` edges at *subsystem* granularity with no `interfaces` (`discover.py`), but `check_orphans` judged orphans *per interface* — so with no interface data, every export looked unconsumed.
 - **Fix:** `agent-plugins-aliases-benchmark` — `check_orphans` now only judges orphans for subsystems that have **interface-level** consumption recorded (curated contracts); subsystem-granularity edges (what `discover` emits) no longer flood. Verified: click orphan 183→0 (total validate issues 206→3, `ok: True`), flask 314→19, requests 146→6, express 53→1, zod 3,025→166.
-- **Test:** `tests/validate/test_validate.py::test_orphans_not_flagged_without_interface_level_consumption`.
+- **Test:** `tests/validate/test_checks.py::test_orphans_not_flagged_without_interface_level_consumption`.
 
 ### BOUNDS-013 — fresh `discover → validate` was far from clean on real repos
 - **Severity / Status:** medium / **Fixed**
@@ -166,7 +166,7 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Symptom:** every `test_*` function / `Test*` class in a test subsystem produced an info-severity `E_STRUCTURAL_DRIFT` ("subsystem 'tests' exports 'test_…' which is not declared in exposes") — hundreds per repo — flooding `validate` output (click 476, every repo with a tests dir affected). `ok` stayed `true` (info severity) but the noise re-created exactly what BOUNDS-014 removed.
 - **Root cause:** asymmetry introduced by BOUNDS-014. Discover *excludes* test cases from `exposes`, but `validate.checks.check_structural_drift`'s "undeclared public surface" branch still compared the full exported set (which includes `test_*`) against the (test-case-free) `exposes`, flagging each test case. The prior session measured BOUNDS-014 by manifest size, not by re-running `validate`, so the drift regression slipped in.
 - **Fix:** `gen9-correctness-mapping-100pct` — `check_structural_drift` now excludes test cases symmetrically, using the shared `scan.is_test_file`/`scan.is_test_symbol` predicates (the same ones discover uses), gated on the file actually being a test file (a `test_*`-named symbol in non-test source still flags). Verified: click structural-drift **476→0** (fresh `discover → validate`: 479→3 issues, all genuine: 2 boundary + 1 coverage), chalk unaffected.
-- **Test:** `tests/validate/test_validate.py::test_drift_excludes_test_cases_from_undeclared_export_noise`, `::test_drift_test_named_symbol_in_non_test_file_still_flags`.
+- **Test:** `tests/validate/test_checks.py::test_drift_excludes_test_cases_from_undeclared_export_noise`, `::test_drift_test_named_symbol_in_non_test_file_still_flags`.
 
 ### BOUNDS-016 — Next.js framework-entry exports flood `E_STRUCTURAL_DRIFT` (undeclared-export noise)
 - **Severity / Status:** medium / **Fixed** (entry-file conventions; app-local component exports remain by design)
@@ -175,7 +175,7 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Root cause:** the undeclared-surface drift branch (and discover's `exposes`) treated framework-invoked entry exports as a consumable surface.
 - **Fix:** `gen9-correctness-mapping-100pct` — `scan.is_framework_entry_file(rel)` recognizes a Next.js special file (`page`/`layout`/`loading`/`error`/`route`/`middleware`/… ) **only** when it sits under an `app/` or `pages/` segment (so an ordinary `lib/route.ts` is never mistaken for a route entry). Such a file's exports are excluded symmetrically from discover's `_exposes_for` and from `check_structural_drift`'s undeclared-surface branch. Verified: zod 166→155 issues (the framework-callback drifts gone).
 - **Residual (by design):** app-local **component** exports in ordinary `.tsx` files (e.g. `BlogCard`) are real module exports and still surface as info-drift; silencing them would risk hiding a genuine surface. A user curates `exposes` or `.boundsignore`s a bundled site.
-- **Test:** `tests/validate/test_validate.py::test_drift_excludes_nextjs_framework_entry_exports`, `::test_drift_route_file_outside_app_dir_still_flags`.
+- **Test:** `tests/validate/test_checks.py::test_drift_excludes_nextjs_framework_entry_exports`, `::test_drift_route_file_outside_app_dir_still_flags`.
 
 ---
 

@@ -92,6 +92,27 @@ def test_describe_agrees_with_resolve_owners(tmp_path):
     assert _describe(tmp_path, "alpha", full=True)["files"] == expected_alpha
 
 
+def test_describe_owned_files_respects_boundsignore(tmp_path):
+    """BOUNDS-006 parity (PR #31 review): describe's roster must exclude a .boundsignore'd file
+    exactly as validate skips it — else file_count/files (and Tier-1 extraction) count files validate
+    never scans, breaking the very parity this fix is for. Locks the ignore-aware ownership path."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: ig\nlanguages: [python]\nsubsystems: [alpha]\n', encoding="utf-8")
+    (cfg / "manifests" / "alpha.yaml").write_text(
+        "name: alpha\nrole: library\ncriticality: leaf\npaths:\n  - src/alpha\n", encoding="utf-8")
+    (tmp_path / "src" / "alpha").mkdir(parents=True)
+    (tmp_path / "src" / "alpha" / "keep.py").write_text("def kept():\n    pass\n", encoding="utf-8")
+    (tmp_path / "src" / "alpha" / "skip.py").write_text("def skipped():\n    pass\n", encoding="utf-8")
+    (tmp_path / ".boundsignore").write_text("src/alpha/skip.py\n", encoding="utf-8")
+    rootm, subs, _ = loader.load_all(tmp_path)
+    em = IgnoreMatcher(rootm.entry_points)
+    payload = describe.describe_one(tmp_path, subs["alpha"], False, None, em, full=True)
+    assert payload["files"] == ["src/alpha/keep.py"]  # skip.py excluded by .boundsignore
+    assert payload["file_count"] == 1
+
+
 def test_nested_paths_are_not_flagged_as_overlap(tmp_path):
     """BOUNDS-006: differing specificity (nested paths) is legitimate ownership, never an overlap —
     asserted under --full (where the overlap diagnostic is actually computed)."""
