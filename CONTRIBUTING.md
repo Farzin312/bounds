@@ -64,7 +64,7 @@ bounds/
 │   ├── calibrate.py        # Manifest↔source reconciliation
 │   ├── agentsync.py        # Cross-agent config generation
 │   └── ciconfig.py         # CI config generation
-├── tests/                  # Pytest test suite (10 files; CI reports the live count)
+├── tests/                  # Pytest suite, grouped by area: extract/ validate/ discover/ cli/ agent/ cache/ meta/
 ├── docs/                   # Deep-dive documentation (linked from the README entrance)
 ├── ARCHITECTURE.md         # Engineering contract
 ├── CONTRIBUTING.md         # This file
@@ -81,7 +81,13 @@ fixed in the same PR, not deferred.
 declared as (or part of) a subsystem in `.bounds/manifests/`. New functionality is a new module with
 a clear boundary — not a grab-bag appended to `cli.py` or `engine.py`. `cli.py` is wiring only;
 command logic lives in its own module (see `discover.py`, `calibrate.py`, `agentsync.py`,
-`ciconfig.py`). If you can't name the subsystem a file belongs to, it isn't scoped yet.
+`ciconfig.py`). Cross-cutting subpackages already exist where a concern has several pieces:
+`extract/`, `validate/`, `manifest/`, `cache/`. If you can't name the subsystem a file belongs to, it
+isn't scoped yet. **Split to scale:** when a single-concern file outgrows its boundary (roughly
+~800+ lines of *distinct* sub-concerns, not just length), promote it to a subpackage with a
+re-exporting `__init__.py` so the public API is unchanged — current candidates are `agentsync.py`
+(registry vs templates vs sync/detect) and `output.py` (per-command renderers). Do that as its own
+focused PR, never mixed with a behavior change.
 
 **2. The repo dogfoods itself — keep it green.** Bounds models its own architecture in `.bounds/`.
 After any change to `src/bounds/**`, run `bounds validate` (and `bounds calibrate` to see what
@@ -162,16 +168,21 @@ bounds validate --quick
 
 All tests must pass. If you add a new feature, include tests.
 
+> **Read [docs/testing.md](docs/testing.md)** for the full guide: the invariants every change must
+> preserve (determinism, fail-soft, JSON-first, stable error codes, posix paths), how to write a
+> regression test, the `xfail(strict=True)` pattern for known-but-unfixed bugs, and — importantly —
+> **how to tell an intended behavior change from a regression and update the right baseline**
+> (`config.STATE_VERSION` bumps, `calibrate --dump-baseline`, append-only `errors.py`).
+
 ### Writing Tests
 
-- Tests live in `tests/` and are grouped by feature area (10 files; run the full suite — CI reports the count):
-  `test_extract.py`, `test_validate.py`, `test_schema_flex.py` (roles/criticality),
-  `test_cache_sqlite.py`, `test_discover.py`, `test_calibrate.py`, `test_agentsync.py`,
-  `test_ciconfig.py`, `test_cli.py`, and `test_commands_cli.py`.
-- Use `pytest` fixtures from `tests/conftest.py` for temporary projects: `sample_project`
-  (multi-subsystem TS+Py), `py_project` (minimal Python project), `git_sample_project` /
-  `git_init` (git-backed variants for quick-mode tests).
-- CLI tests use CliRunner from Click.
+- Tests live in `tests/<area>/` grouped by subsystem — `extract/`, `validate/`, `discover/`, `cli/`,
+  `agent/`, `cache/`, `meta/`. Put a new test in the folder for the code it exercises, and give it a
+  one-line docstring. The full map is in [docs/testing.md](docs/testing.md#layout--tests-are-grouped-by-area).
+- Use `pytest` fixtures from the single root `tests/conftest.py` (visible to every subfolder):
+  `sample_project` (multi-subsystem TS+Py), `py_project` (minimal Python project),
+  `git_sample_project` / `git_init` (git-backed variants for quick-mode tests).
+- CLI tests use CliRunner from Click. Run everything with `.venv/bin/pytest -q`.
 
 ## Branching and PR Workflow
 
@@ -194,7 +205,7 @@ Tree-sitter adapters live in `src/bounds/extract/`. To add a new language:
    `base.make_result(...)` so both the content and structure hashes are computed consistently.
 4. Register the adapter in `src/bounds/extract/registry.py`.
 5. Add the tree-sitter grammar to `pyproject.toml` dependencies.
-6. Write tests in `tests/test_extract.py`.
+6. Write tests in `tests/extract/test_extract.py`.
 
 ## Release Process & Source of Truth
 

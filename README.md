@@ -59,7 +59,8 @@ tree-sitter to validate them against your real source, in both directions.
 - **`bounds preflight`** — run all the pre-PR checks at once: drift, boundary violations, broken contracts, dependency cycles, orphaned subsystems, and cross-subsystem impact.
 - **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface or a table changes.
 - **`bounds discover` / `bounds calibrate`** — set up manifests for a repo that has none in one command, then keep them honest against what tree-sitter actually finds in your source.
-- **`bounds agent --sync`** — wire Bounds into eight coding agents (Claude Code, Codex, Cursor, …) with one command; bare `bounds agent` just lists which of them are present (read-only).
+- **`bounds agent --sync`** — wire Bounds into eight coding agents (Claude Code, Codex, Gemini, Cursor, …) with one command. It generates each tool's *native* invokable command/skill — an auto-triggering Claude/Codex **skill**, a Gemini/OpenCode **command**, a Copilot **prompt file**, a Windsurf **workflow** — plus the shared `AGENTS.md` contract, so the agent reaches for Bounds on its own. Bare `bounds agent` lists which agents are present (read-only).
+- **`bounds guide`** — a state-aware setup checklist (init → discover → wire agents → CI) for humans and agents; `bounds --help` groups every command by purpose.
 - **Deterministic** — same input, same byte-stable output. No network, no flakiness.
 
 ## Why use it
@@ -80,8 +81,9 @@ See [docs/why-bounds.md](docs/why-bounds.md) for the full rationale.
 pipx install "git+https://github.com/Farzin312/bounds.git"
 
 cd your-project
+bounds guide                 # state-aware setup checklist (what to run next)
 bounds discover --apply      # auto-generate root.yaml + manifests from your source
-bounds agent --sync          # teach Claude/Codex/Cursor/etc. to query Bounds first
+bounds agent --sync          # teach Claude/Codex/Gemini/Cursor/etc. to query Bounds first
 bounds describe auth         # one subsystem's verified surface, as JSON
 bounds impact users          # if users is a table/interface, see declared consumers before changing it
 bounds validate --quick      # fast incremental drift check
@@ -114,8 +116,48 @@ functions and 5 exports stays small).
 <img src="assets/token-scaling.svg" alt="Line chart: reading a subsystem's source climbs steeply as the subsystem grows, toward tens of thousands of tokens, while a Bounds describe contract grows only with how much public API the subsystem exposes — far more slowly, from a few hundred tokens for a small subsystem" width="700">
 </div>
 
-The token win *widens* with size. See [docs/token-economics.md](docs/token-economics.md) for the
-measured numbers (one repo, one data point), the scaling argument, and the context-rot effect.
+The token win *widens* with size.
+
+### Verified on real open-source repos
+
+Exact `tiktoken cl100k_base` counts (not an estimate) from a **16-repo, cross-language sweep**. The
+harness shallow-clones each repo at a cited commit, runs `bounds init` + `bounds discover`, and
+counts tokens (Bounds output vs the equivalent source). Full corpus, full-command coverage, and the
+bugs it surfaced: **[benchmarks/results/oss-cross-language.md](benchmarks/results/oss-cross-language.md)**.
+
+| Repo | Whole-repo orientation (`bounds list`) | One subsystem's API (`bounds describe`) |
+|------|----------------------------------------|-----------------------------------------|
+| [click](https://github.com/pallets/click) (Python) | 243 vs 196,257 tok — **99.9% less** | `click` (505 exports): 6,955 vs 93,020 — **92.5% less** |
+| [axios](https://github.com/axios/axios) (TypeScript) | 977 vs 526,284 tok — **99.8% less** | `lib`: 1,007 vs 47,092 — **97.9% less** |
+| [nest](https://github.com/nestjs/nest) (TS, 199 subsystems) | 15,742 vs 1,305,335 tok — **98.8% less** | `packages-common`: 8,036 vs 116,149 — **93.1% less** |
+| [zod](https://github.com/colinhacks/zod) (TypeScript) | 1,285 vs 1,772,284 tok — **99.9% less** | `core` (831 exports): 35,493 vs 117,947 — **69.9% less** |
+
+Across all 13 supported-language repos, whole-repo `bounds list` is **98.7–100%** smaller than
+reading every file, and a single `bounds describe` is **54–100%** smaller than its subsystem's
+source. The `describe` spread is real and tracks how much public API a subsystem *exposes*: a typical
+one is a **median of a few hundred tokens**, while a fat-API subsystem (zod's `core`, 831 exports)
+is ~35k. *Honest caveat:* "vs all source" is a generous baseline — nobody reads a whole repo — so
+read 99% as "orientation is near-free," and the **54–100% `describe`** range as the number that
+matters for real work.
+
+A same-model **capability head-to-head** on click (answer "what's the public API and what depends on
+it?") cost ~7.2k tokens (`describe` + `impact`) and was tree-sitter-verified *with* Bounds, versus
+~93k tokens of source the model must read and infer the public surface from *without* it — **~13×
+cheaper** and more reliable. (Bounds is a navigation layer, not a comprehension layer — you still
+read source to understand *behavior*.)
+
+> **Honest scope.** Those numbers are extraction + retrieval economics, which generalize. The
+> auto-`discover` contracts are a **starting draft to curate** — on these repos a fresh `discover`
+> does *not* produce a clean `bounds validate` (it surfaces real drift plus library orphan-export
+> noise), so treat the drift gate as something you reach *after* refining contracts, not a
+> one-command guarantee. The [cross-language report](benchmarks/results/oss-cross-language.md)
+> documents this in full, including the bugs it found.
+
+**Contributors welcome:** run `python benchmarks/oss_bench.py --repo <path>` (token economics) and
+`python benchmarks/oss_features.py --repo <path>` (full-command matrix), or add your model/tokenizer's
+numbers via [`benchmarks/TEMPLATE.md`](benchmarks/TEMPLATE.md) — see
+[benchmarks/README.md](benchmarks/README.md). See [docs/token-economics.md](docs/token-economics.md)
+for the scaling argument and the context-rot effect.
 
 ## Languages & platforms
 
@@ -126,8 +168,20 @@ triggers, and **row-level-security policies** (descending into `BEGIN;…COMMIT;
 derives an RLS posture. tree-sitter-sql can't parse every Postgres construct (a `DO $$…$$` block,
 some pg_dump output); when a DDL statement is genuinely unparsable the catalog **self-reports it**
 (`E_SCHEMA_UNPARSED`) rather than silently dropping it, and a no-DDL file (seed/grant/cron) is never
-flagged. Runs on **Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on
-the roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
+flagged.
+
+**Frameworks (TypeScript/JavaScript).** The import resolver handles the conventions real frameworks
+use, so the dependency graph is accurate on them and not just on flat repos: relative imports of
+**dot-named files** (`auth.service.ts`, `login.dto.ts` — the NestJS/Angular convention) and
+**tsconfig path aliases** (`@/…`, `@app/*`) plus `baseUrl`-relative bare imports, following a chain
+of `extends`. *Honest limits:* one `*` wildcard per `paths` entry, and an alias that resolves into a
+`node_modules` package (e.g. a monorepo `workspace:` dependency) is treated as external. Verified
+end-to-end on [click](https://github.com/pallets/click) (Python) and
+[axios](https://github.com/axios/axios) (TypeScript); NestJS/Angular import shapes are covered by the
+resolver test matrix.
+
+Runs on **Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on the
+roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
 
 ---
 

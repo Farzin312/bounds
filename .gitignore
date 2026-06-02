@@ -36,6 +36,14 @@ __editable__.*
 .aider.conf.yml
 .github/copilot-instructions.md
 GEMINI.md
+# Per-agent native command/skill artifacts (also `bounds agent --sync` output, same policy).
+.claude/skills/bounds/SKILL.md
+.codex/skills/bounds/SKILL.md
+.gemini/commands/bounds.toml
+.opencode/command/bounds.md
+.github/prompts/bounds.prompt.md
+.cursor/commands/bounds.md
+.windsurf/workflows/bounds.md
 
 # Private design-vault stray docs accidentally dropped at the repo root. Internal idea-vault
 # notes use `s-<N>-*.md` filenames and reference internal IDs (gen labels, premortems); they

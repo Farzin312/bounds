@@ -57,7 +57,7 @@ just `pipx install` the `bounds` CLI.
 ## Source of Truth & Versioning (Mandatory)
 
 GitHub is the single source of truth. To prevent staleness and ensure `pipx upgrade` works for all users:
-- **Automatic Versioning (dynamic CalVer).** This repo uses `setuptools-scm` with a custom scheme (`setup.py:calver`) that yields a clean `YYYY.M.<build>` version (e.g. `2026.6.24`) — git-derived, no `dev`/`+local` suffix. `<build>` is the repo's **total commit count**, so the version strictly increases on every commit (multiple same-day commits get distinct versions) and never regresses, even after a release tag. Never add a static `version =` string; never reintroduce a `dev`/distance-based patch (it would collide same-day or regress after a tag — see `tests/test_versioning.py`).
+- **Automatic Versioning (dynamic CalVer).** This repo uses `setuptools-scm` with a custom scheme (`setup.py:calver`) that yields a clean `YYYY.M.<build>` version (e.g. `2026.6.24`) — git-derived, no `dev`/`+local` suffix. `<build>` is the repo's **total commit count**, so the version strictly increases on every commit (multiple same-day commits get distinct versions) and never regresses, even after a release tag. Never add a static `version =` string; never reintroduce a `dev`/distance-based patch (it would collide same-day or regress after a tag — see `tests/meta/test_versioning.py`).
 - **Release process.** Tags are optional under CalVer (the version is always clean from commits alone). To mark a formal release, tag with the current CalVer: `git tag -a $(bounds --version | awk '{print $2}') -m "Release" && git push --tags`.
 - **Contributor installs.** Always install using `pip install -e .` (editable) for development.
 - **End-user staleness check.** If an agent or user reports a stale `bounds` CLI, the fix is: `pipx install --force git+https://github.com/Farzin312/bounds.git`.
@@ -68,9 +68,13 @@ GitHub is the single source of truth. To prevent staleness and ensure `pipx upgr
 `extract/` tree-sitter adapters (`registry.get_adapter` dispatches by extension;
 `registry.is_language_file` = the one "is this file language X?" check, never hardcode an extension
 list; `scan.py` = the **single home** for fs→extraction helpers — `walk_supported` (the one recursive
-source walk) / `iter_subsystem_files`/`iter_repo_source`/`extract_file`/`strip_ext`/`in_default_ignores`
-+ `read_source_bytes`/`is_oversized` (the one size-guard+read mechanism; engine vs `extract_file`
-differ only in policy), shared by engine + describe + discover/calibrate; never copy a walk;
+source walk; pass `exts=None` to walk *every* file) / `iter_subsystem_files`/`iter_repo_source`/
+`extract_file`/`strip_ext`/`in_default_ignores` + `read_source_bytes`/`is_oversized` (the one
+size-guard+read mechanism; engine vs `extract_file` differ only in policy) + `resolve_owners` (the one
+file→subsystem ownership map — **most-specific declared path/file wins**, `path_specificity` ranks it;
+shared by engine + extract_project so validate/where/impact/calibrate never disagree) + `mapping_coverage`
+(the one source-coverage metric: mapped % + by-language unmapped breakdown, gitignore-aware, gated off
+`--quick`), shared by engine + describe + discover/calibrate; never copy a walk or an owner-assignment;
 `base.canonical_columns` = the one schema column dedup/sort; `rawquery.py` = opt-in, advisory raw-SQL
 table refs) · `cache/store.py` SQLite `cache.db` (+ migration/partial-read/inspect) ·
 `validate/{engine,propagation,checks,schema}` (`checks.resolve_import`/`build_suffix_index` = the one

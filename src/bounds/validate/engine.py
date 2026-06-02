@@ -72,34 +72,32 @@ def run(
     entry_matcher = IgnoreMatcher(root.entry_points)
 
     # ---- File selection: every supported file under each subsystem's paths ----
-    # External symlinks and .boundsignore matches are filtered here; .gitignore is
-    # applied in one batched git call afterwards.
+    # Ownership (most-specific declared path wins) is resolved once in scan.resolve_owners so this
+    # agrees with calibrate/where/impact; external symlinks and .boundsignore matches are filtered
+    # here; .gitignore is applied in one batched git call afterwards.
     file_owner: dict[str, str] = {}
     files: list[tuple[str, Path, str]] = []  # (rel posix, abs path, owner)
     skipped_ignored = 0
-    for name in sorted(subsystems):
-        sub = subsystems[name]
-        for abs_path in scan.iter_subsystem_files(project_root, sub, exts):
-            rel = abs_path.relative_to(project_root).as_posix()
-            if rel in file_owner:  # flat topology: first declared owner wins
-                continue
-            if not follow_symlinks and _is_external_symlink(abs_path, project_root):
-                issues.append(
-                    Issue(
-                        errors.E_EXTERNAL_SYMLINK,
-                        "warning",
-                        f"skipped external symlink '{rel}' (resolves outside the project)",
-                        subsystem=name,
-                        file=rel,
-                        fix="pass --follow-symlinks to include it, or replace it with an in-tree copy",
-                    )
+    owners = scan.resolve_owners(project_root, subsystems, exts)
+    for rel in sorted(owners):
+        name, abs_path = owners[rel]
+        if not follow_symlinks and _is_external_symlink(abs_path, project_root):
+            issues.append(
+                Issue(
+                    errors.E_EXTERNAL_SYMLINK,
+                    "warning",
+                    f"skipped external symlink '{rel}' (resolves outside the project)",
+                    subsystem=name,
+                    file=rel,
+                    fix="pass --follow-symlinks to include it, or replace it with an in-tree copy",
                 )
-                continue
-            if matcher and matcher.matches(rel):
-                skipped_ignored += 1
-                continue
-            file_owner[rel] = name
-            files.append((rel, abs_path, name))
+            )
+            continue
+        if matcher and matcher.matches(rel):
+            skipped_ignored += 1
+            continue
+        file_owner[rel] = name
+        files.append((rel, abs_path, name))
 
     skipped_gitignored = 0
     if not include_gitignored and files:
@@ -245,6 +243,18 @@ def run(
         )
         issues.extend(unowned)
 
+    # mapping coverage: how much of the repo's SOURCE Bounds actually mapped — the honest answer to
+    # "did you map everything?". Walks all files, so it's gated off the --quick hot path. A non-empty
+    # gap surfaces as one loud, advisory E_COVERAGE_GAP warning with a next step, never silently.
+    mapping = None
+    if mode != "quick":
+        mapping = scan.mapping_coverage(
+            project_root, set(file_owner), matcher,
+            repo=repo, include_gitignored=include_gitignored,
+        )
+        if mapping["files_unmapped"] > 0:
+            issues.append(_coverage_gap_issue(mapping))
+
     status = _status(issues)
     unowned_blocks = any(i.severity == "error" for i in unowned)
     blocking = _is_blocking(issues, mode, final_enforce) or unowned_blocks
@@ -258,6 +268,8 @@ def run(
         "unresolved_local_imports": ctx.unresolved_local_imports,
         "extraction_failures": sum(1 for i in issues if i.code == errors.E_EXTRACTION_FAILED),
     }
+    if mapping is not None:
+        coverage["mapping"] = mapping
 
     stats = {
         "files_total": len(files),
@@ -280,6 +292,27 @@ def run(
 # ===========================================================================
 # Helpers
 # ===========================================================================
+def _coverage_gap_issue(mapping: dict) -> Issue:
+    """One loud, advisory issue summarizing unmapped source + the concrete next step to close it."""
+    parts = []
+    if mapping["unmapped_unsupported_language"]:
+        langs = ", ".join(f"{lang}×{n}" for lang, n in sorted(mapping["unmapped_by_language"].items())
+                          if lang in mapping["unsupported_languages"])
+        parts.append(f"{mapping['unmapped_unsupported_language']} in unsupported languages ({langs})")
+    if mapping["unmapped_unowned_supported"]:
+        parts.append(f"{mapping['unmapped_unowned_supported']} supported file(s) in no subsystem")
+    detail = "; ".join(parts) or "some source files"
+    return Issue(
+        errors.E_COVERAGE_GAP,
+        "warning",
+        f"mapped {mapping['mapped_pct']}% of source "
+        f"({mapping['files_mapped']}/{mapping['files_source_total']} files); unmapped: {detail}",
+        fix="close the gap: `bounds init --subsystem <name>` then add the files to its `paths`, or "
+            "have an AI author the manifest (see docs/coverage.md) — unsupported languages need a "
+            "hand-authored manifest until an adapter lands; report gaps to help us reach 100%",
+    )
+
+
 def _is_external_symlink(abs_path: Path, project_root: Path) -> bool:
     """True if ``abs_path`` reaches its target through a symlink that escapes the project.
 

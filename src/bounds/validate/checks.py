@@ -12,11 +12,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from posixpath import normpath
 
-from .. import errors
+from .. import errors, tsconfig
 from ..extract import get_adapter
 from ..extract.scan import strip_ext
 from ..models import ExtractResult, Issue, RootManifest, SubsystemCompact
 from .schema import SCHEMA_LANGUAGES, _fold_subsystem_schema, schema_diagnostics
+
+# Sentinel for "not yet computed" so a genuinely absent tsconfig (cached as None) isn't reloaded.
+_UNSET = object()
+
+# Importer extensions for which tsconfig path aliases apply (a Python file never uses them).
+_TS_IMPORTER_EXTS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
 
 
 def _issue(
@@ -128,6 +134,18 @@ class CheckContext:
             self._known_top = cached
         return cached
 
+    def ts_aliases(self) -> "tsconfig.TsAliases | None":
+        """The project's tsconfig path aliases (loaded once from ``project_root``), or None.
+
+        Lets import resolution follow ``@/…`` / ``baseUrl`` imports the same way ``discover``/
+        ``calibrate``/``where`` do, so boundary checks see the same edge set those commands wrote.
+        """
+        cached = getattr(self, "_ts_aliases", _UNSET)
+        if cached is _UNSET:
+            cached = tsconfig.load(self.project_root)
+            self._ts_aliases = cached
+        return cached
+
     def role_exposes_orphans(self, subsystem: str) -> bool:
         """True if the subsystem's role legitimately exposes unconsumed entrypoints."""
         sub = self.subsystems.get(subsystem)
@@ -186,8 +204,20 @@ def _is_local_looking(module: str, known_top: set[str]) -> bool:
     return first in known_top
 
 
-def _candidate_stems(importer_rel: str, module: str) -> list[str]:
-    """Possible extension-less path stems a module specifier could resolve to."""
+def _is_ts_like(importer_rel: str) -> bool:
+    """True when the importing file is TS/JS — only then do tsconfig path aliases apply."""
+    return posixpath.splitext(importer_rel)[1] in _TS_IMPORTER_EXTS
+
+
+def _candidate_stems(
+    importer_rel: str, module: str, aliases: "tsconfig.TsAliases | None" = None
+) -> list[str]:
+    """Possible extension-less path stems a module specifier could resolve to.
+
+    ``aliases`` (a project's tsconfig ``baseUrl``/``paths``) only contributes for *bare* specifiers
+    imported from a TS/JS file — e.g. ``@/common`` → ``src/common`` — and is tried before the raw
+    fallback. A relative specifier never aliases; a Python importer never consults tsconfig.
+    """
     if not module:
         return []
     if module.startswith("."):
@@ -212,8 +242,13 @@ def _candidate_stems(importer_rel: str, module: str) -> list[str]:
             rest_path = rest.replace(".", "/").strip("/")
         stem = normpath(posixpath.join(up, rest_path)) if rest_path else normpath(up or ".")
         return [] if stem in (".", "", "/") else [stem]
-    # Bare dotted (Python "a.b.c") or bare package (TS "react", "os" -> won't match local files).
-    return [module.replace(".", "/")]
+    # Bare dotted (Python "a.b.c") or bare package (TS "react", "@scope/pkg", "@/alias").
+    candidates: list[str] = []
+    if aliases is not None and _is_ts_like(importer_rel):
+        candidates.extend(aliases.candidate_stems(module))
+    candidates.append(module.replace(".", "/"))
+    seen: set[str] = set()
+    return [c for c in candidates if c and not (c in seen or seen.add(c))]
 
 
 def resolve_import(
@@ -221,17 +256,20 @@ def resolve_import(
     module: str,
     known_noext: dict[str, str],
     suffix_index: dict[str, str] | None = None,
+    aliases: "tsconfig.TsAliases | None" = None,
 ) -> str | None:
     """Resolve an import specifier to a known extracted file path, or None if external/ambiguous.
 
     ``suffix_index`` (from :func:`build_suffix_index`) backs the trailing-segment fallback in
-    ``O(1)``; when omitted it is built on demand so ad-hoc callers stay correct. Resolution
-    order per candidate stem: exact stem, then package ``/index``/``/__init__``, then the
-    smallest stem ending in that segment suffix.
+    ``O(1)``; when omitted it is built on demand so ad-hoc callers stay correct. ``aliases`` (a
+    project's tsconfig ``baseUrl``/``paths``) lets a bare TS specifier like ``@/common`` resolve;
+    when omitted, only relative + exact + suffix resolution apply (the prior behavior). Resolution
+    order per candidate stem: exact stem, then package ``/index``/``/__init__``, then the smallest
+    stem ending in that segment suffix.
     """
     if suffix_index is None:
         suffix_index = build_suffix_index(known_noext)
-    for stem in _candidate_stems(importer_rel, module):
+    for stem in _candidate_stems(importer_rel, module, aliases):
         if stem in known_noext:
             return known_noext[stem]
         for suffix in ("/index", "/__init__"):
@@ -302,11 +340,12 @@ def check_boundary(ctx: CheckContext) -> list[Issue]:
     known = ctx.known_noext()
     suffix_index = ctx.suffix_index()
     known_top = ctx.known_top_segments()
+    aliases = ctx.ts_aliases()
     for name in sorted(ctx.subsystems):
         for rel in ctx.files_of(name):
             result = ctx.extracts[rel]
             for imp in result.imports:
-                target = resolve_import(rel, imp.module, known, suffix_index)
+                target = resolve_import(rel, imp.module, known, suffix_index, aliases)
                 if not target:
                     # Unresolved: if it looks intra-repo, it's a gap in boundary coverage
                     # (an owned file we couldn't attribute) — count it for the coverage signal.
@@ -475,8 +514,16 @@ def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
 # ===========================================================================
 def check_orphans(ctx: CheckContext) -> list[Issue]:
     consumed: set[tuple[str, str]] = set()
+    # Subsystems for which at least one consumer declared the *specific* interfaces it uses. Orphan
+    # detection compares an export against this interface-level data; without it (e.g. the
+    # subsystem-granularity edges `discover` emits) every public export of a library would read as
+    # orphaned — it is consumed by external users, not a sibling subsystem. So we only judge orphans
+    # for subsystems that actually have interface-level consumption recorded (curated contracts).
+    iface_tracked: set[str] = set()
     for sub in ctx.subsystems.values():
         for c in sub.consumes:
+            if c.interfaces:
+                iface_tracked.add(c.subsystem)
             for iface in c.interfaces:
                 consumed.add((c.subsystem, iface))
 
@@ -484,6 +531,8 @@ def check_orphans(ctx: CheckContext) -> list[Issue]:
     for name in sorted(ctx.subsystems):
         sub = ctx.subsystems[name]
         if ctx.role_exposes_orphans(name):  # service-like roles expose unconsumed entrypoints
+            continue
+        if name not in iface_tracked:  # no interface-level consumption to judge against — skip
             continue
         for iface in sorted(sub.expose_names()):
             if (name, iface) not in consumed:

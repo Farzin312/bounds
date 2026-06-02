@@ -10,6 +10,7 @@ Everything is deterministic and zero-LLM: POSIX paths, sorted iteration, no time
 
 from __future__ import annotations
 
+import re
 from pathlib import Path, PurePosixPath
 
 from .. import config
@@ -18,8 +19,8 @@ from ..models import ExtractResult, SubsystemCompact
 from . import get_adapter, supported_extensions
 
 
-def walk_supported(base: Path, exts: set[str]) -> list[Path]:
-    """Supported source files under ``base``, symlink-cycle-safe.
+def walk_supported(base: Path, exts: set[str] | None = None) -> list[Path]:
+    """Supported source files under ``base``, symlink-cycle-safe (``exts=None`` → every file).
 
     A stack-based walk that records each visited directory's *real* path, so a symlinked
     directory that points back into the tree is descended at most once — a symlink loop can never
@@ -60,7 +61,7 @@ def walk_supported(base: Path, exts: set[str]) -> list[Path]:
                         except (OSError, ValueError):
                             continue
                     stack.append(entry)
-                elif entry.is_file() and entry.suffix in exts:
+                elif entry.is_file() and (exts is None or entry.suffix in exts):
                     out.append(entry)
             except OSError:
                 continue
@@ -154,6 +155,128 @@ def iter_subsystem_files(project_root: Path, sub: SubsystemCompact, exts: set[st
     return sorted(out, key=lambda p: p.as_posix())
 
 
+def path_specificity(rel: str, paths, files=None) -> int:
+    """How specifically a subsystem's declared ``paths``/``files`` cover ``rel`` — deeper = higher.
+
+    Used so that when two subsystems' paths nest (a parent dir and a sub-package), the *deepest*
+    declared path owns the file, the same longest-prefix rule the tsconfig resolver uses. An explicit
+    ``files:`` entry naming ``rel`` exactly is the strongest intent a manifest can express and
+    outranks any directory prefix; an exact file path in ``paths`` ties it; a glob contributes the
+    depth of its literal prefix; a root/catch-all (``.`` or pure glob) is least specific (0). Returns
+    0 when nothing covers ``rel``.
+    """
+    best = 0
+    for raw in files or []:
+        if rel == str(raw).strip("/"):
+            best = max(best, rel.count("/") + 2)   # explicit single-file declaration: most specific
+    for raw in paths or []:
+        lit = re.split(r"[*?\[]", str(raw).strip("/"), maxsplit=1)[0].rstrip("/")
+        if not lit or lit == ".":
+            continue  # root / pure-glob: least specific
+        if rel == lit:
+            best = max(best, lit.count("/") + 2)   # exact file path: most specific
+        elif rel.startswith(lit + "/"):
+            best = max(best, lit.count("/") + 1)   # directory / glob-prefix ancestor
+    return best
+
+
+def resolve_owners(
+    project_root: Path,
+    subsystems: dict[str, SubsystemCompact],
+    exts: set[str],
+) -> dict[str, tuple[str, Path]]:
+    """Map every owned file (rel-posix) → ``(owning_subsystem, abs_path)`` — most-specific path wins.
+
+    The single home for file→subsystem ownership, shared by the validation engine and
+    :func:`extract_project`. When subsystem paths nest, the deepest matching path owns the file, so a
+    sub-package keeps its own code instead of the alphabetically-first parent swallowing it (which
+    used to starve the child and report false structural drift). Ties in specificity break to the
+    sorted-first subsystem name for determinism.
+    """
+    claims: dict[str, tuple[int, str, Path]] = {}
+    for name in sorted(subsystems):
+        sub = subsystems[name]
+        for abs_path in iter_subsystem_files(project_root, sub, exts):
+            rel = abs_path.relative_to(project_root).as_posix()
+            spec = path_specificity(rel, sub.paths, sub.files)
+            prev = claims.get(rel)
+            if prev is None or spec > prev[0]:  # strictly-greater keeps the sorted-first tie winner
+                claims[rel] = (spec, name, abs_path)
+    return {rel: (name, abs_path) for rel, (_spec, name, abs_path) in claims.items()}
+
+
+def mapping_coverage(
+    project_root: Path,
+    owned: set[str],
+    matcher: IgnoreMatcher | None = None,
+    repo: Path | None = None,
+    include_gitignored: bool = False,
+) -> dict:
+    """How much of the repo's *source code* Bounds actually mapped, and an honest breakdown of what
+    it could not — the metric that stops a polyglot repo from looking fully mapped while half of it
+    is an unsupported language.
+
+    Walks every non-ignored file (``config.DEFAULT_IGNORES`` + ``.boundsignore``), counts only files
+    whose extension is in :data:`config.KNOWN_SOURCE_EXTS` (docs/config/assets are excluded so they
+    can't dilute the %), and classifies each as:
+      - **mapped** — owned by a subsystem (``rel in owned``),
+      - **unowned-supported** — Bounds *has* an adapter for it, it's just not in any manifest's
+        paths (fix: add it to a manifest — deterministically mappable),
+      - **unsupported** — no adapter for that language yet (fix: hand-author/AI-author a manifest, or
+        it waits for an adapter).
+    Returns counts, ``mapped_pct``, and a sorted by-language breakdown of the unmapped source.
+    Deterministic; safe to skip on the ``--quick`` hot path (callers gate it). Honors ``.gitignore``
+    when ``repo`` is given and ``include_gitignored`` is False, so the denominator matches the
+    gitignore-aware file universe the rest of validation uses (a gitignored owned file is excluded
+    from both numerator and denominator, never miscounted as unmapped).
+    """
+    supported = supported_extensions()
+    # Collect source-code candidates first so gitignore can be applied in one batched call (parity
+    # with the engine's owned-file gitignore filtering).
+    candidates: list[tuple[str, str, str]] = []  # (rel, ext, lang)
+    for abs_path in walk_supported(project_root, None):  # None => every file
+        ext = abs_path.suffix
+        lang = config.KNOWN_SOURCE_EXTS.get(ext)
+        if lang is None:
+            continue  # not source code (docs/config/assets) — out of the denominator
+        rel = abs_path.relative_to(project_root).as_posix()
+        if matcher and matcher.matches(rel):
+            continue
+        candidates.append((rel, ext, lang))
+    if not include_gitignored and repo is not None:
+        from .. import gitutil  # lazy: keep extract/ free of a top-level gitutil import
+        ignored = gitutil.gitignored(repo, [c[0] for c in candidates])
+        candidates = [c for c in candidates if c[0] not in ignored]
+
+    mapped = unowned_supported = unsupported = 0
+    by_lang: dict[str, int] = {}
+    unsupported_langs: set[str] = set()
+    for rel, ext, lang in candidates:
+        if rel in owned:
+            mapped += 1
+            continue
+        by_lang[lang] = by_lang.get(lang, 0) + 1
+        if ext in supported:
+            unowned_supported += 1
+        else:
+            unsupported += 1
+            unsupported_langs.add(lang)
+    total = mapped + unowned_supported + unsupported
+    pct = round(mapped / total * 100, 1) if total else 100.0
+    if total and mapped < total and pct >= 100.0:
+        pct = 99.9  # never display a rounded 100% while a gap remains
+    return {
+        "files_source_total": total,
+        "files_mapped": mapped,
+        "files_unmapped": unowned_supported + unsupported,
+        "mapped_pct": pct,
+        "unmapped_unowned_supported": unowned_supported,
+        "unmapped_unsupported_language": unsupported,
+        "unmapped_by_language": dict(sorted(by_lang.items())),
+        "unsupported_languages": sorted(unsupported_langs),
+    }
+
+
 def extract_project(
     project_root: Path,
     subsystems: dict[str, SubsystemCompact],
@@ -161,30 +284,27 @@ def extract_project(
 ) -> tuple[dict[str, str], dict[str, ExtractResult], set[str]]:
     """Project-wide extraction shared by calibrate / impact --verify / ``where`` (single home).
 
-    Walks every subsystem's owned files (flat topology: first declared owner wins), applies the
-    optional ``.boundsignore`` ``matcher``, and tree-sitter-extracts each. Returns
+    Resolves ownership via :func:`resolve_owners` (most-specific path wins), applies the optional
+    ``.boundsignore`` ``matcher``, and tree-sitter-extracts each owned file. Returns
     ``(file_owner, extracts, generated)`` — rel-posix → owner, rel-posix → :class:`ExtractResult`
     (only files that parsed), and the set of ``@generated``-marked files. Deterministic: sorted
-    subsystem + file iteration. The owned-file walk is :func:`iter_subsystem_files`, so this agrees
-    with the validation engine on ownership rather than carrying yet another copy.
+    iteration. Shares :func:`resolve_owners` with the validation engine so the two never disagree.
     """
     exts = supported_extensions()
     file_owner: dict[str, str] = {}
     extracts: dict[str, ExtractResult] = {}
     generated: set[str] = set()
-    for name in sorted(subsystems):
-        for abs_path in iter_subsystem_files(project_root, subsystems[name], exts):
-            rel = abs_path.relative_to(project_root).as_posix()
-            if rel in file_owner:  # flat topology: first declared owner wins
-                continue
-            if matcher and matcher.matches(rel):
-                continue
-            result, is_gen = extract_file(project_root, rel)
-            file_owner[rel] = name
-            if is_gen:
-                generated.add(rel)
-            if result is not None:
-                extracts[rel] = result
+    owners = resolve_owners(project_root, subsystems, exts)
+    for rel in sorted(owners):
+        name, _abs = owners[rel]
+        if matcher and matcher.matches(rel):
+            continue
+        result, is_gen = extract_file(project_root, rel)
+        file_owner[rel] = name
+        if is_gen:
+            generated.add(rel)
+        if result is not None:
+            extracts[rel] = result
     return file_owner, extracts, generated
 
 
