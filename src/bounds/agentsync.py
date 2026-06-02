@@ -546,9 +546,11 @@ _AGENT_ARTIFACTS: dict[str, tuple[_Artifact, ...]] = {
 # Each here is provably NOT a current artifact path: opencode's singular `command/` was renamed to
 # the plural `commands/`, and codex's `.codex/skills/` was renamed to the shared `.agents/skills/`
 # spec location — so removing these can never delete a file this sync just wrote.
-_LEGACY_ARTIFACTS: tuple[str, ...] = (
-    ".opencode/command/bounds.md",   # -> .opencode/commands/bounds.md (plural; see _AGENT_ARTIFACTS)
-    ".codex/skills/bounds/SKILL.md",  # -> .agents/skills/bounds/SKILL.md (open Agent Skills spec)
+_LEGACY_ARTIFACTS: tuple[tuple[str, str], ...] = (
+    # (legacy path, owning agent) — cleaned only when that agent is in THIS sync, so the
+    # replacement (written above in the _AGENT_ARTIFACTS loop) is guaranteed present.
+    (".opencode/command/bounds.md", "opencode"),   # -> .opencode/commands/bounds.md (plural)
+    (".codex/skills/bounds/SKILL.md", "codex"),     # -> .agents/skills/bounds/SKILL.md (open spec)
 )
 
 
@@ -613,13 +615,18 @@ def _sync(root: Path, selected: list[str]) -> dict:
             )
             buckets.record(outcome, Path(art.path).as_posix())
 
-    # 4. Self-clean renamed orphans. The artifacts above already wrote the *current* paths; now
-    #    remove any stale file left at a prior (renamed) bounds-owned path so a re-sync migrates
-    #    cleanly. Only these exact paths are ever touched, and none collides with a current
-    #    artifact (see `_LEGACY_ARTIFACTS`), so this can't delete what we just wrote. Fail-soft:
+    # 4. Self-clean renamed orphans — but ONLY for agents in THIS sync. The step-3 loop above
+    #    already wrote the current path for each selected agent, so removing that agent's stale
+    #    file at its prior (renamed) path is safe: the replacement is guaranteed present. Gating on
+    #    `owner in selected` means a selective sync (e.g. --only gemini) never strips another
+    #    agent's file without writing its replacement. Only these exact bounds-owned paths are ever
+    #    touched, and none collides with a current artifact (see `_LEGACY_ARTIFACTS`). Fail-soft:
     #    cleanup never raises. An emptied parent dir is removed too, but only if empty — we never
     #    recursively delete a dir that still holds other files.
-    for rel in _LEGACY_ARTIFACTS:
+    selected_set = set(selected)
+    for rel, owner in _LEGACY_ARTIFACTS:
+        if owner not in selected_set:
+            continue
         legacy = root / Path(rel)
         if legacy.is_file():
             try:

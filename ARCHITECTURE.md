@@ -820,7 +820,8 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_SCHEMA_NO_ORDER` | warning | order-dependent migrations with no deterministic order (no prefix/revision-chain/explicit header); folded in lexical order |
 | `E_SCHEMA_UNPARSED` | warning | a migration statement couldn't be parsed; the file's other statements still folded |
 | `E_SUBSYSTEM_NOT_FOUND` | fatal | unknown subsystem (raised by `describe <name>`, `impact <name>`, `calibrate --subsystem`) |
-| `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do) |
+| `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do, invalid subsystem name) |
+| `E_INTERNAL` | fatal | an unexpected (non-`BoundsError`) exception escaped a command body; the top-level guard converts it to a generic `{"error":{code,message,fix}}` (no traceback leaked) instead of crashing |
 | `E_UNSUPPORTED_LANGUAGE` | warning | file extension has no adapter (skipped) |
 | `E_EXTRACTION_FAILED` | warning | could not extract a file — tree-sitter parse error, unreadable, or over `MAX_FILE_BYTES`. An OWNED file is never silently dropped; it always emits this. |
 | `E_ADAPTER_CONTRACT` | warning | adapter output violated its declared self-consistency contract — a Prisma relation field leaked as a column, or an all-unparsable SQL migration with a revision header that masked the failure. Advisory only (never blocks). |

@@ -91,19 +91,6 @@ def _dunder_all_from_tree(root: ts.Node, source: bytes) -> frozenset[str] | None
     return None
 
 
-def parse_dunder_all(source: bytes) -> frozenset[str] | None:
-    """Parse a module's literal ``__all__`` from raw source bytes, or None when absent/dynamic.
-
-    Shared by the adapter (export gating) and ``discover`` (public-surface gating) so the two can
-    never disagree on what ``__all__`` means. Per-file and cacheable — reads only this source. Fails
-    soft: any parse error yields None (fall back to the underscore rule), never a crash.
-    """
-    try:
-        return _dunder_all_from_tree(_parser().parse(source).root_node, source)
-    except Exception:
-        return None
-
-
 def _call_first_string(node: ts.Node, source: bytes) -> str | None:
     """First string argument of a ``Name(...)`` call (e.g. ``Table("users", meta)``), or None."""
     if node.type != "call":

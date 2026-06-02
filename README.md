@@ -105,15 +105,15 @@ If `bounds --help` does not list `impact`, `discover`, and `agent`, your install
 
 ---
 
-## Scales with your public API, not your code size
+## Scales with what you expose, not your code size
 
 Reading source is **O(files)** — the bigger the subsystem, the more an agent reads. A Bounds contract
-is **O(public API)** — it grows only with what a subsystem *exposes*, not its internal size, so it
-climbs far more slowly: from a few hundred tokens for a small subsystem (a subsystem with 50 internal
-functions and 5 exports stays small).
+is **O(public surface)** — it grows only with what a subsystem *exposes* (its public symbols, tables,
+and dependencies), not its internal size, so it climbs far more slowly: a subsystem with 50 internal
+functions behind 5 exports stays a few hundred tokens.
 
 <div align="center">
-<img src="assets/token-scaling.svg" alt="Line chart: reading a subsystem's source climbs steeply as the subsystem grows, toward tens of thousands of tokens, while a Bounds describe contract grows only with how much public API the subsystem exposes — far more slowly, from a few hundred tokens for a small subsystem" width="700">
+<img src="assets/token-scaling.svg" alt="Line chart: reading a subsystem's source climbs steeply as the subsystem grows, toward tens of thousands of tokens, while a Bounds describe contract grows only with how much a subsystem exposes — its public surface of symbols, tables, and dependencies — far more slowly, from a few hundred tokens for a small subsystem" width="700">
 </div>
 
 The token win *widens* with size.
@@ -134,7 +134,7 @@ bugs it surfaced: **[benchmarks/results/oss-cross-language.md](benchmarks/result
 
 Across all 13 supported-language repos, whole-repo `bounds list` is **98.7–100%** smaller than
 reading every file, and a single `bounds describe` is **54–100%** smaller than its subsystem's
-source. The `describe` spread is real and tracks how much public API a subsystem *exposes*: a typical
+source. The `describe` spread is real and tracks how much a subsystem *exposes*: a typical
 one is a **median of a few hundred tokens**, while a fat-API subsystem (zod's `core`, 831 exports)
 is ~35k. *Honest caveat:* "vs all source" is a generous baseline — nobody reads a whole repo — so
 read 99% as "orientation is near-free," and the **54–100% `describe`** range as the number that
