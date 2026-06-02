@@ -294,6 +294,15 @@ def save_state(project_root: Path, state: State) -> None:
     finally:
         conn.close()
 
+    # The write succeeded, so cache.db is now authoritative. Self-complete the migration by
+    # removing any lingering legacy state.json: it is already shadowed (load_state prefers
+    # cache.db) and version-gated out, so it is dead weight. Fail-soft — never raise from cleanup.
+    legacy = _legacy_json_path(project_root)
+    try:
+        legacy.unlink(missing_ok=True)
+    except OSError:
+        pass
+
 
 def load_subsystem_records(project_root: Path, subsystem: str) -> list[FileRecord]:
     """Partial read: the cached records for one subsystem, via the subsystem index.
@@ -352,12 +361,9 @@ def migrate_json_to_sqlite(project_root: Path) -> dict:
 
     state = _load_json(json_path)
     save_state(project_root, state)
-    removed = False
-    try:
-        json_path.unlink()
-        removed = True
-    except OSError:
-        pass
+    # save_state self-completes the migration by removing the orphan state.json, so reflect the
+    # real on-disk outcome rather than relying on a redundant unlink here (which would now miss).
+    removed = not json_path.exists()
     return {
         "migrated": True,
         "files": len(state.files),

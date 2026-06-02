@@ -11,8 +11,10 @@ it. The reconciliation rules encode developer intent:
   another subsystem consumes it (then it's a real contract → flagged ``needs_review``, never
   auto-removed) or it is marked ``internal: true`` (deliberately private → exempt entirely).
 * A symbol tree-sitter exports but the manifest omits is proposed for **addition** — UNLESS its
-  file is ``@generated`` or the symbol is private (the adapter already drops ``_``-prefixed
-  Python names from the exported set; we double-guard).
+  file is generated (detected by a header marker; see :mod:`bounds.ignore`) or the symbol is
+  private (the adapter already drops ``_``-prefixed Python names from the exported set; we
+  double-guard). The marker token is intentionally not spelled out in this header — a source file
+  that literally contains it would otherwise be self-misdetected as generated.
 * A real cross-subsystem import not in ``consumes`` is proposed as a new ``consumes`` edge
   (direct imports only — never invent transitive deps). A declared ``consumes`` interface the
   provider doesn't expose is proposed for removal.
@@ -31,7 +33,7 @@ import yaml
 
 from . import config, errors
 from . import tsconfig
-from .extract.scan import extract_project
+from .extract.scan import extract_project, subsystems_with_unsupported_source
 from .ignore import load_matcher
 from .manifest import loader as manifest_loader
 from .validate.checks import index_extracts, resolve_import
@@ -50,6 +52,11 @@ def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bo
 
     matcher = load_matcher(project_root)
     file_owner, extracts, generated = extract_project(project_root, subs, matcher)
+    # Subsystems that own an UNSUPPORTED-language source file (Go/Rust/Java/…): for those Bounds has
+    # no adapter, so it can't extract symbols and has zero evidence a hand-authored expose is gone.
+    # Shared with the validation engine (scan.subsystems_with_unsupported_source) so calibrate and
+    # validate never disagree about such a manifest.
+    unsupported_owners = subsystems_with_unsupported_source(project_root, subs, matcher)
     known_noext, suffix_index = index_extracts(extracts)  # one shared projection (built once)
     aliases = tsconfig.load(project_root)  # TS path aliases, loaded once for the whole run
 
@@ -66,7 +73,7 @@ def run_calibrate(project_root: Path, *, subsystem: str | None = None, apply: bo
     for name in targets:
         proposal = _calibrate_one(
             name, subs, file_owner, extracts, generated, known_noext, suffix_index,
-            consumed_providers_ifaces, aliases,
+            consumed_providers_ifaces, aliases, unsupported_owners,
         )
         if _has_changes(proposal):
             proposals[name] = proposal
@@ -98,8 +105,15 @@ def _calibrate_one(
     suffix_index: dict[str, str],
     consumed_providers_ifaces: dict[str, set[str]],
     aliases: "tsconfig.TsAliases | None" = None,
+    unsupported_owners: set[str] | None = None,
 ) -> dict:
     sub = subs[name]
+    # When the subsystem owns an unsupported-language file, its exposes may have been hand-authored
+    # for symbols Bounds cannot extract — so a "declared but not found" expose is UNVERIFIABLE, never
+    # proven stale. Such exposes are routed to needs_review (surfaced, never auto-stripped) instead of
+    # remove_exposes. A pure supported-language subsystem is unaffected: a genuinely stale expose is
+    # still proposed for removal.
+    owns_unsupported = name in (unsupported_owners or set())
     own_files = sorted(p for p, owner in file_owner.items() if owner == name and p in extracts)
 
     # Actual exported symbols: name -> (kind, file). First sorted file wins for stability.
@@ -126,8 +140,10 @@ def _calibrate_one(
         iface = declared[s]
         if iface.internal:
             continue  # deliberately private — exempt from calibration
-        if s in consumed_here:
-            needs_review.append(s)  # real contract; never auto-remove
+        if s in consumed_here or owns_unsupported:
+            # consumed → real contract; owns_unsupported → can't verify an unparseable-language
+            # symbol is gone. Either way: surface for a human, never auto-remove.
+            needs_review.append(s)
         else:
             remove_exposes.append(s)
 

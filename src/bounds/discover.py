@@ -9,7 +9,7 @@ named subsystem; ``--namespace <ns>`` tags every candidate.
 
 Heuristic (deterministic, zero LLM):
 
-1. Walk the repo for supported source files (honouring ignore dirs + ``.boundsignore``).
+1. Walk the repo for supported non-test source files (honouring ignore dirs + ``.boundsignore``).
 2. A **candidate** is any directory holding direct source files; score by direct-file count
    (high ≥5, medium 3-4, low <3 — low candidates are dropped unless merged). A directory
    whose files are predominantly SQL/Prisma schema (a migration set) is always kept,
@@ -26,14 +26,15 @@ Calibrate shares the extraction engine to *reconcile* existing manifests; discov
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
 from . import config, errors, gitutil, tsconfig
-from .extract import adapter_for_language
+from .extract import adapter_for_language, supported_extensions
 from .extract.scan import (
     extract_file,
+    extract_project,
     is_framework_entry_file,
     is_test_file,
     is_test_symbol,
@@ -43,6 +44,7 @@ from .extract.scan import (
     resolve_test_owners,
 )
 from .ignore import IgnoreMatcher, load_matcher
+from .manifest import loader as manifest_loader
 from .models import SubsystemCompact
 from .validate.checks import index_extracts, resolve_import
 from .validate.schema import SCHEMA_LANGUAGES, schema_catalog
@@ -64,22 +66,80 @@ def run_discover(
     ignored = gitutil.gitignored(project_root, sources)
     if ignored:
         sources = [rel for rel in sources if rel not in ignored]
+    sources = [rel for rel in sources if not is_test_file(rel)]
+
+    repo = gitutil.repo_root(project_root) or project_root
+    existing_root = None
+    existing_subs: dict[str, SubsystemCompact] = {}
+    existing_file_owner: dict[str, str] = {}
+    existing_extracts: dict = {}
+    existing_generated: set[str] = set()
+    existing_owned: set[str] = set()
+    existing_tests: set[str] = set()
+    try:
+        existing_root, existing_subs, _existing_issues = manifest_loader.load_all(project_root)
+    except errors.BoundsError as exc:
+        if exc.code != errors.E_MANIFEST_NOT_FOUND:
+            raise
+    if existing_subs:
+        existing_file_owner, existing_extracts, existing_generated = extract_project(
+            project_root, existing_subs, matcher
+        )
+        existing_owned = set(existing_file_owner)
+        existing_tests = set(resolve_test_owners(project_root, existing_subs, matcher, repo))
+        sources = [
+            rel for rel in sources
+            if rel not in existing_owned and rel not in existing_tests
+        ]
+
     if not sources:
+        if existing_subs:
+            coverage = mapping_coverage(
+                project_root,
+                existing_owned,
+                matcher,
+                repo=repo,
+                subsystems=existing_subs,
+            )
+            return {
+                "mode": "discover",
+                "applied": apply,
+                "root": {
+                    "version": config.SCHEMA_VERSION,
+                    "project": project_root.resolve().name,
+                    "languages": list(existing_root.languages) if existing_root else [],
+                    "subsystems": sorted(existing_subs),
+                },
+                "candidates": [],
+                "coverage": coverage,
+                "written": [],
+                "skipped": [],
+                "notice": (
+                    "no unmapped supported source found; existing Bounds manifests already own "
+                    "the discoverable source. Run `bounds calibrate` to reconcile drift."
+                ),
+            }
         raise errors.BoundsError(
             errors.E_USAGE,
             "no supported source files found to discover",
-            fix="run from a project root containing .py/.ts/.js sources, "
+            fix="run from a project root containing non-test .py/.ts/.js sources, "
             "or check your .boundsignore / .gitignore",
         )
 
     # Map each source file to its candidate subsystem (merges win over directory grouping).
     merges = merges or []
     file_to_candidate, candidate_files = _group(sources, merges)
+    file_owner_for_imports = {
+        **existing_file_owner,
+        **file_to_candidate,
+    }
 
-    # Extract every file once; record owners + exported symbols + imports + generated flag.
-    extracts: dict = {}
-    generated: set[str] = set()
-    for rel in sources:
+    # Extract every candidate file once; include existing-owned extracts too so imports from newly
+    # discovered source can resolve to already-materialized subsystems without creating duplicates.
+    extract_sources = sorted(set(sources))
+    extracts: dict = dict(existing_extracts)
+    generated: set[str] = set(existing_generated)
+    for rel in extract_sources:
         result, is_gen = extract_file(project_root, rel)
         if is_gen:
             generated.add(rel)
@@ -96,7 +156,7 @@ def run_discover(
             continue
         for imp in result.imports:
             target = resolve_import(rel, imp.module, known_noext, suffix_index, aliases)
-            tgt_owner = file_to_candidate.get(target) if target else None
+            tgt_owner = file_owner_for_imports.get(target) if target else None
             if tgt_owner and tgt_owner != owner:
                 consumes[owner].add(tgt_owner)
     consumed_by: dict[str, int] = {c: 0 for c in candidate_files}
@@ -146,9 +206,10 @@ def run_discover(
     # `consumes: <name>` for a subsystem discover never materializes would make `validate` raise a
     # self-inflicted E_UNRESOLVED_REFERENCE on a fresh run. Only edges between kept subsystems stand.
     kept_set = set(kept)
+    materialized_set = kept_set | set(existing_subs)
     for cand in candidates:
         if cand.get("consumes"):
-            cand["consumes"] = [c for c in cand["consumes"] if c in kept_set]
+            cand["consumes"] = [c for c in cand["consumes"] if c in materialized_set]
 
     # Auto-link tests (and docs) by convention so a fresh discover already maps them — the user does
     # very little. Conservative: only convention-confident files, collapsed to directory globs when a
@@ -177,15 +238,13 @@ def run_discover(
     # files are excluded from the source denominator and reported in their own bucket (subsystems
     # passed so the doc/test linkage buckets reflect the discovered subsystems' paths).
     owned = {rel for rel, cand in file_to_candidate.items() if cand in kept_set}
-    cov_subs = {
+    cov_subs = dict(existing_subs)
+    cov_subs.update({
         c["name"]: SubsystemCompact(name=c["name"], paths=list(c.get("paths") or []),
                                     tests=list(c.get("tests") or []), docs=list(c.get("docs") or []))
         for c in candidates if not c.get("dropped")
-    }
-    coverage = mapping_coverage(
-        project_root, owned, matcher,
-        repo=gitutil.repo_root(project_root) or project_root, subsystems=cov_subs,
-    )
+    })
+    coverage = mapping_coverage(project_root, owned | existing_owned, matcher, repo=repo, subsystems=cov_subs)
 
     result = {
         "mode": "discover",
@@ -197,14 +256,17 @@ def run_discover(
         "skipped": sorted(skipped),
     }
     if coverage["files_unmapped"] > 0:
+        has_unsupported = bool(coverage["unsupported_languages"])
         result["next_step"] = (
             f"mapped {coverage['mapped_pct']}% of source; "
             f"{coverage['files_unmapped']} file(s) unmapped"
             + (f" in unsupported languages ({', '.join(coverage['unsupported_languages'])})"
-               if coverage["unsupported_languages"] else "")
+               if has_unsupported else "")
             + ". To reach 100%: `bounds init --subsystem <name>` and add the files to its `paths`, "
-            "or have an AI author the manifest in the same format — then `bounds validate`. "
-            "See docs/coverage.md."
+            "or have an AI author the manifest in the same format — then `bounds validate`."
+            + (" Hand-authored exposes for an unsupported language are durable (calibrate/validate "
+               "keep them, never strip or flag as drift)." if has_unsupported else "")
+            + " See docs/coverage.md."
         )
     notice = _apply_notice(applied, written, skipped)
     if notice is not None:
@@ -438,7 +500,8 @@ def _collapse_link_paths(files: list[str], owners: dict[str, str | None], owner:
     for d in sorted(files_by_dir):
         siblings = all_by_dir.get(d, [])
         clean = all(o == owner for _rel, o in siblings)
-        if clean and d not in ("", "."):
+        owner_named_dir = PurePosixPath(d).name == owner
+        if clean and owner_named_dir and d not in ("", "."):
             out.append(d)  # whole directory maps to this owner — collapse to the dir glob
         else:
             out.extend(files_by_dir[d])  # mixed/owner-shared dir — list files individually
@@ -523,11 +586,18 @@ def _infer_criticality(consumed_by: int) -> str:
 
 
 def _exposes_for(files: list[str], extracts: dict, generated: set[str]) -> list[dict]:
-    """Every exported, non-private symbol across a candidate's files, verified by tree-sitter.
+    """Every exported symbol across a candidate's files, verified by tree-sitter.
 
     Test cases (``test_*`` functions / ``Test*`` classes in a test file) are excluded: a test runner
     discovers them by naming convention, nothing *imports* them, so listing all of them as a public
     surface is wrong and bloats the manifest (a 400-test dir would yield an 800-line `exposes`).
+
+    The public surface is exactly ``sym.exported`` as the adapter computed it — so discover and
+    validate agree by construction. For Python that means a literal ``__all__`` is honoured (only its
+    members are exposed; a leading-underscore name listed in ``__all__`` IS public, and a public-cased
+    name omitted from ``__all__`` is NOT); when ``__all__`` is absent the underscore rule applies.
+    We must NOT re-filter on a leading underscore here — that would drop a deliberately-``__all__``-ed
+    ``_name`` and desync the two surfaces.
     """
     seen: dict[str, dict] = {}
     for rel in files:
@@ -537,7 +607,7 @@ def _exposes_for(files: list[str], extracts: dict, generated: set[str]) -> list[
             continue  # a Next.js page/layout/route entry — framework-invoked, not a consumable API
         is_test = is_test_file(rel)
         for sym in extracts[rel].symbols:
-            if not sym.exported or sym.name.startswith("_"):
+            if not sym.exported:
                 continue
             if is_test and is_test_symbol(sym.name, sym.kind):
                 continue  # a test case is not a consumable interface
@@ -564,6 +634,9 @@ def _write(project_root: Path, root_proposal: dict, candidates: list[dict]) -> t
     """
     cfg = project_root / config.BOUNDS_DIR
     (cfg / config.MANIFESTS_DIR).mkdir(parents=True, exist_ok=True)
+    # Ensure the regenerable, binary cache is gitignored whenever discover scaffolds .bounds/ —
+    # same self-contained .gitignore init writes (shared template, idempotent).
+    config.ensure_bounds_gitignore(cfg)
     written: list[str] = []
     skipped: list[str] = []
 

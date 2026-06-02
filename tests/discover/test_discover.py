@@ -87,9 +87,42 @@ def test_discover_apply_writes_manifests(tmp_path):
     auth_manifest = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR / "auth.yaml"
     assert auth_manifest.is_file()
 
-    # Re-running --apply skips existing manifests rather than clobbering.
+    # Re-running --apply on a fully bounded repo does not re-propose duplicate manifests.
     again = run_discover(tmp_path, apply=True)
-    assert any("auth.yaml" in s for s in again["skipped"])
+    assert again["candidates"] == []
+    assert again["written"] == []
+    assert again["skipped"] == []
+    assert "no unmapped supported source" in again["notice"]
+
+
+def test_discover_apply_ensures_gitignore(tmp_path):
+    """apply=True scaffolds .bounds/.gitignore (regenerable cache armor) with the three entries."""
+    _project(tmp_path)
+    run_discover(tmp_path, apply=True)
+    gi = tmp_path / config.BOUNDS_DIR / config.GITIGNORE_FILE
+    assert gi.is_file()
+    body = gi.read_text(encoding="utf-8")
+    for entry in ("cache.db", "cache.db-journal", "state.json"):
+        assert entry in body
+
+
+def test_discover_apply_preserves_existing_gitignore(tmp_path):
+    """apply=True onto a pre-existing user-authored .bounds/.gitignore preserves it and appends only the missing entries (no rewrite, no dupes)."""
+    _project(tmp_path)
+    bounds_dir = tmp_path / config.BOUNDS_DIR
+    bounds_dir.mkdir(parents=True, exist_ok=True)
+    gi = bounds_dir / config.GITIGNORE_FILE
+    user_body = "# hand-written\nsecrets.env\n"
+    gi.write_text(user_body, encoding="utf-8")
+
+    run_discover(tmp_path, apply=True)
+
+    after = gi.read_text(encoding="utf-8")
+    assert after.startswith(user_body)  # user content survives byte-for-byte at the head
+    lines = [line.strip() for line in after.splitlines()]
+    assert "secrets.env" in lines
+    for entry in config.GITIGNORE_ENTRIES:
+        assert lines.count(entry) == 1  # each required entry present exactly once
 
 
 def test_discover_namespace_tag(tmp_path):
@@ -109,25 +142,71 @@ def test_discover_writes_detected_languages(tmp_path):
     assert root_doc["languages"] == ["python"]
 
 
-def test_discover_excludes_test_cases_from_exposes(tmp_path):
-    """BOUNDS-014: a test runner finds `test_*` by convention — nothing imports them, so they are
-    not a public surface and must not bloat a test subsystem's `exposes`."""
+def test_discover_never_promotes_test_dirs_to_subsystems(tmp_path):
+    """BOUNDS-020: tests are linked evidence, not architecture subsystems created by discover."""
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    for i in range(5):
+        (auth / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    tests_auth = tmp_path / "tests" / "auth"
+    tests_auth.mkdir(parents=True)
+    for i in range(8):
+        (tests_auth / f"test_case_{i}.py").write_text(
+            "def test_case():\n    assert True\n"
+            "def make_fixture():\n    return 1\n"
+        )
+
+    result = run_discover(tmp_path)
+    names = {c["name"] for c in result["candidates"]}
+    assert names == {"auth"}
+    auth_cand = next(c for c in result["candidates"] if c["name"] == "auth" and not c["dropped"])
+    assert auth_cand["tests"] == ["tests/auth"]
+    assert {e["name"] for e in auth_cand["exposes"]} == {f"f{i}" for i in range(5)}
+
+
+def test_discover_top_level_tests_dir_is_not_a_candidate(tmp_path):
+    """A top-level ``tests/`` directory produces NO discover candidate — neither kept nor dropped.
+
+    Codifies the is_test_file pre-filter: test files are removed from ``sources`` before candidate
+    grouping, so a tests/ dir never even appears as a (dropped) candidate. It is linked evidence on
+    a real subsystem, never architecture discover would propose as its own subsystem.
+    """
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    for i in range(5):
+        (pkg / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
     tests = tmp_path / "tests"
     tests.mkdir()
-    (tests / "test_thing.py").write_text(
-        "def test_one():\n    pass\n"
-        "def test_two():\n    pass\n"
-        "class TestSuite:\n    pass\n"
-        "def make_fixture():\n    return 1\n"  # a genuine helper — kept
-    )
-    for i in range(4):  # pad so the dir is kept as a candidate
-        (tests / f"test_pad{i}.py").write_text(f"def test_pad{i}():\n    pass\n")
+    for i in range(8):
+        (tests / f"test_thing_{i}.py").write_text("def test_thing():\n    assert True\n")
+
     result = run_discover(tmp_path)
-    cand = next(c for c in result["candidates"] if not c["dropped"])
-    names = {e["name"] for e in cand["exposes"]}
-    assert "make_fixture" in names              # real helper kept
-    assert not any(n.startswith("test_") for n in names)  # no test_* functions
-    assert "TestSuite" not in names             # no Test* classes
+    # No candidate at all references the tests dir — not kept, not dropped.
+    assert all("tests" not in c["name"] for c in result["candidates"])
+    assert {c["name"] for c in result["candidates"]} == {"pkg"}
+
+
+def test_discover_exposes_honour_dunder_all_matching_extraction(tmp_path):
+    """Discover's ``exposes`` honour a module's literal __all__ exactly as the adapter does, so discover and validate agree on the public surface: a non-listed public name is dropped, and an __all__-ed leading-underscore name is kept."""
+    pkg = tmp_path / "api"
+    pkg.mkdir()
+    (pkg / "core.py").write_text(
+        '__all__ = ["public_a", "_explicit"]\n\n'
+        "def public_a():\n    pass\n\n"
+        "def public_b():\n    pass\n\n"
+        "def _explicit():\n    pass\n\n"
+        "def _hidden():\n    pass\n"
+    )
+    for i in range(4):
+        (pkg / f"more{i}.py").write_text(f"def g{i}():\n    pass\n")
+
+    result = run_discover(tmp_path)
+    api = next(c for c in result["candidates"] if c["name"] == "api" and not c["dropped"])
+    names = {e["name"] for e in api["exposes"]}
+    assert "public_a" in names          # listed in __all__
+    assert "_explicit" in names         # __all__ overrides the underscore rule
+    assert "public_b" not in names      # public-cased but omitted from __all__
+    assert "_hidden" not in names       # neither listed nor public-cased
 
 
 def test_discover_overwrites_hardcoded_python_default_for_ts(tmp_path):
@@ -157,7 +236,7 @@ def test_discover_overwrites_hardcoded_python_default_for_ts(tmp_path):
 def test_discover_folds_module_subparts_into_parent(tmp_path):
     """A NestJS-shaped module folds dto/ and services/ subdirs into one `auth` subsystem (path src/auth), not three fragments."""
     # A NestJS-shaped module (auth.module.ts directly + dto/ and services/ subdirs) becomes ONE
-    # `auth` subsystem, not auth + auth-dto + auth-services (the spex_backend over-fragmentation).
+    # `auth` subsystem, not auth + auth-dto + auth-services (over-fragmentation).
     (tmp_path / ".bounds").mkdir()
     auth = tmp_path / "src" / "auth"
     (auth / "dto").mkdir(parents=True)
@@ -227,6 +306,78 @@ def test_discover_apply_preserves_custom_root_keys(tmp_path):
     assert "auth" in root_doc["subsystems"]  # discovery still merged its finds
 
 
+def test_discover_existing_model_does_not_create_duplicate_subsystems(tmp_path):
+    """On an already-bounded repo, discover targets unmapped source only; it must not create alternate manifests over owned files."""
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        yaml.safe_dump({"version": "1", "project": "proj", "languages": ["python"], "subsystems": ["app"]}),
+        encoding="utf-8",
+    )
+    (cfg / config.MANIFESTS_DIR / "app.yaml").write_text(
+        "name: app\nrole: library\ncriticality: core\npaths: [src/app]\n"
+        "exposes:\n  - { name: run, kind: function }\n"
+        "tests:\n  - tests/app\n",
+        encoding="utf-8",
+    )
+    app = tmp_path / "src" / "app"
+    app.mkdir(parents=True)
+    (app / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
+    tests = tmp_path / "tests" / "app"
+    tests.mkdir(parents=True)
+    for i in range(3):
+        (tests / f"test_app_{i}.py").write_text("def test_run():\n    assert True\n", encoding="utf-8")
+
+    dry = run_discover(tmp_path)
+    assert [c for c in dry["candidates"] if not c["dropped"]] == []
+    assert "no unmapped supported source" in dry["notice"]
+
+    applied = run_discover(tmp_path, apply=True)
+    assert applied["written"] == []
+    assert applied["skipped"] == []
+    assert not (cfg / config.MANIFESTS_DIR / "tests-app.yaml").exists()
+    root_doc = yaml.safe_load((cfg / config.ROOT_FILE).read_text())
+    assert root_doc["subsystems"] == ["app"]
+
+
+def test_discover_existing_model_adds_only_unmapped_source(tmp_path):
+    """Partial discovery may add a new subsystem, but imports to existing subsystems stay wired."""
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        yaml.safe_dump({"version": "1", "project": "proj", "languages": ["python"], "subsystems": ["app"]}),
+        encoding="utf-8",
+    )
+    (cfg / config.MANIFESTS_DIR / "app.yaml").write_text(
+        "name: app\nrole: library\ncriticality: core\npaths: [src/app]\n"
+        "exposes:\n  - { name: run, kind: function }\n",
+        encoding="utf-8",
+    )
+    app = tmp_path / "src" / "app"
+    extra = tmp_path / "src" / "extra"
+    app.mkdir(parents=True)
+    extra.mkdir(parents=True)
+    (app / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
+    (extra / "feature.py").write_text(
+        "from ..app.main import run\n\n"
+        "def feature():\n    return run()\n",
+        encoding="utf-8",
+    )
+    for i in range(4):
+        (extra / f"mod{i}.py").write_text(f"def helper{i}():\n    return True\n", encoding="utf-8")
+
+    dry = run_discover(tmp_path)
+    kept = [c for c in dry["candidates"] if not c["dropped"]]
+    assert [c["name"] for c in kept] == ["extra"]
+    assert kept[0]["consumes"] == ["app"]
+
+    applied = run_discover(tmp_path, apply=True)
+    assert f"{config.BOUNDS_DIR}/{config.MANIFESTS_DIR}/extra.yaml" in applied["written"]
+    assert not (cfg / config.MANIFESTS_DIR / "app.yaml.yaml").exists()
+    root_doc = yaml.safe_load((cfg / config.ROOT_FILE).read_text())
+    assert root_doc["subsystems"] == ["app", "extra"]
+
+
 def test_discover_merge_into(tmp_path):
     """An explicit merges= directive folds multiple paths into one named subsystem ('core'), suppressing the per-dir candidates."""
     _project(tmp_path)
@@ -284,11 +435,11 @@ def test_discover_apply_zero_written_emits_notice(tmp_path):
     first = run_discover(tmp_path, apply=True)
     assert "notice" not in first  # real manifests were written -> no confusing notice
 
-    again = run_discover(tmp_path, apply=True)  # all candidates already exist
-    assert again["written"] == [f"{config.BOUNDS_DIR}/{config.ROOT_FILE}"]  # only root re-merged
-    assert again["skipped"]  # the per-candidate manifests were skipped
+    again = run_discover(tmp_path, apply=True)  # all source is already owned
+    assert again["written"] == []
+    assert again["skipped"] == []
     assert "notice" in again
-    assert "0 new manifests" in again["notice"]
+    assert "no unmapped supported source" in again["notice"]
     assert "calibrate" in again["notice"]  # points the user at the reconcile path
 
 
@@ -393,6 +544,52 @@ def test_discover_auto_populates_tests_by_convention(tmp_path):
     assert auth_cand["tests"] == ["tests/auth"]
 
 
+def test_discover_top_level_test_file_links_without_overclaiming_tests_dir(tmp_path):
+    """A single `tests/test_<name>.py` link stays file-scoped; discover must not claim all of `tests/`."""
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    for i in range(5):
+        (auth / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_auth.py").write_text("def test_auth():\n    assert True\n")
+
+    result = run_discover(tmp_path)
+    auth_cand = next(c for c in result["candidates"] if c["name"] == "auth" and not c["dropped"])
+    assert auth_cand["tests"] == ["tests/test_auth.py"]
+
+
+def test_discover_docs_convention_links_file_without_overclaiming_docs_dir(tmp_path):
+    """A top-level docs/<name>.md link stays file-scoped; discover must not claim all of `docs/`."""
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    for i in range(5):
+        (auth / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "auth.md").write_text("# Auth\n")
+
+    result = run_discover(tmp_path)
+    auth_cand = next(c for c in result["candidates"] if c["name"] == "auth" and not c["dropped"])
+    assert auth_cand["docs"] == ["docs/auth.md"]
+
+
+def test_discover_docs_named_dir_can_collapse_to_dir_link(tmp_path):
+    """docs/<name>/ can collapse when the directory basename is the owner and all docs inside map to it."""
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    for i in range(5):
+        (auth / f"m{i}.py").write_text(f"def f{i}():\n    pass\n")
+    docs = tmp_path / "docs" / "auth"
+    docs.mkdir(parents=True)
+    (docs / "overview.md").write_text("# Auth overview\n")
+    (docs / "api.md").write_text("# Auth API\n")
+
+    result = run_discover(tmp_path)
+    auth_cand = next(c for c in result["candidates"] if c["name"] == "auth" and not c["dropped"])
+    assert auth_cand["docs"] == ["docs/auth"]
+
+
 def test_discover_applied_manifest_carries_tests(tmp_path):
     """--apply writes the convention-linked `tests:` into the manifest, so a fresh discover produces
     a manifest that already maps source↔tests with no hand-editing."""
@@ -408,3 +605,31 @@ def test_discover_applied_manifest_carries_tests(tmp_path):
     man = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR / "billing.yaml"
     doc = yaml.safe_load(man.read_text())
     assert doc["tests"] == ["tests/billing"]
+
+
+def test_discover_existing_model_reports_unlinked_tests_without_candidates(tmp_path):
+    """Unlinked tests in an existing Bounds repo stay in coverage diagnostics, not generated manifests."""
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        yaml.safe_dump({"version": "1", "project": "proj", "languages": ["python"], "subsystems": ["app"]}),
+        encoding="utf-8",
+    )
+    (cfg / config.MANIFESTS_DIR / "app.yaml").write_text(
+        "name: app\nrole: library\ncriticality: core\npaths: [src/app]\n"
+        "exposes:\n  - { name: run, kind: function }\n",
+        encoding="utf-8",
+    )
+    app = tmp_path / "src" / "app"
+    app.mkdir(parents=True)
+    (app / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
+    misc = tmp_path / "tests" / "misc"
+    misc.mkdir(parents=True)
+    for i in range(6):
+        (misc / f"test_misc_{i}.py").write_text("def test_misc():\n    assert True\n", encoding="utf-8")
+
+    result = run_discover(tmp_path, apply=True)
+    assert result["candidates"] == []
+    assert result["written"] == []
+    assert result["coverage"]["tests"]["unlinked"] == 6
+    assert not (cfg / config.MANIFESTS_DIR / "misc.yaml").exists()

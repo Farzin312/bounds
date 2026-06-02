@@ -16,17 +16,18 @@ BOUNDS := $(if $(wildcard $(VENV)/bin/bounds),$(VENV)/bin/bounds,bounds)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev test lint validate benchmark clean
+.PHONY: help install dev test lint validate benchmark oss-bench clean
 
 help: ## List available targets
 	@echo "Bounds — make targets:"
-	@echo "  make install    Editable install of the package"
-	@echo "  make dev        Editable install with dev extras (pytest, etc.)"
-	@echo "  make test       Run the test suite (pytest -q)"
-	@echo "  make lint       Best-effort lint (ruff if present, else compileall)"
-	@echo "  make validate   Dogfood: bounds validate --human"
-	@echo "  make benchmark  Run the token-economics harness against this repo"
-	@echo "  make clean      Remove build/cache artifacts and .bounds/cache.db"
+	@echo "  make install            Editable install of the package"
+	@echo "  make dev                Editable install with dev extras (pytest, etc.)"
+	@echo "  make test               Run the test suite (pytest -q)"
+	@echo "  make lint               Best-effort lint (ruff if present, else compileall)"
+	@echo "  make validate           Dogfood: bounds validate --human"
+	@echo "  make benchmark          Coverage + token-economics report on THIS repo (dogfood)"
+	@echo "  make oss-bench REPO=DIR Combined coverage + token + command-health report on a cloned repo"
+	@echo "  make clean              Remove build/cache artifacts and .bounds/cache.db"
 	@echo ""
 	@echo "Using PY=$(PY)  BOUNDS=$(BOUNDS)"
 
@@ -53,13 +54,28 @@ lint: ## Best-effort lint (non-failing if ruff absent)
 validate: ## Dogfood Bounds on itself
 	$(BOUNDS) validate --human
 
-# benchmark: deterministic, model-agnostic token-economics harness. Shells out
-# to read-only `bounds` queries against this repo and reports tokens saved
-# (Bounds contract vs equivalent source). No wall-clock in its output; latency
-# is a de-emphasized, separately-labeled note in benchmarks/results/. See
-# benchmarks/README.md for methodology and how to contribute a result.
-benchmark: ## Run the token-economics harness against this repo
+# benchmark: deterministic, model-agnostic dogfood harness. Shells out to
+# read-only `bounds` queries against THIS repo and reports BOTH headline value
+# props — mapping coverage (authoritative `bounds validate` metric) and token
+# savings (Bounds contract vs equivalent source). No wall-clock in its output;
+# latency is a de-emphasized, separately-labeled note in benchmarks/results/.
+# See benchmarks/README.md for methodology and how to contribute a result.
+benchmark: ## Coverage + token-economics report on this repo (dogfood)
 	$(PY) benchmarks/run.py
+
+# oss-bench: combined coverage + token-economics + command-surface health report
+# for ONE already-cloned third-party repo. Runs oss_bench.py + oss_features.py
+# and prints a finished markdown block (closes the hand-assembled-tables hole).
+# It WRITES a fresh .bounds/ into the target repo (init + discover); point it at
+# a throwaway clone, never your working tree. Usage:
+#   make oss-bench REPO=/path/to/clone [NAME=flask LANG=python]
+oss-bench: ## Combined coverage + token + command-health report on a cloned repo (REPO=DIR)
+	@if [ -z "$(REPO)" ]; then \
+		echo "usage: make oss-bench REPO=/path/to/cloned/repo [NAME=flask LANG=python]"; \
+		exit 2; \
+	fi
+	$(PY) benchmarks/oss_report.py --repo "$(REPO)" \
+		$(if $(NAME),--name "$(NAME)",) $(if $(LANG),--lang "$(LANG)",)
 
 clean: ## Remove build/cache artifacts and the bounds cache db
 	rm -rf build dist .pytest_cache *.egg-info src/*.egg-info

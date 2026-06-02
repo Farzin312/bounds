@@ -78,6 +78,17 @@ def test_impact_unknown_subsystem_is_fatal(monkeypatch, py_project):
     assert "E_SUBSYSTEM_NOT_FOUND" in res.output
 
 
+def test_impact_human_surfaces_note_criticality_basis(monkeypatch, py_project):
+    """impact --human re-renders the same data the JSON carries: the note, criticality, and basis are no longer dropped (JSON-first parity)."""
+    data = json.loads(_invoke(monkeypatch, py_project, ["impact", "models"]).output)
+    human = _invoke(monkeypatch, py_project, ["impact", "models", "--human"]).output
+    # Every honesty field present in the JSON appears in the human render.
+    assert data["criticality"] in human          # e.g. "core"
+    assert data["basis"] in human                 # "declared-consumes"
+    assert "lower bound" in human                 # the note's guidance
+    assert "--verify" in human                    # the note tells you how to cross-check
+
+
 def test_schema_describe_impact_and_column_contract(monkeypatch, tmp_path):
     """End-to-end SQL contract: describe verifies a table's sorted columns from migrations, impact tracks its consumers, and dropping a consumed column drifts as E_CONTRACT_MISSING_EXPORT."""
     _write_schema_project(tmp_path)
@@ -312,7 +323,19 @@ def test_agent_rejects_multiple_modes(monkeypatch, py_project):
 
 
 def test_ci_install_cli(monkeypatch, py_project):
-    """ci --install --action scaffolds a real .github/workflows/bounds.yml and lists it in created — the CI gate is generated, not just described."""
+    """ci --install --github scaffolds a real .github/workflows/bounds.yml and lists it in created, and writes NO .gitlab-ci.yml — picking a provider installs only that provider's config, not a kitchen-sink of all three."""
+    res = _invoke(monkeypatch, py_project, ["ci", "--install", "--github"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert any("bounds.yml" in p for p in data["created"])
+    assert (py_project / ".github" / "workflows" / "bounds.yml").is_file()
+    # Picking GitHub must NOT drop a stray GitLab config (the old footgun).
+    assert not (py_project / ".gitlab-ci.yml").exists()
+    assert not (py_project / ".pre-commit-config.yaml").exists()
+
+
+def test_ci_install_action_alias_still_works(monkeypatch, py_project):
+    """The deprecated --action flag remains a hidden alias of --github (back-compat) — existing scripts keep installing the GitHub workflow."""
     res = _invoke(monkeypatch, py_project, ["ci", "--install", "--action"])
     assert res.exit_code == 0
     data = json.loads(res.output)
@@ -320,8 +343,66 @@ def test_ci_install_cli(monkeypatch, py_project):
     assert (py_project / ".github" / "workflows" / "bounds.yml").is_file()
 
 
+def test_ci_autodetect_github_installs_only_github(monkeypatch, py_project):
+    """With no provider flag, a `.github/` marker auto-selects GitHub only — the result reports `detected: [action]` and writes no GitLab/pre-commit config."""
+    (py_project / ".github").mkdir(exist_ok=True)
+    res = _invoke(monkeypatch, py_project, ["ci", "--install"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["detected"] == ["action"]
+    assert data["targets"] == ["action"]
+    assert (py_project / ".github" / "workflows" / "bounds.yml").is_file()
+    assert not (py_project / ".gitlab-ci.yml").exists()
+    assert not (py_project / ".pre-commit-config.yaml").exists()
+
+
+def test_ci_autodetect_gitlab_installs_only_gitlab(monkeypatch, tmp_path):
+    """With no provider flag, a root `.gitlab-ci.yml` marker auto-selects GitLab only — no GitHub workflow is created."""
+    (tmp_path / ".gitlab-ci.yml").write_text("stages: [test]\n", encoding="utf-8")
+    res = _invoke(monkeypatch, tmp_path, ["ci", "--install"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["detected"] == ["gitlab"]
+    assert data["targets"] == ["gitlab"]
+    assert (tmp_path / ".gitlab-ci.yml").exists()
+    assert not (tmp_path / ".github" / "workflows" / "bounds.yml").exists()
+
+
+def test_ci_autodetect_ambiguous_asks_to_pick(monkeypatch, tmp_path):
+    """No CI markers (or both) → friendly E_USAGE "pick a provider" (exit 2) and NOTHING is written — never silently install all three."""
+    res = _invoke(monkeypatch, tmp_path, ["ci", "--install"])
+    assert res.exit_code == 2
+    assert "--github" in res.output and "--gitlab" in res.output
+    assert not (tmp_path / ".github" / "workflows" / "bounds.yml").exists()
+    assert not (tmp_path / ".gitlab-ci.yml").exists()
+    assert not (tmp_path / ".pre-commit-config.yaml").exists()
+
+
+def test_ci_all_installs_three(monkeypatch, tmp_path):
+    """--all is the explicit escape hatch: it installs all three targets regardless of detection."""
+    res = _invoke(monkeypatch, tmp_path, ["ci", "--install", "--all"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["targets"] == ["action", "gitlab", "precommit"]
+    assert (tmp_path / ".github" / "workflows" / "bounds.yml").is_file()
+    assert (tmp_path / ".gitlab-ci.yml").exists()
+    assert (tmp_path / ".pre-commit-config.yaml").exists()
+
+
+def test_ci_precommit_only(monkeypatch, tmp_path):
+    """--precommit alone (no provider) installs just the local hook — a valid local gate independent of CI host; no auto-detect, no provider config dumped."""
+    res = _invoke(monkeypatch, tmp_path, ["ci", "--install", "--precommit"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["targets"] == ["precommit"]
+    assert "detected" not in data  # provider detection is skipped when precommit is explicit
+    assert (tmp_path / ".pre-commit-config.yaml").exists()
+    assert not (tmp_path / ".github" / "workflows" / "bounds.yml").exists()
+    assert not (tmp_path / ".gitlab-ci.yml").exists()
+
+
 def test_ci_needs_install(monkeypatch, py_project):
-    """Bare ci with no action flag is a usage error (exit 2) — it must not write workflow files without an explicit --install."""
+    """Bare ci with no install flag is a usage error (exit 2) — it must not write workflow files without an explicit --install."""
     res = _invoke(monkeypatch, py_project, ["ci"])
     assert res.exit_code == 2
 
@@ -629,7 +710,7 @@ def test_human_renderers_are_clean_summaries(monkeypatch, py_project):
     lst = _invoke(monkeypatch, py_project, ["list", "--human"]).output
     assert "subsystem" in lst and not lst.lstrip().startswith("{")  # a summary, not JSON
     ov = _invoke(monkeypatch, py_project, ["overview", "--human"]).output
-    assert "roles:" in ov and "dependency edges" in ov
+    assert "roles:" in ov and "dependency edges" in ov and "trust:" in ov and "next:" in ov
     im = _invoke(monkeypatch, py_project, ["impact", "models", "--human"]).output
     assert "blast radius" in im and "consumers" in im
     cal = _invoke(monkeypatch, py_project, ["calibrate", "--human"]).output

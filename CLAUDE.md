@@ -93,7 +93,7 @@ only, never `output.emit`) · `discover.py` · `calibrate.py` · `agentsync.py` 
 `ignore.py` `.boundsignore` + generated-code detection ·
 `update_check.py`/`upgrade.py` GitHub-release check + `pipx` self-upgrade · `output.py` JSON/human emit.
 
-Commands: `list` · `describe` · `validate` · `preflight` · `overview` · `init` · `impact` ·
+Commands: `guide` · `list` · `describe` · `validate` · `preflight` · `overview` · `init` · `impact` ·
 `where` · `discover` · `calibrate` · `agent` · `ci` · `cache` · `upgrade` · `upgrade-check`.
 
 **Adding a language adapter:** subclass `extract.base.LanguageAdapter` (set `language_name`,

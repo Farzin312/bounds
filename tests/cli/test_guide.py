@@ -14,11 +14,13 @@ _ROOT_YAML = ('version: "1"\nproject: x\nlanguages: [python]\n'
 
 
 def test_guide_fresh_project_all_todo(tmp_path):
-    """A fresh project shows all four setup steps (init/discover/agents/ci) undone, with next pointing at the first one — the state-aware onboarding contract."""
+    """A fresh project shows all setup steps (init/discover/coverage/agents/ci) undone, with next pointing at the first one — the state-aware onboarding contract."""
     payload = guide.run_guide(tmp_path)
     assert payload["mode"] == "guide"
     assert payload["complete"] is False
-    assert [s["id"] for s in payload["steps"]] == ["init", "discover", "agents", "ci"]
+    assert [s["id"] for s in payload["steps"]] == [
+        "init", "discover", "coverage", "agents", "ci"
+    ]
     assert all(not s["done"] for s in payload["steps"])
     assert payload["next"] == "bounds init --root"  # first undone step
     assert payload["daily"]  # daily commands always present
@@ -34,6 +36,42 @@ def test_guide_after_init_points_to_discover(tmp_path):
     assert done["init"] is True
     assert done["discover"] is False  # no subsystems mapped yet
     assert payload["next"] == "bounds discover --apply"
+
+
+def test_guide_coverage_step_surfaces_unsupported_gap(tmp_path):
+    """With subsystems mapped but an unsupported-language file unmapped, the coverage step is
+    not-done and its `why` names the gap and the durable hand-authored fix — so an agent running
+    `guide` is told loudly what's still dark, not just that discover ran."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: poly\nlanguages: [python]\nsubsystems: [app]\n', encoding="utf-8")
+    (cfg / "manifests" / "app.yaml").write_text(
+        "name: app\nrole: library\ncriticality: leaf\npaths: [app]\nexposes: []\n", encoding="utf-8")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "m.py").write_text("def f():\n    pass\n", encoding="utf-8")
+    (tmp_path / "svc").mkdir()
+    (tmp_path / "svc" / "main.go").write_text("package main\nfunc F() {}\n", encoding="utf-8")
+
+    cov_step = next(s for s in guide.run_guide(tmp_path)["steps"] if s["id"] == "coverage")
+    assert cov_step["done"] is False
+    why = cov_step["why"].lower()
+    assert "go" in why and "unsupported" in why and "durable" in why
+
+
+def test_guide_coverage_step_done_when_fully_mapped(tmp_path):
+    """When every library file is mapped, the coverage step reads done (no false gap)."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: full\nlanguages: [python]\nsubsystems: [app]\n', encoding="utf-8")
+    (cfg / "manifests" / "app.yaml").write_text(
+        "name: app\nrole: library\ncriticality: leaf\npaths: [app]\nexposes: []\n", encoding="utf-8")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "m.py").write_text("def f():\n    pass\n", encoding="utf-8")
+
+    cov_step = next(s for s in guide.run_guide(tmp_path)["steps"] if s["id"] == "coverage")
+    assert cov_step["done"] is True
 
 
 def test_guide_detects_ci_gate(tmp_path):

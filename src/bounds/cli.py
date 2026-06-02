@@ -125,6 +125,22 @@ def _run(human: bool, fn, ci: bool = False):
     except errors.BoundsError as err:
         output.emit(err.to_dict(), human, ci=ci)
         sys.exit(config.EXIT_FATAL)
+    except SystemExit:
+        # A command body may legitimately call sys.exit (e.g. non-zero from validate);
+        # let it propagate untouched rather than masking it as an internal error.
+        raise
+    except Exception:  # noqa: BLE001 - top-level guard: never leak a raw traceback to an agent
+        # Any unexpected, non-BoundsError failure becomes a generic fatal error object so the
+        # JSON-first contract holds (one {"error":{...}} object, exit 2) instead of a Python
+        # traceback. The message is intentionally generic — no stack trace in the payload.
+        err = errors.BoundsError(
+            errors.E_INTERNAL,
+            "an unexpected internal error occurred",
+            fix="re-run with -H/--human for more context, or file an issue at "
+            "https://github.com/Farzin312/bounds/issues",
+        )
+        output.emit(err.to_dict(), human, ci=ci)
+        sys.exit(config.EXIT_FATAL)
 
 
 def _interactive_human(explicit_human: bool) -> bool:
@@ -449,16 +465,69 @@ def overview_cmd(human: bool) -> None:
         counts = Counter(i.code for i in report.issues)
         cov = report.stats.get("coverage", {})
         mapping = cov.get("mapping") or {}
+        validation_errors = report.errors()
         validation = {
-            "ok": report.ok,
-            "errors": len(report.errors()),
+            "ok": not validation_errors,
+            "errors": len(validation_errors),
             "warnings": len(report.warnings()),
             "structural_drift": counts.get(errors.E_STRUCTURAL_DRIFT, 0),
             "boundary_violations": counts.get(errors.E_BOUNDARY_VIOLATION, 0),
+            "ownership_overlaps": counts.get(errors.E_SUBSYSTEM_OVERLAP, 0),
             "contract_gaps": counts.get(errors.E_CONTRACT_MISSING_EXPORT, 0),
             "stale_interfaces": counts.get(errors.E_STALE_INTERFACE, 0),
             "mapped_pct": mapping.get("mapped_pct", 0.0),
         }
+        next_steps: list[str] = []
+        mapped_pct = validation["mapped_pct"]
+        if mapped_pct < 100.0:
+            # Name WHAT is unmapped and the right move per gap kind — so an agent reading overview is
+            # told loudly which files are dark and that unsupported-language manifests are durable
+            # (hand-author once; calibrate/validate won't strip or flag them). JSON-first: the same
+            # mapping fields the human view re-renders.
+            unsupported_n = mapping.get("unmapped_unsupported_language", 0)
+            unowned_n = mapping.get("unmapped_unowned_supported", 0)
+            bits: list[str] = []
+            if unowned_n:
+                bits.append(
+                    f"{unowned_n} supported file(s) in no subsystem — add to a manifest's `paths:`"
+                )
+            if unsupported_n:
+                langs = ", ".join(sorted(mapping.get("unsupported_languages", []) or []))
+                bits.append(
+                    f"{unsupported_n} file(s) in unsupported languages"
+                    + (f" ({langs})" if langs else "")
+                    + " — hand-author a manifest's `exposes` (durable: calibrate/validate keep it)"
+                )
+            detail = ("; ".join(bits)) if bits else "missing library source"
+            next_steps.append(
+                f"Close the coverage gap ({detail}). Run `bounds validate -H` for the full "
+                "`E_COVERAGE_GAP` fix (see docs/coverage.md), then rerun `bounds validate`."
+            )
+        if validation["ownership_overlaps"]:
+            next_steps.append(
+                "Resolve duplicate ownership: run `bounds validate -H` for the overlapping "
+                "subsystems, then narrow one path or move shared files to `files:`."
+            )
+        if validation_errors:
+            next_steps.append(
+                "Refresh the generated model or fix the contract: run `bounds validate -H` "
+                "and address error-severity drift, missing exports, or boundary violations."
+            )
+        if cycle_issues:
+            next_steps.append("Break dependency cycles before treating impact results as complete.")
+        if schema_errors:
+            next_steps.append("Fix schema manifest errors before trusting schema/table answers.")
+        if not next_steps:
+            next_steps.append(
+                "Use `bounds list` → `bounds describe <name>` → `bounds impact <name>` to scope "
+                "changes, then `bounds validate --quick` after edits."
+            )
+        validation["trust_note"] = (
+            "Bounds is authoritative for tree-sitter-verified symbols in mapped source. "
+            "If mapped_pct is below 100, unmapped library source is outside the architecture map; "
+            "use Bounds to scope first, then inspect source where the map is incomplete."
+        )
+        validation["next_steps"] = next_steps
         # Informational doc/test linkage (tracked, never a blocking gap) — carried so the human
         # overview can re-render the same data the validate JSON exposes (JSON-first parity).
         for label in ("tests", "docs"):
@@ -475,10 +544,11 @@ def overview_cmd(human: bool) -> None:
             "cycles": [i.message for i in cycle_issues],
             "schema_issues": [i.to_dict() for i in schema_issues],
             "health": {
-                # ok is true only when nothing blocks: the validation pass is clean AND there
-                # are no graph cycles or schema errors (kept distinct so the human line and JSON
-                # still surface each signal independently).
-                "ok": report.ok and not cycle_issues and schema_errors == 0,
+                # ok is true only when the dashboard is actually clean: no error-severity
+                # validation issues, no graph cycles, and no schema errors. This is stricter
+                # than `report.ok`, which can stay true under enforce=off while still reporting
+                # real drift.
+                "ok": not validation_errors and not cycle_issues and schema_errors == 0,
                 "schema_errors": schema_errors,
                 "cycles": len(cycle_issues),
                 "validation": validation,
@@ -577,6 +647,15 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
                 "--namespace requires --subsystem",
                 fix="pass --subsystem <name> together with --namespace <ns>",
             )
+        # Guard before any path is built: a subsystem name is interpolated into
+        # `<MANIFESTS_DIR>/<name>.yaml`, so an unvalidated name like `../../tmp/x` would
+        # write OUTSIDE .bounds/. relative_to() is lexical and would NOT catch it.
+        if subsystem and not config.is_valid_subsystem_name(subsystem):
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                f"invalid subsystem name {subsystem!r}",
+                fix="use only letters, digits, '-' and '_'",
+            )
         existing = manifest_loader.find_root(Path.cwd())
         project = existing or Path.cwd()
         bounds_dir = project / config.BOUNDS_DIR
@@ -595,6 +674,13 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
                     encoding="utf-8",
                 )
                 created.append(rel)
+            # Gitignore the regenerable, binary cache (.bounds/README claims it's gitignored).
+            # Idempotent: report created vs already-present like root.yaml does.
+            gitignore_rel = (bounds_dir / config.GITIGNORE_FILE).relative_to(project).as_posix()
+            if config.ensure_bounds_gitignore(bounds_dir):
+                created.append(gitignore_rel)
+            else:
+                skipped.append(gitignore_rel)
 
         result: dict = {"created": created, "skipped": skipped}
 
@@ -811,34 +897,76 @@ def _prompt_agent_selection(available: list[str], detected: set[str]) -> set[str
 # ===========================================================================
 @main.command("ci", short_help="Install drift/boundary gates in CI")
 @click.option("--install", "do_install", is_flag=True, default=False,
-              help="Generate CI config for the detected systems.")
-@click.option("--action", "want_action", is_flag=True, default=False, help="GitHub Action only.")
-@click.option("--precommit", "want_precommit", is_flag=True, default=False, help="pre-commit hook only.")
-@click.option("--gitlab", "want_gitlab", is_flag=True, default=False, help="GitLab CI only.")
-@click.option("--all", "want_all", is_flag=True, default=False, help="All CI targets.")
+              help="Generate CI config for the selected (or auto-detected) provider.")
+@click.option("--github", "want_github", is_flag=True, default=False,
+              help="Install the GitHub Actions workflow (.github/workflows/bounds.yml).")
+# --action is the deprecated former name for --github; kept as a hidden alias for
+# back-compat so existing scripts/docs don't break. Prefer --github.
+@click.option("--action", "want_action_alias", is_flag=True, default=False, hidden=True)
+@click.option("--gitlab", "want_gitlab", is_flag=True, default=False,
+              help="Install the GitLab CI job (.gitlab-ci.yml).")
+@click.option("--precommit", "want_precommit", is_flag=True, default=False,
+              help="Install the local pre-commit hook (.pre-commit-config.yaml). Opt-in; orthogonal to provider.")
+@click.option("--all", "want_all", is_flag=True, default=False,
+              help="Install all three targets (GitHub + GitLab + pre-commit).")
 @_human
-def ci_cmd(do_install: bool, want_action: bool, want_precommit: bool, want_gitlab: bool,
-           want_all: bool, human: bool) -> None:
-    """Install drift/boundary gates so the agent workflow is enforced in CI."""
+def ci_cmd(do_install: bool, want_github: bool, want_action_alias: bool, want_gitlab: bool,
+           want_precommit: bool, want_all: bool, human: bool) -> None:
+    """Install drift/boundary gates so the agent workflow is enforced in CI.
+
+    Pick a provider: ``--github`` or ``--gitlab`` (add ``--precommit`` for a local hook,
+    or ``--all`` for everything). With no provider flag, Bounds auto-detects the one CI
+    host this repo already uses; if it can't tell (no or both markers), it asks you to
+    pick instead of installing all three.
+    """
     human = _interactive_human(human)  # interactive setup action: announce in a terminal
 
     def go() -> None:
         if not do_install:
             raise errors.BoundsError(
                 errors.E_USAGE, "ci needs --install",
-                fix="run 'bounds ci --install' (optionally --action/--precommit/--gitlab/--all)",
+                fix="run 'bounds ci --install' (pick --github/--gitlab, add --precommit, or --all)",
             )
-        targets: set[str] = set()
-        if want_action:
-            targets.add("action")
-        if want_precommit:
-            targets.add("precommit")
-        if want_gitlab:
-            targets.add("gitlab")
-        if want_all:
-            targets = set()  # empty => all
+
+        want_github_eff = want_github or want_action_alias  # --action is the legacy alias
         root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
+
+        # Resolve the FINAL explicit target set here; run_ci_install never expands an
+        # empty/missing selection to "all" — so a stray host config is never dumped.
+        targets: set[str] = set()
+        detected: list[str] = []
+        if want_all:
+            targets = set(ciconfig.ALL_TARGETS)
+        else:
+            if want_github_eff:
+                targets.add("action")
+            if want_gitlab:
+                targets.add("gitlab")
+            if want_precommit:
+                targets.add("precommit")
+            # No explicit provider chosen (precommit-only is fine and stays as-is) → try
+            # to auto-detect the single provider this repo uses.
+            no_provider_chosen = not (want_github_eff or want_gitlab)
+            if no_provider_chosen and not want_precommit:
+                found = ciconfig.detect_ci_provider(root)
+                detected = sorted(found)
+                if len(found) == 1:
+                    targets |= found
+                else:
+                    # Zero or both markers: ambiguous. Guide the user to choose rather
+                    # than silently installing all three (the old footgun).
+                    raise errors.BoundsError(
+                        errors.E_USAGE,
+                        "Couldn't determine your CI provider"
+                        + (f" (detected markers for: {', '.join(detected)})" if detected else " (no CI markers found)")
+                        + ".",
+                        fix="Pass --github or --gitlab (add --precommit for a local hook, "
+                            "or --all for everything).",
+                    )
+
         payload = ciconfig.run_ci_install(root, targets=targets)
+        if detected:
+            payload["detected"] = detected  # which provider auto-detect picked
         output.emit(payload, human)
 
     _run(human, go)

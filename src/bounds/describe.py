@@ -83,44 +83,19 @@ def subsystem_overlaps(root: Path, sub: SubsystemCompact) -> list[Issue]:
     depend on the tie-break. Nested paths (different specificity) are NOT overlaps — the deepest path
     legitimately wins (BOUNDS-001), so they never surface here. Sorted for deterministic output.
     """
-    exts = supported_extensions()
     try:
         subs, matcher, repo = _ignore_ctx(root)
     except errors.BoundsError:
         return []
-    # Only files validate would actually scan: the ignore-aware owned set (.boundsignore + .gitignore)
-    # gates the claim map, so an overlap is never reported for a file validate skips by default.
-    scanned = scan.resolve_owners(root, subs, exts, matcher, repo)
-    # file -> {specificity -> sorted set of claiming subsystem names}, built from the same primitives
-    # resolve_owners uses (iter_subsystem_files + path_specificity); no second walk concept.
-    claims: dict[str, dict[int, set[str]]] = {}
-    for name in sorted(subs):
-        s = subs[name]
-        for abs_path in scan.iter_subsystem_files(root, s, exts):
-            rel = abs_path.relative_to(root).as_posix()
-            if rel not in scanned:  # dropped by .boundsignore/.gitignore/symlink — not scanned
-                continue
-            spec = scan.path_specificity(rel, s.paths, s.files)
-            claims.setdefault(rel, {}).setdefault(spec, set()).add(name)
-    issues: list[Issue] = []
-    for rel in sorted(claims):
-        by_spec = claims[rel]
-        top = max(by_spec)
-        contenders = by_spec[top]
-        if sub.name not in contenders or len(contenders) < 2:
-            continue  # this subsystem isn't tied at the winning specificity → no genuine overlap
-        others = sorted(c for c in contenders if c != sub.name)
-        issues.append(Issue(
-            code=errors.E_SUBSYSTEM_OVERLAP,
-            severity=errors.SEVERITY[errors.E_SUBSYSTEM_OVERLAP],
-            message=(f"'{rel}' is claimed at equal specificity by {sorted(contenders)}; "
-                     f"ownership is decided only by sorted-first name ({min(contenders)})"),
-            subsystem=sub.name,
-            file=rel,
-            fix=(f"narrow one path or move '{rel}' to `files:` so a single subsystem owns it "
-                 f"(currently overlaps with {others})"),
-        ))
-    return issues
+    return scan._ownership_overlap_issues(
+        root,
+        subs,
+        supported_extensions(),
+        matcher,
+        repo,
+        subsystem=sub.name,
+        aggregate=False,
+    )
 
 
 def extract_owned(

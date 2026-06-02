@@ -14,7 +14,7 @@ An AI agent's only real cost is **tokens into context**, so that is the only uni
 
 ### Measured on this repo
 
-To understand the `models` subsystem's public API (10 exports, consumed by 5 subsystems) — a small, well-factored subsystem:
+To understand the `models` subsystem's public surface (10 exports, consumed by 5 subsystems) — a small, well-factored subsystem:
 
 | Read this | Size | Token estimate |
 |-----------|------|----------------|
@@ -76,9 +76,9 @@ The token win isn't a flat discount — it *widens* with codebase size, and that
 - **Reading source is O(files).** To understand a subsystem by reading it, an agent's token cost grows with how much code that subsystem (and its neighbors) contains. Bigger codebase → bigger reads.
 - **A Bounds contract is O(symbols exposed).** `bounds describe` returns only the declared, tree-sitter-verified surface — `exposes`, `consumes`, `consumed_by`. A subsystem with 50 internal functions and 5 exports is still ~5 expose entries. So the contract stays roughly **flat as a subsystem's *internals* grow** — but it **scales with how many symbols it *exposes***. A small, well-factored subsystem is cheap; a sprawling one with hundreds of exports is not.
 
-The table below tracks the dimension that matters for the contract — *internal* size at a roughly fixed public API — so the describe column stays flat. (Widen the public API and that column grows; see the measured range below.)
+The table below tracks the dimension that matters for the contract — *internal* size at a roughly fixed public surface — so the describe column stays flat. (Widen the public surface and that column grows; see the measured range below.)
 
-| Subsystem internals (fixed public API) | Read the subsystem's source | `bounds describe <name>` |
+| Subsystem internals (fixed public surface) | Read the subsystem's source | `bounds describe <name>` |
 |----------------------------------------|-----------------------------|--------------------------|
 | Small (a few files) | hundreds–low-thousands of tokens | a few hundred tokens for a small exposed surface |
 | Medium (dozens of files) | many thousands of tokens | roughly unchanged if the exposed API/table count is unchanged |

@@ -2,15 +2,15 @@
 
 The problem this solves: AI coding agents (Claude Code, Cursor, Copilot, Gemini, …) each
 have their own out-of-band convention for project instructions, and when left to their own
-devices they read the raw `.bounds/` files — the binary cache and the unverified YAML
+devices they may read the raw `.bounds/` files — the binary cache and the unverified YAML
 manifests — which both defeats tree-sitter verification *and* burns context on data the CLI
 already compresses.
 
 This module writes a single canonical contract in ``AGENTS.md`` — the cross-ecosystem
 standard file that agents already read — plus a small per-agent *pointer* file in each
 agent's native config location, all conveying the same essentials: use ``bounds list`` /
-``bounds describe`` / ``bounds validate --quick``, never read the raw files, and treat the CLI
-as the API. ``AGENTS.md`` is the source of truth; every per-tool pointer references it, so
+``bounds describe`` / ``bounds validate --quick`` to read architecture, never read raw
+``.bounds`` artifacts, and treat the CLI as the API. ``AGENTS.md`` is the source of truth; every per-tool pointer references it, so
 there is exactly one place the contract lives.
 
 Design constraints (enforced repo-wide):
@@ -60,22 +60,27 @@ CANONICAL_BODY = f"""\
 
 ## Bounds — architecture contract for agents
 
-Bounds models this codebase as subsystem boundary manifests. Query them through the CLI — never read the raw files.
+Bounds models this codebase as subsystem boundary manifests. Query architecture through the CLI — never read raw `.bounds` files.
 
 ### Which command for which task
 - Understand the layout / find the right subsystem → `bounds list`
-- A subsystem's public API or DB tables → `bounds describe <name>` (a few hundred tokens, tree-sitter-verified — read this instead of opening source or migrations)
+- A subsystem's public API or DB tables → `bounds describe <name>` (a few hundred tokens, tree-sitter-verified — use this before opening source or migrations)
 - Every subsystem in a namespace → `bounds describe --namespace <ns>`
 - Where a symbol or table is defined → `bounds where <symbol>`
 - What breaks if you change a subsystem or table → `bounds impact <name>`
 - Confirm an edit didn't drift the contract → `bounds validate --quick`
-- Project health at a glance → `bounds overview`
+- Project health, coverage, and trust guidance → `bounds overview`
 
 ### Workflow
-1. `bounds list` before searching the repo.
-2. `bounds describe <name>` instead of opening source or migrations.
+1. `bounds list` before broad repo search.
+2. `bounds describe <name>` to scope the contract, then read only the implementation files you need to edit.
 3. `bounds impact <name>` before changing an interface or a migration.
-4. `bounds validate --quick` after edits; fix drift before broadening context.
+4. If `bounds overview` reports partial coverage, overlaps, cycles, or validation errors, follow `health.validation.next_steps` before trusting that part of the map.
+5. `bounds validate --quick` after edits; fix drift before broadening context.
+
+### Enforcement (CI is the hard gate, not agent goodwill)
+- After manifests exist, wire the gate once: `bounds ci --install --github` (or `--gitlab`) generates the CI config that runs `bounds preflight --ci` on every PR. This — not agent compliance — is the hard enforcement of the contract.
+- An **intentional** surface change is not drift to fight: update the manifest, then re-baseline with `bounds calibrate --dump-baseline` and commit `.bounds/drift-baseline.json`. `bounds calibrate --check` then fails only on NEW drift above that baseline.
 
 ### Output
 - JSON by default — parse it. Add `-H`/`--human` for a readable view of the same data.
@@ -87,23 +92,24 @@ Bounds models this codebase as subsystem boundary manifests. Query them through 
 
 ### Hard rules
 - NEVER read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/manifests/*.yaml`, or `.bounds/root.yaml` directly. The cache is binary; the manifests bypass tree-sitter verification.
-- The CLI is the API. Always use `bounds` commands to read architecture.
+- The CLI is the API for architecture. Use source files only for implementation details after Bounds has scoped the subsystem.
 """
 
 # The token-lean body shared by every per-agent *pointer* file. Kept short on purpose:
 # its only job is to redirect the agent to AGENTS.md and the essentials.
 _AGENT_POINTER_BODY = """\
 This project uses **Bounds** to model its architecture as subsystem boundary manifests.
-Read the architecture through the Bounds CLI, never by opening the raw files.
+Read the architecture through the Bounds CLI, never by opening raw `.bounds` files.
 
 - Find the right subsystem → `bounds list`
-- A subsystem's API/tables → `bounds describe <name>` (verified, a few hundred tokens — use instead of opening source)
+- A subsystem's API/tables → `bounds describe <name>` (verified, a few hundred tokens — use before opening source)
 - Where a symbol/table lives → `bounds where <symbol>`
 - What breaks if you change it → `bounds impact <name>`
+- Trust/coverage/next steps → `bounds overview`
 - After an edit → `bounds validate --quick`
 
 **Never** read `.bounds/cache.db`, `.bounds/*.json`, or `.bounds/manifests/*.yaml` directly —
-the cache is binary and the manifests bypass tree-sitter verification. The CLI is the API.
+the cache is binary and the manifests bypass tree-sitter verification. The CLI is the API for architecture.
 See `AGENTS.md` for the full contract.
 """
 
@@ -300,7 +306,7 @@ def _front_matter(agent: "_Agent") -> str:
       * Windsurf — ``trigger: always_on`` applies the rule universally.
     Agents without dedicated front-matter return ``""``.
     """
-    desc = "Read this project's architecture via the Bounds CLI, not the raw files"
+    desc = "Read this project's architecture via the Bounds CLI, not raw .bounds files"
     front = {
         "claude": f"---\ndescription: {desc}\n---\n",
         "cursor": f"---\ndescription: {desc}\nalwaysApply: true\n---\n",
@@ -330,7 +336,7 @@ _CLAUDE_COMMAND_BODY = """\
 # /bounds
 
 Run the **Bounds** CLI to read this project's architecture (subsystem boundaries, public
-surfaces, drift) — never read the raw source or `.bounds/` files. Output is JSON by default;
+surfaces, drift) — never read raw `.bounds/` files. Output is JSON by default;
 add `-H` for human-readable.
 
 Run:
@@ -355,7 +361,7 @@ Usage — `/bounds <subcommand> [args]` forwards verbatim to `bounds <subcommand
 - `/bounds overview -H` — project health at a glance
 
 Never read `.bounds/cache.db`, `.bounds/*.json`, or `.bounds/manifests/*.yaml` directly — the
-cache is binary and the manifests bypass tree-sitter verification. The CLI is the API. See
+cache is binary and the manifests bypass tree-sitter verification. The CLI is the API for architecture. See
 `AGENTS.md` for the full contract.
 """
 
@@ -366,10 +372,10 @@ def _pointer_block_body(fmt: str) -> str:
         return "\n".join(
             [
                 "# Bounds models this codebase as subsystem boundary manifests.",
-                "# Read architecture via the CLI, never the raw files:",
+                "# Read architecture via the CLI, never raw .bounds files:",
                 "#   bounds list / bounds describe <name> / bounds validate --quick",
                 "# Never read .bounds/cache.db, .bounds/*.json, or .bounds/manifests/*.yaml.",
-                "# The CLI is the API. See AGENTS.md for the full contract.",
+                "# The CLI is the API for architecture. See AGENTS.md for the full contract.",
                 "read: [AGENTS.md]",
             ]
         )
@@ -390,7 +396,7 @@ def _pointer_block_body(fmt: str) -> str:
 # The auto-trigger description for skill files (Claude/Codex). It is the matcher the model reads
 # to decide *when* to invoke — so it is written as concrete trigger conditions, not a tagline.
 _SKILL_TRIGGER = (
-    "Read this codebase's architecture with the Bounds CLI instead of grepping or opening files. "
+    "Read this codebase's architecture with the Bounds CLI before grepping or opening implementation files. "
     "Use when exploring an unfamiliar area, when you need a subsystem's public API or database "
     "tables, before changing a shared or core subsystem or a migration (check blast radius first), "
     "when asked what depends on X or what breaks if X changes, or to verify drift after an edit. "
@@ -460,7 +466,7 @@ Task: ${input:task:What do you want to know about the architecture?}
 _CURSOR_CMD_BODY = """\
 # Bounds
 
-Use the Bounds CLI to read this project's architecture instead of grepping or opening files:
+Use the Bounds CLI to scope this project's architecture before grepping or opening implementation files:
 
 - `bounds list` — the subsystem map
 - `bounds describe <name>` — a subsystem's verified API/tables
@@ -505,15 +511,16 @@ def _skill_front() -> str:
     return f"---\nname: bounds\ndescription: {_SKILL_TRIGGER}\n---\n"
 
 
-_ARTIFACT_DESC = "Read this project's architecture via the Bounds CLI, not the raw files"
+_ARTIFACT_DESC = "Read this project's architecture via the Bounds CLI, not raw .bounds files"
 
 # Per-agent native artifacts. Keys mirror AGENT_KEYS; an agent absent here (aider) gets only its
 # always-on pointer, since it has no committable command mechanism to target.
 _AGENT_ARTIFACTS: dict[str, tuple[_Artifact, ...]] = {
-    # Claude & Codex: auto-triggering skills (the description fires them). Tool-specific dirs so
-    # the two tools don't both load one shared copy.
+    # Claude & Codex: auto-triggering skills (the description fires them). Claude keeps its own
+    # `.claude/skills/`; Codex loads from the cross-tool open Agent Skills location
+    # `.agents/skills/` (the shared spec Codex/Cursor/Gemini/Copilot/VS Code adopted).
     "claude": (_Artifact(".claude/skills/bounds/SKILL.md", _MARKDOWN, _SKILL_BODY, _skill_front()),),
-    "codex": (_Artifact(".codex/skills/bounds/SKILL.md", _MARKDOWN, _SKILL_BODY, _skill_front()),),
+    "codex": (_Artifact(".agents/skills/bounds/SKILL.md", _MARKDOWN, _SKILL_BODY, _skill_front()),),
     # Gemini: TOML custom command -> /bounds.
     "gemini": (_Artifact(".gemini/commands/bounds.toml", _YAML, _GEMINI_TOML_BODY),),
     # OpenCode: Markdown custom command -> /bounds (project commands live in `.opencode/commands/`,
@@ -535,6 +542,20 @@ _AGENT_ARTIFACTS: dict[str, tuple[_Artifact, ...]] = {
                   f"---\ndescription: {_ARTIFACT_DESC}\n---\n"),
     ),
 }
+
+# Bounds-owned artifact paths that were RENAMED after we already shipped them, so repos synced
+# by an older bounds carry a stale orphan at the old path. These are regenerable (the *correct*
+# paths are written in the `_AGENT_ARTIFACTS` loop of this same sync), so a re-sync self-cleans
+# the orphan — the same self-clean pattern as the legacy state.json in `cache.store.save_state`.
+# Each here is provably NOT a current artifact path: opencode's singular `command/` was renamed to
+# the plural `commands/`, and codex's `.codex/skills/` was renamed to the shared `.agents/skills/`
+# spec location — so removing these can never delete a file this sync just wrote.
+_LEGACY_ARTIFACTS: tuple[tuple[str, str], ...] = (
+    # (legacy path, owning agent) — cleaned only when that agent is in THIS sync, so the
+    # replacement (written above in the _AGENT_ARTIFACTS loop) is guaranteed present.
+    (".opencode/command/bounds.md", "opencode"),   # -> .opencode/commands/bounds.md (plural)
+    (".codex/skills/bounds/SKILL.md", "codex"),     # -> .agents/skills/bounds/SKILL.md (open spec)
+)
 
 
 # ---------------------------------------------------------------------------
@@ -597,6 +618,31 @@ def _sync(root: Path, selected: list[str]) -> dict:
                 prefix=art.front, dedicated=True,
             )
             buckets.record(outcome, Path(art.path).as_posix())
+
+    # 4. Self-clean renamed orphans — but ONLY for agents in THIS sync. The step-3 loop above
+    #    already wrote the current path for each selected agent, so removing that agent's stale
+    #    file at its prior (renamed) path is safe: the replacement is guaranteed present. Gating on
+    #    `owner in selected` means a selective sync (e.g. --only gemini) never strips another
+    #    agent's file without writing its replacement. Only these exact bounds-owned paths are ever
+    #    touched, and none collides with a current artifact (see `_LEGACY_ARTIFACTS`). Fail-soft:
+    #    cleanup never raises. An emptied parent dir is removed too, but only if empty — we never
+    #    recursively delete a dir that still holds other files.
+    selected_set = set(selected)
+    for rel, owner in _LEGACY_ARTIFACTS:
+        if owner not in selected_set:
+            continue
+        legacy = root / Path(rel)
+        if legacy.is_file():
+            try:
+                legacy.unlink()
+            except OSError:
+                pass
+            try:
+                parent = legacy.parent
+                if not any(parent.iterdir()):
+                    parent.rmdir()
+            except OSError:
+                pass
 
     return {
         "created": sorted(buckets.created),

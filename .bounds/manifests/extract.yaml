@@ -19,6 +19,7 @@ exposes:
   - { name: mapping_coverage, kind: function }
   - { name: resolve_doc_owners, kind: function }
   - { name: resolve_test_owners, kind: function }
+  - { name: subsystems_with_unsupported_source, kind: function }
 consumes:
   - { subsystem: models, via: models, interfaces: [Symbol, ImportRef, ExtractResult] }
 tests:

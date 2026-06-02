@@ -268,8 +268,10 @@ def _render_list_human(payload: dict) -> str:
 def _render_overview_human(payload: dict) -> str:
     """Render `bounds overview`: a health line + counts; the full edge list stays in the JSON."""
     h = payload.get("health", {}) or {}
-    status = "ok" if h.get("ok") else "needs attention"
     v = h.get("validation", {}) or {}
+    status = "ok" if h.get("ok") else "needs attention"
+    if h.get("ok") and v.get("warnings", 0):
+        status = "ok with warnings"
     lines = [
         f"{payload.get('project', '')}: {payload.get('subsystems', 0)} subsystems — {status}",
         f"  roles: {_kv_inline(payload.get('roles', {}))}",
@@ -277,7 +279,8 @@ def _render_overview_human(payload: dict) -> str:
         f"  cycles: {h.get('cycles', 0)}   schema errors: {h.get('schema_errors', 0)}"
         f"   dependency edges: {len(payload.get('edges', []))}",
         f"  validation: {v.get('errors', 0)} errors, {v.get('warnings', 0)} warnings"
-        f"   (drift: {v.get('structural_drift', 0)}, boundaries: {v.get('boundary_violations', 0)})"
+        f"   (drift: {v.get('structural_drift', 0)}, boundaries: {v.get('boundary_violations', 0)}, "
+        f"overlaps: {v.get('ownership_overlaps', 0)})"
         f"   mapped: {v.get('mapped_pct', 0.0)}%",
     ]
     # Informational doc/test linkage (tracked, never a gap) — one short line each, only when present.
@@ -286,6 +289,10 @@ def _render_overview_human(payload: dict) -> str:
         if bucket:
             lines.append(f"  {label}: {bucket.get('linked', 0)} linked / "
                          f"{bucket.get('unlinked', 0)} unlinked")
+    if v.get("trust_note"):
+        lines.append(f"  trust: {v['trust_note']}")
+    for step in v.get("next_steps", []) or []:
+        lines.append(f"  next: {step}")
     for cyc in payload.get("cycles", []) or []:
         lines.append(f"  cycle: {cyc}")
     return "\n".join(lines)
@@ -297,6 +304,14 @@ def _render_impact_human(payload: dict) -> str:
     label = "subsystem" if "subsystem" in payload else "interface"
     lines = [f"impact of {label} '{target}': blast radius {payload.get('blast_radius', 0)}"
              + (" (lower bound)" if payload.get("blast_radius_is_lower_bound") else "")]
+    # Re-render the honesty fields the JSON carries (parity rule): criticality + basis tell the
+    # reader *how* the radius was derived; both are present on the subsystem payload, basis on both.
+    crit = payload.get("criticality")
+    basis = payload.get("basis")
+    meta = [bit for bit in ((f"criticality {crit}" if crit else None),
+                            (f"basis {basis}" if basis else None)) if bit]
+    if meta:
+        lines.append("  " + " · ".join(meta))
     if payload.get("providers"):
         lines.append(f"  provided by: {', '.join(payload['providers'])}")
     direct = payload.get("direct_consumers", []) or []
@@ -313,6 +328,11 @@ def _render_impact_human(payload: dict) -> str:
         lines.append(f"  undeclared importers (from --verify): {len(undeclared)}")
         for e in undeclared:
             lines.append(f"    {e.get('consumer', '?')}: {', '.join(e.get('files', []))}")
+    # The note carries the "this is a lower bound — run --verify" guidance the JSON includes;
+    # surface it last so the human view never drops information the JSON has (parity rule).
+    note = payload.get("note")
+    if note:
+        lines.append(f"  note: {note}")
     return "\n".join(lines)
 
 

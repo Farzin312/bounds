@@ -40,6 +40,7 @@ bounds/
 │       ├── __init__.py            # dynamic __version__ (importlib.metadata)
 │       ├── cli.py                 # click group + all commands (arg-parse + one go() per command)
 │       ├── describe.py            # Tier-1+2 `describe` assembly (reuses extract/scan + validate engine)
+│       ├── locate.py              # backs `where` + `impact` (symbol/table location + blast radius)
 │       ├── config.py              # constants: dir names, schema version, defaults, role/criticality registries
 │       ├── errors.py              # BoundsError + stable error-code registry
 │       ├── models.py              # all dataclasses (the data model)
@@ -52,6 +53,8 @@ bounds/
 │       ├── agentsync.py           # cross-agent config generation
 │       ├── tsconfig.py            # tolerant tsconfig.json path-alias loader (baseUrl + paths)
 │       ├── ciconfig.py            # CI config generation
+│       ├── update_check.py        # GitHub-release check for a newer Bounds version
+│       ├── upgrade.py             # `pipx` self-upgrade of a stale Bounds CLI
 │       ├── manifest/
 │       │   ├── __init__.py
 │       │   ├── loader.py          # discover .bounds/, load root + subsystems, fill consumed_by
@@ -279,12 +282,18 @@ class ValidationReport:
 BOUNDS_DIR = ".bounds"
 LEGACY_DIR = ".compact"          # pre-rename layout; still read for backward compatibility
 ROOT_FILE = "root.yaml"
+SUBSYS_DIR = "subsystems"        # legacy per-dir layout name (pre-MANIFESTS_DIR)
 MANIFESTS_DIR = "manifests"      # subsystem manifests live here: .bounds/manifests/<name>.yaml
 SUBSYS_FILE = "bounds.yaml"
 CACHE_FILE = "cache.db"          # binary SQLite extraction cache (context armor)
 STATE_FILE = "state.json"        # legacy JSON cache; read once for auto-migration to cache.db
+GITIGNORE_FILE = ".gitignore"    # scaffolded under .bounds/ so the regenerable cache stays uncommitted
+DRIFT_BASELINE_FILE = "drift-baseline.json"   # accepted-drift baseline; `calibrate --check` flags only drift above it
 SCHEMA_VERSION = "1"
-STATE_VERSION = "1"              # cache schema version, mirrored in PRAGMA user_version
+STATE_VERSION = "3"              # cache schema version, mirrored in PRAGMA user_version
+                                 # (v3: honor Python __all__ in the export surface +
+                                 #  same-file Django ORM inheritance — any extraction-output
+                                 #  change for unchanged source forces a cache rebuild)
 
 # Built-in role/criticality enums. With no custom block in root.yaml these are the
 # valid sets (backward compatible); a custom block replaces them via the root registries.
@@ -293,7 +302,7 @@ BUILTIN_CRITICALITY = {"core","connector","leaf"}
 VALID_ROLES = BUILTIN_ROLES          # back-compat alias
 VALID_CRITICALITY = BUILTIN_CRITICALITY
 VALID_MODES = {"quick","full","preflight","hotfix","audit"}
-VALID_ENFORCE = {"on","off"}
+VALID_ENFORCE = {"on","off","warn"}
 
 # Behavior each base role encodes (checks key off behavior, never the label):
 #   orphan_exposes -- exposes may legitimately have zero consumers (entrypoints).
@@ -304,9 +313,19 @@ ROLE_BASE_BEHAVIOR = {
     "library":   {"orphan_exposes": False},
 }
 
-DEFAULT_IGNORES = {"node_modules",".git","dist","build","__pycache__",".venv","venv",
-                   ".bounds",".compact",".mypy_cache",".pytest_cache"}
+DEFAULT_IGNORES = {"node_modules",".git","dist","build","out","target","coverage",
+                   ".next",".turbo",".svelte-kit",".vercel",".cache",
+                   "__pycache__",".venv","venv",".mypy_cache",".pytest_cache",
+                   ".bounds",".compact"}
 MAX_FILE_BYTES = 1_000_000       # a larger source file is skipped + E_EXTRACTION_FAILED (never read in)
+
+# ext -> language label for *known source code* (the mapping-coverage denominator; adapters →
+# mappable, the rest → an honest by-language coverage gap). Docs are excluded so they can't dilute %.
+KNOWN_SOURCE_EXTS = {".py":"python", ".ts":"typescript", ".js":"javascript",
+                     ".sql":"sql", ".prisma":"prisma", ...}   # + unsupported-today langs (go/rust/…)
+DOC_EXTS = {".md",".mdx",".rst"}            # informational only; never counted in the source denominator
+UPGRADE_INSTALL_CMD = "pipx install --force git+https://github.com/Farzin312/bounds.git"  # stale-CLI fix
+
 # propagation depth by criticality of the *changed* provider (fallback for the built-ins):
 PROPAGATION_DEPTH = {"core": -1, "connector": 1, "leaf": 0}   # -1 = unbounded
 BUILTIN_CRITICALITY_DEPTH = PROPAGATION_DEPTH
@@ -460,11 +479,11 @@ def check_cycles(ctx) -> list[Issue]                # E_CYCLE_DETECTED
 def check_orphans(ctx) -> list[Issue]               # E_ORPHAN_EXPORT (warning)
 
 CHECKS_BY_MODE = {
-  "quick":     [drift, cross_impact],                          # fast, warning-only
-  "full":      [drift, boundary, contract, cross_impact, cycles, orphans],
-  "preflight": [drift, boundary, contract, cross_impact, cycles, orphans],  # blocking
-  "audit":     [drift, boundary, contract, cross_impact, cycles, orphans],  # report only
-  "hotfix":    [],                                             # no-op pass
+  "quick":     [drift, cross_impact, schema, adapter_contracts],                          # fast, warning-only
+  "full":      [drift, boundary, contract, cross_impact, cycles, orphans, schema, adapter_contracts],
+  "preflight": [drift, boundary, contract, cross_impact, cycles, orphans, schema, adapter_contracts],  # blocking
+  "audit":     [drift, boundary, contract, cross_impact, cycles, orphans, schema, adapter_contracts],  # report only
+  "hotfix":    [],                                                                         # no-op pass
 }
 ```
 
@@ -509,10 +528,11 @@ def extract_file(project_root: Path, rel: str) -> tuple[ExtractResult | None, bo
 def extract_owned(root, sub) -> tuple[dict[str, str], list[str], list[str], list[dict]]
     # (exported symbol/table -> owning file, owned files, unparsed files, table catalog)
     # via the shared scan helpers + deterministic SQL fold.
-def describe_one(root, sub, deep, report, entry_matcher) -> dict
+def describe_one(root, sub, deep, report, entry_matcher, full=False) -> dict
     # merged payload: SubsystemCompact.to_dict() + exposes[*].verified/file/entry_point, files,
-    # entry_points, unparsed_files?, tables?, validation_status (subsystem-scoped),
-    # project_status, semantic? (deep).
+    # entry_points, unparsed_files?, tables?, schema_hash? (folded-schema digest, schema subsystems),
+    # validation_status (subsystem-scoped), project_status, semantic? (deep).
+    # full=True adds the verbose lists (files/schema_objects, at-risk table names, schema_diagnostics, docs/tests, overlaps).
 def status_report(root) -> ValidationReport | None   # one shared read-only quick run backing status
 def subsystem_status(report, name) -> str            # fresh|stale|unresolved, scoped to one subsystem
 def project_status(report) -> str                    # the project-wide status rollup
@@ -644,7 +664,7 @@ def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
     #                   bounds) | "hand-edited" (our managed block's body changed since we stamped it)
     # Native artifacts per agent (in addition to the AGENTS.md pointer):
     #   claude   → .claude/skills/bounds/SKILL.md (auto-trigger) + .claude/commands/bounds.md
-    #   codex    → .codex/skills/bounds/SKILL.md (auto-trigger)
+    #   codex    → .agents/skills/bounds/SKILL.md (auto-trigger; shared open Agent Skills spec)
     #   gemini   → .gemini/commands/bounds.toml
     #   opencode → .opencode/commands/bounds.md
     #   copilot  → .github/prompts/bounds.prompt.md
@@ -800,7 +820,8 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_SCHEMA_NO_ORDER` | warning | order-dependent migrations with no deterministic order (no prefix/revision-chain/explicit header); folded in lexical order |
 | `E_SCHEMA_UNPARSED` | warning | a migration statement couldn't be parsed; the file's other statements still folded |
 | `E_SUBSYSTEM_NOT_FOUND` | fatal | unknown subsystem (raised by `describe <name>`, `impact <name>`, `calibrate --subsystem`) |
-| `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do) |
+| `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do, invalid subsystem name) |
+| `E_INTERNAL` | fatal | an unexpected (non-`BoundsError`) exception escaped a command body; the top-level guard converts it to a generic `{"error":{code,message,fix}}` (no traceback leaked) instead of crashing |
 | `E_UNSUPPORTED_LANGUAGE` | warning | file extension has no adapter (skipped) |
 | `E_EXTRACTION_FAILED` | warning | could not extract a file — tree-sitter parse error, unreadable, or over `MAX_FILE_BYTES`. An OWNED file is never silently dropped; it always emits this. |
 | `E_ADAPTER_CONTRACT` | warning | adapter output violated its declared self-consistency contract — a Prisma relation field leaked as a column, or an all-unparsable SQL migration with a revision header that masked the failure. Advisory only (never blocks). |
@@ -826,8 +847,8 @@ bounds list [--namespace NS]       → {project, subsystems:[{name, role, critic
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count, entry_points, validation_status,
                                        project_status, unparsed_files?, exposes[*].verified, exposes[*].file?,
-                                       exposes[*].entry_point?, exposes[*].columns?, tables?, schema_object_counts?,
-                                       rls_posture?, schema_coverage?, schema_diagnostics?}
+                                       exposes[*].entry_point?, exposes[*].columns?, tables?, schema_hash?,
+                                       schema_object_counts?, rls_posture?, schema_coverage?, schema_diagnostics?}
                                    # token-lean by default: the file roster, the (often huge) schema-object
                                    # list, the RLS posture table-name lists, AND the per-file schema_diagnostics
                                    # are gated behind --full, which adds {files, docs, tests, overlaps?,
@@ -840,6 +861,7 @@ bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count,
                                    #   [E_SUBSYSTEM_OVERLAP Issue dicts] — genuine same-path ownership conflicts.
                                        # tables?: [{name, kind:"table", columns:[...], files:[...]}]  (bare table
                                        #   names — schema qualifier dropped so every op folds to one entry)
+                                       # schema_hash? (schema subsystems): stable digest of the folded table catalog
                                        # schema_object_counts?: {kind: n} for the LIVE non-table surface; --full
                                        #   restores schema_objects?: [{name, kind, table?, files:[...]}] — functions/
                                        #   views/indexes/triggers/types/policies/rls. Policies + RLS are an ORDERED

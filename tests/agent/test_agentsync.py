@@ -66,6 +66,19 @@ def test_sync_writes_canonical_agents_md_and_pointer_files(tmp_path):
     assert report["skipped_custom"] == []
 
 
+def test_canonical_contract_scopes_source_reading_instead_of_forbidding_it(tmp_path):
+    """Agent guidance must say Bounds scopes architecture first, then source can be read for implementation; forbidding source reads is misleading."""
+    root = _mk_root(tmp_path)
+    agentsync.run_agent(root, mode="sync", only={"codex"})
+    body = (root / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert "then read only the implementation files you need to edit" in body
+    assert "Use source files only for implementation details after Bounds has scoped the subsystem" in body
+    assert "never read raw `.bounds` files" in body
+    assert "never read the raw files" not in body
+    assert "never read the raw source" not in body
+
+
 def test_every_generated_block_is_marked_and_stamped(tmp_path):
     """Every synced file carries BOUNDS markers + a version/hash stamp (not the literal version
     — we assert structure, since the version string is volatile)."""

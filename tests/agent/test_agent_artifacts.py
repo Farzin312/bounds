@@ -28,7 +28,7 @@ def _frontmatter(text: str) -> dict:
 # Path each capable agent's targeted artifact must land at.
 _ARTIFACTS = {
     "claude": ".claude/skills/bounds/SKILL.md",
-    "codex": ".codex/skills/bounds/SKILL.md",
+    "codex": ".agents/skills/bounds/SKILL.md",
     "gemini": ".gemini/commands/bounds.toml",
     "opencode": ".opencode/commands/bounds.md",
     "copilot": ".github/prompts/bounds.prompt.md",
@@ -71,7 +71,7 @@ def test_skill_files_have_valid_autotrigger_frontmatter(tmp_path):
     """Claude/codex SKILL.md front-matter must name the skill 'bounds' and describe WHEN to use it (the auto-trigger matcher) — without it the skill never fires."""
     root = _mk_root(tmp_path)
     agentsync.run_agent(root, mode="sync", only={"claude", "codex"})
-    for rel in (".claude/skills/bounds/SKILL.md", ".codex/skills/bounds/SKILL.md"):
+    for rel in (".claude/skills/bounds/SKILL.md", ".agents/skills/bounds/SKILL.md"):
         fm = _frontmatter((root / rel).read_text(encoding="utf-8"))
         assert fm.get("name") == "bounds"
         # The description is the auto-trigger matcher — it must describe WHEN to use bounds.
@@ -160,7 +160,7 @@ def test_check_ignores_absent_optional_artifact(tmp_path):
     import shutil
     root = _mk_root(tmp_path)
     agentsync.run_agent(root, mode="sync", only={"codex"})
-    shutil.rmtree(root / ".codex")  # drop the optional native skill
+    shutil.rmtree(root / ".agents")  # drop the optional native skill (cross-tool .agents/skills/)
     result = agentsync.run_agent(root, mode="check")
     assert "codex" in result["configured"]
 
@@ -172,3 +172,51 @@ def test_artifacts_only_for_selected_agents(tmp_path):
     assert (root / ".gemini/commands/bounds.toml").is_file()
     assert not (root / ".claude/skills/bounds/SKILL.md").exists()
     assert not (root / ".windsurf/workflows/bounds.md").exists()
+
+
+def test_sync_self_cleans_renamed_legacy_artifacts(tmp_path):
+    """A repo synced by an older bounds carries stale orphans at the OLD artifact paths
+    (singular `.opencode/command/`, `.codex/skills/`). A fresh sync must delete those orphans
+    AND write the corrected paths, so a re-sync migrates the repo cleanly with no dead files —
+    the same self-clean as the legacy state.json. Emptied legacy dirs are pruned, but a still-used
+    dir (the plural `.opencode/commands/`) survives.
+    """
+    root = _mk_root(tmp_path)
+    # Seed the stale orphans an older bounds would have written at the now-renamed paths.
+    legacy_oc = root / ".opencode/command/bounds.md"
+    legacy_codex = root / ".codex/skills/bounds/SKILL.md"
+    legacy_oc.parent.mkdir(parents=True)
+    legacy_codex.parent.mkdir(parents=True)
+    legacy_oc.write_text("stale opencode command\n", encoding="utf-8")
+    legacy_codex.write_text("stale codex skill\n", encoding="utf-8")
+
+    agentsync.run_agent(root, mode="sync", only={"opencode", "codex"})
+
+    # Both legacy orphans are gone, and their now-empty parent dirs are pruned.
+    assert not legacy_oc.exists(), "stale .opencode/command/bounds.md not cleaned"
+    assert not legacy_codex.exists(), "stale .codex/skills/bounds/SKILL.md not cleaned"
+    assert not (root / ".opencode/command").exists(), "emptied .opencode/command/ not pruned"
+    assert not (root / ".codex/skills/bounds").exists(), "emptied .codex/skills/bounds/ not pruned"
+
+    # The corrected current artifacts exist and the still-needed plural dir survives.
+    assert (root / ".opencode/commands/bounds.md").is_file()
+    assert (root / ".agents/skills/bounds/SKILL.md").is_file()
+    assert (root / ".opencode/commands").is_dir()
+
+
+def test_sync_legacy_clean_preserves_unrelated_files_in_dir(tmp_path):
+    """The legacy-orphan cleanup only unlinks the exact bounds-owned file and prunes its parent
+    ONLY if empty — a human file sharing the legacy dir must be left untouched and the dir kept.
+    """
+    root = _mk_root(tmp_path)
+    legacy_oc = root / ".opencode/command/bounds.md"
+    legacy_oc.parent.mkdir(parents=True)
+    legacy_oc.write_text("stale\n", encoding="utf-8")
+    sibling = root / ".opencode/command/other.md"
+    sibling.write_text("a human's own command\n", encoding="utf-8")
+
+    agentsync.run_agent(root, mode="sync", only={"opencode"})
+
+    assert not legacy_oc.exists(), "bounds-owned orphan should be removed"
+    assert sibling.is_file(), "unrelated sibling must be preserved"
+    assert (root / ".opencode/command").is_dir(), "non-empty legacy dir must NOT be pruned"

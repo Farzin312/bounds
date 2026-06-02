@@ -1,0 +1,24 @@
+name: bounds
+# Skip convention: include "[skip bounds]" in the PR/commit message to bypass this
+# gate (enforced via CI-side commit-message filtering, not by bounds itself).
+on:
+  pull_request:
+    paths: ['src/**', '.bounds/**']
+  push:
+    branches: [main]
+    paths: ['src/**', '.bounds/**']
+jobs:
+  bounds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .bounds/cache.db
+          key: bounds-${{ hashFiles('.bounds/root.yaml', '.bounds/manifests/**') }}
+      - run: pipx install bounds-cli
+      # Freshness gate: flag NEW manifest-vs-source drift above the committed baseline.
+      # Non-blocking by default (|| true) until you commit a baseline and trust the signal;
+      # drop the `|| true` to make new drift fail the build.
+      - run: bounds calibrate --check || true
+      - run: bounds preflight --ci

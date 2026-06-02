@@ -2,7 +2,7 @@
 
 The resolver is the single point where a recorded import string becomes a dependency edge, and it is
 LANGUAGE-SENSITIVE: a "." means a package separator in Python but a literal filename character in
-TS/JS. Conflating the two silently drops edges (the spex_backend 63/93 ``consumed_by 0`` bug).
+TS/JS. Conflating the two silently drops edges in large TS backends.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def test_resolve_python_dotted_relative():
 def test_resolve_relative_typescript_dotted_filename():
     """NestJS/Angular files are dot-named (`auth.service.ts`); a relative import of one must
     resolve. Regression for the bug where `./auth.service` became the bogus stem
-    `src/auth/auth/service` and silently produced no edge (spex_backend 63/93 consumed_by 0)."""
+    `src/auth/auth/service` and silently produced no edge."""
     known = {"src/auth/auth.service": "src/auth/auth.service.ts",
              "src/auth/auth.module": "src/auth/auth.module.ts"}
     assert resolve_import("src/auth/auth.module.ts", "./auth.service", known) == "src/auth/auth.service.ts"
@@ -53,7 +53,7 @@ def test_resolve_external_is_none():
 # The resolver is the single point where a recorded import string becomes a
 # dependency edge, and it is LANGUAGE-SENSITIVE: a "." means a package separator
 # in Python but a literal filename character in TS/JS. Conflating the two silently
-# drops edges (the spex_backend 63/93 `consumed_by 0` bug). These tests lock each
+# drops edges in large TS backends. These tests lock each
 # supported language's distinct resolution semantics so a future change to one
 # dialect can't quietly break another.
 # ===========================================================================

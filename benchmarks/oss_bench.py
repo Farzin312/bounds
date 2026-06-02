@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""Single-repo cross-language benchmark: token economics + correctness health signals.
+"""Single-repo cross-language benchmark: mapping coverage + token economics + correctness health.
 
-`oss_run.py` measures two repos and prints a markdown table. This is the per-repo engine behind a
-larger cross-language sweep: given one already-cloned repo, it runs the full Bounds pipeline
-(`init` -> `discover --apply` -> `list`/`describe`/`impact`/`overview`/`validate`) and emits ONE
-JSON object capturing both:
+The per-repo engine behind a cross-language sweep. Given one already-cloned repo, it runs the full
+Bounds pipeline (`list` before setup -> `init` -> `discover --apply` ->
+`list`/`describe`/`impact`/`overview`/`validate`) and emits ONE JSON object capturing:
 
-  (a) token economics — orient-on-whole-repo and learn-one-subsystem cost via Bounds vs source, plus
-      the full per-subsystem `describe` distribution (min/median/max) so the spread is honest, and
-  (b) correctness/health — did discover crash? does `validate` immediately report drift on the
+  (a) **mapping coverage** — the authoritative `bounds validate` metric (mapped_pct, files
+      mapped/total/unmapped, by-language unmapped, tests/docs linkage). Read from the CLI's own
+      JSON via `_lib.read_coverage`; there is NO benchmark-local coverage walk.
+  (b) **token economics** — orient-on-whole-repo and learn-one-subsystem cost via Bounds vs source,
+      plus the full per-subsystem `describe` distribution (min/median/max) so the spread is honest.
+  (c) **correctness/health** — did discover crash? does `validate` immediately report drift on the
       manifests discover just wrote (discover<->validate disagreement)? overview health, cycles,
-      schema issues, supported-vs-total file coverage, and per-command latency.
+      schema issues, and per-command latency.
 
-Deterministic + model-agnostic (same as the other harnesses): optional tiktoken (exact cl100k_base),
-else a labeled ~1-token/4-chars estimate. Fail-soft: a repo with no supported files yields a result
-with `subsystems: 0` and a note, never a crash — that is itself a measured outcome (unsupported
-language handling). One JSON object to stdout so a caller can capture it cleanly.
+Deterministic + model-agnostic: optional tiktoken (exact cl100k_base), else a labeled
+~1-token/4-chars estimate. Fail-soft: a repo with no supported files yields a result with
+`subsystems: 0` and a note, never a crash — that is itself a measured outcome (unsupported language
+handling). One JSON object to stdout so a caller can capture it cleanly.
 
 Usage:
     python benchmarks/oss_bench.py --repo /path/to/cloned/repo
@@ -26,79 +28,73 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
-import subprocess
 import sys
-import time
 from pathlib import Path
 
 BENCH_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BENCH_DIR.parent
 sys.path.insert(0, str(BENCH_DIR))
-from run import _make_counter, manifest_source_files  # noqa: E402 - reuse the one counter + parser
+from _lib import (  # noqa: E402 - shared benchmark helpers (the one home for these)
+    _as_int,
+    _make_counter,
+    manifest_source_files,
+    pick_subsystem,
+    read_coverage,
+    run_bounds,
+    source_tokens,
+)
 
-# Extensions Bounds has an adapter for (registry: python, typescript/js, sql, prisma). Used only to
-# report supported-vs-total file coverage; never to gate extraction (the CLI owns that).
-SUPPORTED_EXTS = {".py", ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".sql", ".prisma"}
 # Per-subsystem `describe` distribution can be expensive on huge maps; cap the sampled count.
 DESCRIBE_SAMPLE_CAP = 60
 
 
-def _bounds() -> str:
-    venv = REPO_ROOT / ".venv" / "bin" / "bounds"
-    return str(venv) if venv.exists() else "bounds"
-
-
 def _run(args: list[str], cwd: Path) -> tuple[str, str, int, float]:
-    """Run `bounds <args>` in cwd; return (stdout, stderr, returncode, elapsed_seconds)."""
-    t0 = time.perf_counter()
-    proc = subprocess.run([_bounds(), *args], cwd=cwd, capture_output=True, text=True)
-    return proc.stdout, proc.stderr, proc.returncode, time.perf_counter() - t0
+    """Run `bounds <args>` in cwd; return (stdout, stderr, returncode, elapsed_seconds).
+
+    Module-local indirection over the shared runner so tests can monkeypatch ``oss_bench._run``
+    (and so the whole pipeline below routes through one seam).
+    """
+    return run_bounds(args, cwd)
+
+
+def _error_payload(stdout: str) -> dict:
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    err = data.get("error")
+    return err if isinstance(err, dict) else {}
 
 
 def _source_tokens(root: Path, name: str, count) -> int:
-    text = "".join(p.read_text(encoding="utf-8", errors="ignore")
-                   for p in manifest_source_files(root, name))
-    return count(text)
-
-
-def _pick_subsystem(subs: list[dict]) -> str | None:
-    """The most-depended-on non-test subsystem (the one an agent most needs to understand)."""
-    def score(s):
-        name = s.get("name", "")
-        penalty = -1 if ("test" in name.lower()) else 0
-        return (penalty, len(s.get("consumed_by", []) or []), s.get("exposes", 0))
-    real = [s for s in subs if "test" not in s.get("name", "").lower()] or subs
-    return max(real, key=score).get("name") if real else None
-
-
-def _file_coverage(root: Path) -> dict:
-    """Total source-ish files in the repo vs how many a supported adapter could handle."""
-    ignore = {".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__", ".bounds"}
-    total = supported = 0
-    for p in root.rglob("*"):
-        if not p.is_file():
-            continue
-        if any(part in ignore for part in p.parts):
-            continue
-        total += 1
-        if p.suffix in SUPPORTED_EXTS:
-            supported += 1
-    return {"files_total": total, "files_supported_ext": supported}
-
-
-def _as_int(x, default=0) -> int:
-    try:
-        return int(x)
-    except (TypeError, ValueError):
-        return default
+    return source_tokens(root, name, count)
 
 
 def measure(root: Path, name: str, lang: str, count) -> dict:
     result: dict = {"name": name, "lang": lang, "root": str(root), "errors": [], "notes": []}
-    result.update(_file_coverage(root))
+
+    # --- without Bounds: the command should fail loud and tell users how to recover ---
+    pre_out, pre_err, pre_rc, pre_t = _run(["list"], root)
+    result["without_bounds_list_rc"] = pre_rc
+    result["without_bounds_list_sec"] = round(pre_t, 3)
+    pre_error = _error_payload(pre_out)
+    if pre_error:
+        result["without_bounds_error_code"] = pre_error.get("code")
+        result["without_bounds_error_message"] = pre_error.get("message")
+        result["without_bounds_error_fix"] = pre_error.get("fix")
+    elif pre_rc == 0:
+        result["notes"].append("preflight list succeeded before init; repo already had .bounds")
+    else:
+        result["errors"].append(f"preflight list emitted non-JSON failure (rc={pre_rc}): {pre_err.strip()[:200]}")
 
     # --- init + discover (the bootstrap; capture crashes/latency) ---
     _, init_err, init_rc, init_t = _run(["init", "--root"], root)
+    result["init_rc"] = init_rc
+    result["init_sec"] = round(init_t, 3)
+    if init_rc != 0:
+        result["errors"].append(f"init exited {init_rc}: {init_err.strip()[:200]}")
     out, disc_err, disc_rc, disc_t = _run(["discover", "--apply"], root)
     result["discover_rc"] = disc_rc
     result["discover_sec"] = round(disc_t, 3)
@@ -124,6 +120,10 @@ def measure(root: Path, name: str, lang: str, count) -> dict:
     if not subs:
         result["notes"].append("no subsystems discovered (unsupported language or empty repo)")
         return result
+
+    # --- mapping coverage: the AUTHORITATIVE metric from the CLI's own JSON ---
+    # (read from `bounds validate` stats.coverage.mapping; no benchmark-local file walk).
+    result["coverage"] = read_coverage(root)
 
     # --- map reduction: bounds list vs reading every subsystem's source ---
     all_source = sum(_source_tokens(root, s.get("name", ""), count) for s in subs)
@@ -156,7 +156,7 @@ def measure(root: Path, name: str, lang: str, count) -> dict:
         result["describe_max_tok"] = max(describe_toks)
 
     # --- key subsystem: describe + impact vs its own source (API reduction) ---
-    key = _pick_subsystem(subs)
+    key = pick_subsystem(subs)
     result["key_subsystem"] = key
     d_out, _, _, d_t = _run(["describe", key], root)
     i_out, _, _, i_t = _run(["impact", key], root)
@@ -175,6 +175,14 @@ def measure(root: Path, name: str, lang: str, count) -> dict:
         result["overview_health_ok"] = bool(health.get("ok"))
         result["cycles"] = _as_int(health.get("cycles", len(ov.get("cycles", []) or [])))
         result["schema_issues"] = len(ov.get("schema_issues", []) or [])
+        validation = health.get("validation", {}) if isinstance(health, dict) else {}
+        if isinstance(validation, dict):
+            result["overview_validation_errors"] = _as_int(validation.get("errors"))
+            result["overview_validation_warnings"] = _as_int(validation.get("warnings"))
+            result["overview_structural_drift"] = _as_int(validation.get("structural_drift"))
+            result["overview_boundary_violations"] = _as_int(validation.get("boundary_violations"))
+            result["overview_ownership_overlaps"] = _as_int(validation.get("ownership_overlaps"))
+            result["overview_mapped_pct"] = validation.get("mapped_pct")
     except json.JSONDecodeError:
         result["errors"].append("overview emitted non-JSON")
 
@@ -186,10 +194,17 @@ def measure(root: Path, name: str, lang: str, count) -> dict:
         val = json.loads(val_out)
         issues = val.get("issues", []) if isinstance(val, dict) else []
         result["validate_issue_count"] = len(issues)
+        result["validate_error_count"] = sum(
+            1 for i in issues if isinstance(i, dict) and i.get("severity") == "error"
+        )
+        result["validate_warning_count"] = sum(
+            1 for i in issues if isinstance(i, dict) and i.get("severity") == "warning"
+        )
         # Codes give a fingerprint of WHAT drifts immediately after discover (ideally nothing).
         codes = sorted({i.get("code", "?") for i in issues if isinstance(i, dict)})
         result["validate_codes"] = codes[:12]
         result["validate_clean_on_fresh_discover"] = (len(issues) == 0)
+        result["validate_error_clean_on_fresh_discover"] = (result["validate_error_count"] == 0)
     except json.JSONDecodeError:
         result["errors"].append("validate emitted non-JSON")
 

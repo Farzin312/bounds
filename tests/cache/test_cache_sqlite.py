@@ -86,10 +86,43 @@ def test_migration_from_legacy_json(tmp_path):
     report = store.migrate_json_to_sqlite(tmp_path)
     assert report["migrated"] is True
     assert report["files"] == 1
+    # save_state now removes the orphan json itself; removed_json must still reflect that truthfully.
+    assert report["removed_json"] is True
     assert not (cfg / config.STATE_FILE).exists()
     assert (cfg / config.CACHE_FILE).is_file()
     # A second migrate is a no-op.
     assert store.migrate_json_to_sqlite(tmp_path)["migrated"] is False
+
+
+def test_save_state_removes_orphan_legacy_json(tmp_path):
+    """save_state must self-complete the migration: after writing cache.db it removes a sibling
+    state.json so the shadowed, version-gated orphan never lingers as dead weight."""
+    _init_bounds(tmp_path)
+    cfg = tmp_path / config.BOUNDS_DIR
+    legacy = cfg / config.STATE_FILE
+    legacy.write_text(json.dumps({"version": config.STATE_VERSION, "files": {}}), encoding="utf-8")
+
+    state = store.State()
+    state.put(_result("src/auth/login.py"), subsystem="auth")
+    store.save_state(tmp_path, state)
+
+    # cache.db is now authoritative; the orphan state.json is gone.
+    assert (cfg / config.CACHE_FILE).is_file()
+    assert not legacy.exists()
+
+
+def test_save_state_no_legacy_json_is_noop(tmp_path):
+    """When there is no sibling state.json, the cleanup is a fail-soft no-op (missing file never raises)."""
+    _init_bounds(tmp_path)
+    cfg = tmp_path / config.BOUNDS_DIR
+    assert not (cfg / config.STATE_FILE).exists()
+
+    state = store.State()
+    state.put(_result("src/auth/login.py"), subsystem="auth")
+    store.save_state(tmp_path, state)  # must not raise
+
+    assert (cfg / config.CACHE_FILE).is_file()
+    assert not (cfg / config.STATE_FILE).exists()
 
 
 def test_prune_drops_missing_files(tmp_path):

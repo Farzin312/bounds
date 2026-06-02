@@ -120,6 +120,16 @@ def load_all(
 # Internal helpers
 # ---------------------------------------------------------------------------
 def _subsystem_path(project_root: Path, name: str) -> Path:
+    # Defense-in-depth (cli.init applies the same check before writing): the name is
+    # interpolated into a path, so a traversal/separator name like `../../tmp/x` could read
+    # an arbitrary `*.yaml` outside the manifests dir. Reject anything that isn't a safe
+    # single segment so `describe <name>` / `calibrate --subsystem` stay confined.
+    if not config.is_valid_subsystem_name(name):
+        raise errors.BoundsError(
+            errors.E_USAGE,
+            f"invalid subsystem name {name!r}",
+            fix="use only letters, digits, '-' and '_'",
+        )
     return config.config_dir(project_root) / config.MANIFESTS_DIR / f"{name}.yaml"
 
 

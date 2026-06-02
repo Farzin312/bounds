@@ -1,0 +1,5 @@
+# Bounds cache artifacts — regenerable, binary (context armor), machine-only.
+# Do NOT commit these; manifests and root.yaml ARE committed.
+cache.db
+cache.db-journal
+state.json

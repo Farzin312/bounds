@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import agentsync
+from . import agentsync, gitutil
+from .extract import scan, supported_extensions
+from .ignore import load_matcher
 from .manifest import loader as manifest_loader
 
 
@@ -26,12 +28,16 @@ def run_guide(project_root: Path) -> dict:
     has_bounds = root is not None
 
     n_subsystems = 0
+    subs: dict = {}
     if has_bounds:
         try:
             _root, subs, _issues = manifest_loader.load_all(base)
             n_subsystems = len(subs)
         except Exception:  # noqa: BLE001 - a broken manifest shouldn't break the guide
             n_subsystems = 0
+            subs = {}
+
+    coverage = _coverage(base, subs) if n_subsystems > 0 else None
 
     agent_check = agentsync.run_agent(base, mode="check")
     agents_done = bool(agent_check.get("ok")) and bool(agent_check.get("configured"))
@@ -50,6 +56,16 @@ def run_guide(project_root: Path) -> dict:
             "command": "bounds discover --apply",
             "why": "Auto-maps subsystems + dependency edges so agents have a map to query.",
             "done": has_bounds and n_subsystems > 0,
+        },
+        {
+            "id": "coverage",
+            "title": "Close coverage gaps (map 100% of library source)",
+            "command": "bounds validate -H",
+            "why": _coverage_why(coverage),
+            # Done only once subsystems exist AND everything is mapped; until then this surfaces the
+            # gap loudly so an agent/human knows what's still dark and the durable hand-authored fix
+            # for unsupported languages. Not-done before discover (discover, ordered first, is `next`).
+            "done": coverage is not None and coverage.get("files_unmapped", 0) == 0,
         },
         {
             "id": "agents",
@@ -83,6 +99,50 @@ def run_guide(project_root: Path) -> dict:
         "next": pending["command"] if pending else None,
         "complete": pending is None,
     }
+
+
+def _coverage(base: Path, subs: dict) -> dict | None:
+    """Mapping coverage over the repo's library source, or None if it can't be computed.
+
+    Fail soft: any error (e.g. a permissions issue while walking) just drops the coverage step's
+    detail — the guide must never raise. Uses the same `scan.mapping_coverage` signal as
+    `validate`/`overview`, so the three never disagree about what's mapped.
+    """
+    try:
+        matcher = load_matcher(base)
+        exts = supported_extensions()
+        owners = scan.resolve_owners(base, subs, exts)
+        owned = set(owners)
+        repo = gitutil.repo_root(base) or base
+        return scan.mapping_coverage(base, owned, matcher, repo=repo, subsystems=subs)
+    except Exception:  # noqa: BLE001 - coverage is advisory; never break the guide over it
+        return None
+
+
+def _coverage_why(coverage: dict | None) -> str:
+    """One-line rationale for the coverage step — names the live gap when there is one."""
+    if not coverage or coverage.get("files_unmapped", 0) == 0:
+        return (
+            "Bounds is authoritative only for source it mapped; aim for 100% so no library code is "
+            "outside the map. See docs/coverage.md."
+        )
+    bits: list[str] = []
+    unowned = coverage.get("unmapped_unowned_supported", 0)
+    unsupported = coverage.get("unmapped_unsupported_language", 0)
+    if unowned:
+        bits.append(f"{unowned} supported file(s) in no subsystem — add to a manifest's `paths:`")
+    if unsupported:
+        langs = ", ".join(sorted(coverage.get("unsupported_languages", []) or []))
+        bits.append(
+            f"{unsupported} file(s) in unsupported languages"
+            + (f" ({langs})" if langs else "")
+            + " — hand-author a manifest's `exposes` (durable: calibrate/validate keep it)"
+        )
+    detail = "; ".join(bits) or "some library source is unmapped"
+    return (
+        f"mapped {coverage.get('mapped_pct', 0.0)}% of library source; {detail}. "
+        "See docs/coverage.md."
+    )
 
 
 def _ci_installed(root: Path) -> bool:

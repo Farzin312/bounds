@@ -158,6 +158,94 @@ def test_calibrate_clean_subsystem_absent_from_proposal(tmp_path):
     assert result["summary"]["removed"] == 0
 
 
+# ---- Unsupported-language durability (Go/Rust/Java — no adapter) ----
+def _build_unsupported(tmp_path):
+    """A Go subsystem (unsupported language) with hand-authored exposes + a pure-Python subsystem.
+
+    Bounds has no Go adapter, so it extracts nothing from ``payments`` — its exposes are
+    unverifiable and must never be auto-removed. ``db`` is pure supported source with a genuinely
+    stale expose that must still be proposed for removal (regression guard).
+    """
+    (tmp_path / "services" / "payments").mkdir(parents=True)
+    (tmp_path / "services" / "payments" / "charge.go").write_text(
+        "package payments\nfunc Charge() error { return nil }\nfunc Refund() error { return nil }\n"
+    )
+    (tmp_path / "src" / "db").mkdir(parents=True)
+    (tmp_path / "src" / "db" / "store.py").write_text("def connect():\n    pass\n")
+
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        yaml.safe_dump({"version": "1", "project": "x", "languages": ["go", "python"],
+                        "subsystems": ["payments", "db"]})
+    )
+    (cfg / config.MANIFESTS_DIR / "payments.yaml").write_text(
+        yaml.safe_dump(
+            {"name": "payments", "role": "library", "criticality": "core",
+             "paths": ["services/payments"],
+             "exposes": [{"name": "Charge", "kind": "function"},
+                         {"name": "Refund", "kind": "function"}],
+             "consumes": []},
+            sort_keys=False,
+        )
+    )
+    (cfg / config.MANIFESTS_DIR / "db.yaml").write_text(
+        yaml.safe_dump(
+            {"name": "db", "role": "platform", "criticality": "core", "paths": ["src/db"],
+             "exposes": [{"name": "connect", "kind": "function"},
+                         {"name": "DROPME", "kind": "function"}],  # stale, unconsumed -> REMOVE
+             "consumes": []},
+            sort_keys=False,
+        )
+    )
+    return tmp_path
+
+
+def test_calibrate_never_removes_unsupported_language_exposes(tmp_path):
+    """A Go (unsupported) subsystem's hand-authored exposes are UNVERIFIABLE — Bounds has no adapter,
+    so a 'declared but not found' expose is never proven stale: it goes to needs_review, never
+    remove_exposes (no data loss on hand-authored unsupported-language manifests)."""
+    _build_unsupported(tmp_path)
+    result = run_calibrate(tmp_path)
+    # payments has only needs_review entries (no add/remove/consumes), so _has_changes is False and
+    # it drops from proposals entirely — the point: zero remove_exposes for it anywhere.
+    blob = str(result["subsystems"])
+    payments = result["subsystems"].get("payments", {})
+    assert payments.get("remove_exposes", []) == []      # never auto-removed
+    assert "remove_exposes" not in blob or "Charge" not in str(payments.get("remove_exposes", []))
+    assert result["summary"]["removed"] == 1  # only db's DROPME, not the Go exposes
+
+
+def test_calibrate_pure_supported_subsystem_still_removes_stale_expose(tmp_path):
+    """Regression guard: the unsupported-language protection must NOT over-protect — a pure
+    supported-language subsystem (db) with a genuinely stale expose (DROPME) is STILL proposed for
+    removal."""
+    _build_unsupported(tmp_path)
+    result = run_calibrate(tmp_path)
+    db = result["subsystems"]["db"]
+    assert db["remove_exposes"] == ["DROPME"]
+
+
+def test_calibrate_unsupported_exposes_surfaced_as_needs_review(tmp_path):
+    """The protected exposes are not silently dropped — they surface as needs_review so a human can
+    confirm them, exactly like a consumed-but-vanished contract."""
+    from bounds.calibrate import _calibrate_one
+    from bounds.extract.scan import extract_project, subsystems_with_unsupported_source
+    from bounds.ignore import load_matcher
+    from bounds.manifest import loader as ml
+    from bounds.validate.checks import index_extracts
+
+    _build_unsupported(tmp_path)
+    _r, subs, _ = ml.load_all(tmp_path)
+    m = load_matcher(tmp_path)
+    fo, ex, gen = extract_project(tmp_path, subs, m)
+    uns = subsystems_with_unsupported_source(tmp_path, subs, m)
+    kn, sx = index_extracts(ex)
+    p = _calibrate_one("payments", subs, fo, ex, gen, kn, sx, {}, None, uns)
+    assert p["remove_exposes"] == []
+    assert p["needs_review"] == ["Charge", "Refund"]
+
+
 # ---- Drift baseline + check (the freshness gate) ----
 def test_check_without_baseline_flags_all_drift(tmp_path):
     """With no baseline file, the freshness gate treats all existing drift as new (ok=False) and emits agent-structured items."""

@@ -145,6 +145,32 @@ def test_drift_route_file_outside_app_dir_still_flags():
     assert any(i.severity == "info" and "GET" in i.message for i in issues)
 
 
+def test_drift_skips_declared_expose_for_unsupported_language_owner():
+    """A subsystem owning an UNSUPPORTED-language file (Go/Rust/Java) has exposes Bounds can't
+    verify — it has no adapter, extracted nothing, so a declared-but-absent expose is NOT
+    proven-stale drift. Consistent with calibrate (which routes the same exposes to needs_review,
+    never remove): the two must agree on an unsupported-language manifest."""
+    subs = {"payments": Sub(name="payments", paths=["services/payments"],
+                            exposes=[Interface("Charge"), Interface("Refund")])}
+    # No extracts (no Go adapter) and payments flagged as an unsupported-language owner.
+    issues = check_structural_drift(
+        _ctx(subs, extracts={}, file_owner={}, unsupported_owners={"payments"})
+    )
+    assert issues == [], [i.message for i in issues]
+
+
+def test_drift_supported_owner_not_in_unsupported_set_still_flags():
+    """Regression guard: the unsupported-owner skip must NOT over-protect — a supported subsystem
+    NOT in unsupported_owners with a declared-but-missing expose still flags E_STRUCTURAL_DRIFT."""
+    subs = {"a": Sub(name="a", paths=["x"], exposes=[Interface("foo")])}
+    extracts = {"x/f.py": ExtractResult("x/f.py", "python", [Symbol("bar", "function", 1, True)])}
+    issues = check_structural_drift(
+        _ctx(subs, extracts, {"x/f.py": "a"}, unsupported_owners=set())
+    )
+    assert any(i.code == errors.E_STRUCTURAL_DRIFT and i.severity == "error" and "foo" in i.message
+               for i in issues)
+
+
 # ===========================================================================
 # Cycle helper — deep-graph hardening
 # ===========================================================================
@@ -200,6 +226,27 @@ def test_boundary_allows_exposed_import():
         ),
     }
     owner = {"src/database/index.ts": "database", "src/auth/index.ts": "auth"}
+    assert check_boundary(_ctx(subs, extracts, owner)) == []
+
+
+def test_boundary_allows_test_files_to_import_internals():
+    """Tests may exercise internals without turning a fresh discover into production boundary errors."""
+    subs = {
+        "library": Sub(name="library", exposes=[Interface("public")]),
+        "tests": Sub(name="tests", paths=["tests"], consumes=[Consumes("library")]),
+    }
+    extracts = {
+        "src/library.py": ExtractResult(
+            "src/library.py", "python",
+            [Symbol("public", "function", 1, True), Symbol("_private", "function", 2, True)],
+        ),
+        "tests/test_library.py": ExtractResult(
+            "tests/test_library.py", "python",
+            [],
+            [ImportRef("../src/library", ["_private"], 1)],
+        ),
+    }
+    owner = {"src/library.py": "library", "tests/test_library.py": "tests"}
     assert check_boundary(_ctx(subs, extracts, owner)) == []
 
 

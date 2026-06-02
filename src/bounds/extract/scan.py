@@ -13,9 +13,9 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
-from .. import config
+from .. import config, errors
 from ..ignore import IgnoreMatcher, has_generated_marker
-from ..models import ExtractResult, SubsystemCompact
+from ..models import ExtractResult, Issue, SubsystemCompact
 from . import get_adapter, supported_extensions
 
 
@@ -170,16 +170,24 @@ def iter_repo_source(project_root: Path, matcher: IgnoreMatcher | None = None) -
     return sorted(out)
 
 
-def iter_subsystem_files(project_root: Path, sub: SubsystemCompact, exts: set[str]) -> list[Path]:
-    """Every supported source file a subsystem owns (its ``paths`` globs + explicit ``files``).
+def iter_subsystem_files(
+    project_root: Path, sub: SubsystemCompact, exts: set[str] | None
+) -> list[Path]:
+    """Files a subsystem owns (its ``paths`` globs + explicit ``files``), filtered by ``exts``.
 
     The single home for the owned-file walk: the validation engine and ``describe`` both
     call this so they agree on exactly which files belong to a subsystem — no second copy to
-    drift. Deduplicated by real path (so a file reached via two globs is counted once) and
-    sorted by posix path for deterministic output. Skips :data:`config.DEFAULT_IGNORES`.
+    drift. ``exts`` is the extension allow-set (e.g. ``supported_extensions()``); pass ``None`` to
+    include EVERY extension — used by :func:`subsystems_with_unsupported_source` so an
+    unsupported-language file (``.go``/``.rs``/…) is visible (mirroring ``walk_supported``'s
+    ``exts=None`` convention). Deduplicated by real path (so a file reached via two globs is counted
+    once) and sorted by posix path for deterministic output. Skips :data:`config.DEFAULT_IGNORES`.
     """
     out: list[Path] = []
     seen: set[Path] = set()
+
+    def included(suffix: str) -> bool:
+        return exts is None or suffix in exts
 
     def add(f: Path) -> None:
         try:
@@ -197,16 +205,16 @@ def iter_subsystem_files(project_root: Path, sub: SubsystemCompact, exts: set[st
             for f in walk_supported(base, exts):
                 add(f)
         elif base.is_file():
-            if base.suffix in exts:
+            if included(base.suffix):
                 add(base)
         else:  # treat as a glob relative to the project root
             for f in sorted(project_root.glob(raw)):
-                if f.is_file() and f.suffix in exts and not in_default_ignores(f, project_root):
+                if f.is_file() and included(f.suffix) and not in_default_ignores(f, project_root):
                     add(f)
 
     for raw in sub.files or []:
         f = project_root / raw
-        if f.is_file() and f.suffix in exts:
+        if f.is_file() and included(f.suffix):
             add(f)
 
     return sorted(out, key=lambda p: p.as_posix())
@@ -276,6 +284,85 @@ def resolve_owners(
         if ignored:
             result = {rel: v for rel, v in result.items() if rel not in ignored}
     return result
+
+
+def _ownership_overlap_issues(
+    project_root: Path,
+    subsystems: dict[str, SubsystemCompact],
+    exts: set[str],
+    matcher: IgnoreMatcher | None = None,
+    repo: Path | None = None,
+    include_gitignored: bool = False,
+    *,
+    subsystem: str | None = None,
+    aggregate: bool = True,
+) -> list[Issue]:
+    """Equal-specificity ownership conflicts in the same file universe as validation.
+
+    Nested paths are valid: the deepest declaration wins. This reports only ties at the winning
+    specificity, where ownership falls back to alphabetical subsystem order. ``aggregate=True``
+    emits one warning per contender set so a broad duplicate path does not flood validation.
+    ``aggregate=False`` preserves the per-file diagnostics used by ``describe --full``.
+    """
+    scanned = resolve_owners(project_root, subsystems, exts, matcher, repo, include_gitignored)
+    claims: dict[str, dict[int, set[str]]] = {}
+    for name in sorted(subsystems):
+        sub = subsystems[name]
+        for abs_path in iter_subsystem_files(project_root, sub, exts):
+            rel = abs_path.relative_to(project_root).as_posix()
+            if rel not in scanned:
+                continue
+            spec = path_specificity(rel, sub.paths, sub.files)
+            claims.setdefault(rel, {}).setdefault(spec, set()).add(name)
+
+    grouped: dict[tuple[int, tuple[str, ...]], list[str]] = {}
+    per_file: list[tuple[str, int, tuple[str, ...]]] = []
+    for rel in sorted(claims):
+        by_spec = claims[rel]
+        top = max(by_spec)
+        contenders = tuple(sorted(by_spec[top]))
+        if len(contenders) < 2 or (subsystem is not None and subsystem not in contenders):
+            continue
+        if aggregate:
+            grouped.setdefault((top, contenders), []).append(rel)
+        else:
+            per_file.append((rel, top, contenders))
+
+    issues: list[Issue] = []
+    if aggregate:
+        for (_spec, contenders), rels in sorted(grouped.items()):
+            owner = subsystem or min(contenders)
+            others = [c for c in contenders if c != owner]
+            sample = ", ".join(rels[:3])
+            if len(rels) > 3:
+                sample += f", +{len(rels) - 3} more"
+            issues.append(Issue(
+                code=errors.E_SUBSYSTEM_OVERLAP,
+                severity=errors.SEVERITY[errors.E_SUBSYSTEM_OVERLAP],
+                message=(f"{len(rels)} file(s) are claimed at equal specificity by "
+                         f"{list(contenders)}; ownership is decided only by sorted-first name "
+                         f"({min(contenders)}). Sample: {sample}"),
+                subsystem=owner,
+                file=rels[0] if len(rels) == 1 else None,
+                fix=("narrow one subsystem path or move shared files to `files:` so a single "
+                     f"subsystem owns them (currently overlaps with {others})"),
+            ))
+        return issues
+
+    for rel, _spec, contenders in per_file:
+        owner = subsystem or min(contenders)
+        others = [c for c in contenders if c != owner]
+        issues.append(Issue(
+            code=errors.E_SUBSYSTEM_OVERLAP,
+            severity=errors.SEVERITY[errors.E_SUBSYSTEM_OVERLAP],
+            message=(f"'{rel}' is claimed at equal specificity by {list(contenders)}; "
+                     f"ownership is decided only by sorted-first name ({min(contenders)})"),
+            subsystem=owner,
+            file=rel,
+            fix=(f"narrow one path or move '{rel}' to `files:` so a single subsystem owns it "
+                 f"(currently overlaps with {others})"),
+        ))
+    return issues
 
 
 def _gitignore_filter(
@@ -443,7 +530,8 @@ def resolve_doc_owners(
 
       1. **explicit** — the most-specific subsystem whose ``docs:`` (then ``paths``/``files``)
          declares the file;
-      2. **convention** — ``docs/<name>.*`` or ``<name>.md`` whose stem == a subsystem name;
+      2. **convention** — ``docs/<name>/…``, ``docs/<name>.*``, or ``<name>.md`` whose name/stem
+         == a subsystem name;
       3. else **None** — unlinked.
 
     Docs are ALWAYS informational, never a coverage gap. Deterministic: most-specific wins, equal
@@ -463,12 +551,63 @@ def resolve_doc_owners(
 
 
 def _convention_doc_owner(rel: str, sub_names: set[str]) -> str | None:
-    """Convention-based owner for a doc file: ``docs/<name>.*`` or ``<name>.md`` whose stem is a
-    subsystem name. Returns None when the stem matches no subsystem."""
+    """Convention-based owner for a doc file.
+
+    ``docs/<name>/…`` maps to subsystem ``<name>``; otherwise ``docs/<name>.*`` or ``<name>.md``
+    maps by stem. Returns None when no directory segment or stem matches a subsystem.
+    """
+    parts = rel.split("/")
+    for i, part in enumerate(parts[:-1]):
+        if part == "docs" and i + 1 < len(parts) - 1:
+            area = parts[i + 1]
+            if area in sub_names:
+                return area
     stem = PurePosixPath(rel).stem
     if stem in sub_names:
         return stem
     return None
+
+
+def subsystems_with_unsupported_source(
+    project_root: Path,
+    subsystems: dict[str, "SubsystemCompact"],
+    matcher: IgnoreMatcher | None = None,
+) -> set[str]:
+    """Names of subsystems that own at least one UNSUPPORTED-language source file.
+
+    A file is "unsupported source" when its extension is a known source language
+    (:data:`config.KNOWN_SOURCE_EXTS`) but **no adapter handles it** — i.e. tree-sitter cannot
+    extract its symbols (Go, Rust, Java, …). For such a file Bounds has *zero evidence* about which
+    symbols a hand-authored ``exposes`` declares, so calibrate must not auto-remove those exposes and
+    validate must not flag them as structural drift. This is the single shared signal both paths key
+    off, so :mod:`bounds.calibrate` and :mod:`bounds.validate` can never disagree about an
+    unsupported-language manifest.
+
+    A directory/glob walk only — it inspects extensions, never reads source — so it stays cheap and
+    adds no per-file source reads to the ``--quick`` budget. Ignore-aware (``.boundsignore``) and
+    skips :data:`config.DEFAULT_IGNORES`; test files are excluded (a test in an unsupported language
+    is not the public surface a manifest's exposes describes). Deterministic: returns a plain set the
+    callers sort at their serialization boundary.
+    """
+    supported = supported_extensions()
+    out: set[str] = set()
+    for name in sorted(subsystems):
+        sub = subsystems[name]
+        for abs_path in iter_subsystem_files(project_root, sub, None):  # None => every extension
+            ext = abs_path.suffix
+            if ext in supported or ext not in config.KNOWN_SOURCE_EXTS:
+                continue  # supported (verifiable) or not source code at all
+            try:
+                rel = abs_path.relative_to(project_root).as_posix()
+            except ValueError:
+                continue
+            if is_test_file(rel):
+                continue
+            if matcher and matcher.matches(rel):
+                continue
+            out.add(name)
+            break  # one unsupported-source file is enough to mark the subsystem
+    return out
 
 
 def mapping_coverage(

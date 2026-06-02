@@ -39,7 +39,7 @@ reality*, checked in both directions on every commit.
 
 A full code graph of a Django codebase can be tens of thousands of tokens. An agent pays this cost
 just to find where `login()` is defined. Bounds gives you the answer in a few hundred tokens of JSON —
-one CLI call. A Bounds contract is `O(public API count)`, not `O(full symbol count)`, so it stays
+one CLI call. A Bounds contract is `O(public-surface count)`, not `O(full symbol count)`, so it stays
 roughly flat as the implementation behind it grows.
 
 ---
@@ -74,7 +74,7 @@ extracted reality.
 | Core approach | Extract graph from source | Declare intent in YAML, validate against source |
 | What you get | What code exists | What code SHOULD exist |
 | Granularity | Functions, classes, imports | Subsystem boundaries, contracts, dependencies |
-| Token cost | O(full symbol count) | O(public API count) — 5–20 lines per subsystem |
+| Token cost | O(full symbol count) | O(public-surface count) — 5–20 lines per subsystem |
 | Validation | None (graph = truth) | Drift detection, contract compliance, boundary checks |
 | LLM dependency | High (embeddings, semantic search) | Zero for structural path |
 | CI integration | Analysis step | Gate step — can block PRs |

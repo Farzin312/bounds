@@ -117,7 +117,7 @@ bounds impact auth                  # who breaks if auth's surface changes
 bounds impact users                 # who declared they consume the users table/interface
 bounds validate --quick             # fast incremental check              (JSON)
 bounds validate --human             # same data, human-readable
-bounds preflight                    # 6 pre-PR checks, blocking
+bounds preflight                    # 7 pre-PR checks, blocking
 bounds overview                     # project health dashboard
 bounds calibrate                    # reconcile manifests vs source (diff; --apply to write)
 ```

@@ -63,7 +63,7 @@
         <text x="26" y="86" font-size="11"><tspan class="g">"fresh"</tspan><tspan class="dim"> }</tspan></text>
       </g>
       <text x="16" y="216" class="y" font-size="18" font-weight="bold">≈ a few hundred tokens</text>
-      <text x="16" y="236" class="dim" font-size="11">tree-sitter-verified · O(exposed API)</text>
+      <text x="16" y="236" class="dim" font-size="11">tree-sitter-verified · O(public surface)</text>
     </g>
   </g>
 </svg>

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Full-command-surface smoke matrix for one repo: does EVERY Bounds command run on real code?
 
-`oss_bench.py` measures token economics + the discover<->validate signal. This complements it by
-exercising the whole CLI surface (not just list/describe/impact/validate) on an already-cloned repo,
-so we learn which commands work, crash, or misbehave on third-party code — and in particular whether
-the documented `discover -> calibrate -> validate` flow actually converges to a clean state.
+`oss_bench.py` measures coverage + token economics + the discover<->validate signal. This
+complements it by exercising the whole CLI surface (not just list/describe/impact/validate) on an
+already-cloned repo, so we learn which commands work, crash, or misbehave on third-party code — and
+in particular whether the documented `discover -> calibrate -> validate` flow actually converges to
+a clean state.
 
-For each command it records: return code, whether stdout is valid JSON (or the expected shape), and a
-one-line note / first error line. Nothing here mutates the Bounds repo; all writes land in the cloned
-repo's own `.bounds/` (and a throwaway CI file). One JSON object to stdout.
+For each command it records: return code, whether stdout is valid JSON (or the expected shape), and
+a one-line note / first error line. Nothing here mutates the Bounds repo; all writes land in the
+cloned repo's own `.bounds/` (and a throwaway CI file). One JSON object to stdout.
 
 Usage:
     python benchmarks/oss_features.py --repo /path/to/cloned/repo
@@ -22,18 +23,26 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _bounds() -> str:
-    venv = REPO_ROOT / ".venv" / "bin" / "bounds"
-    return str(venv) if venv.exists() else "bounds"
+BENCH_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BENCH_DIR.parent
+sys.path.insert(0, str(BENCH_DIR))
+from _lib import (  # noqa: E402 - shared benchmark helpers (the one home for these)
+    bounds_bin,
+    bounds_json,
+    list_subsystems,
+    pick_subsystem,
+)
 
 
 def _run(args: list[str], cwd: Path, timeout: int = 120) -> dict:
+    """Run one command and record rc / JSON-validity / crash — the smoke-matrix record shape.
+
+    A distinct concern from the shared text/JSON runners: it classifies the call (crash? json?
+    error code? issue count?) and enforces a timeout, so it stays local to this harness.
+    """
     t0 = time.perf_counter()
     try:
-        p = subprocess.run([_bounds(), *args], cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run([bounds_bin(), *args], cwd=cwd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return {"cmd": " ".join(args), "rc": None, "timeout": True, "sec": timeout}
     out, err = p.stdout, p.stderr
@@ -59,10 +68,8 @@ def _run(args: list[str], cwd: Path, timeout: int = 120) -> dict:
 
 def _first_symbol(cwd: Path, key: str) -> str | None:
     """A symbol name from `describe <key>` to feed `where`."""
-    p = subprocess.run([_bounds(), "describe", key], cwd=cwd, capture_output=True, text=True)
-    try:
-        d = json.loads(p.stdout)
-    except json.JSONDecodeError:
+    d = bounds_json(["describe", key], cwd)
+    if not isinstance(d, dict):
         return None
     for field in ("exposes", "exports"):
         items = d.get(field)
@@ -72,23 +79,11 @@ def _first_symbol(cwd: Path, key: str) -> str | None:
     return None
 
 
-def _list_subsystems(cwd: Path) -> list[dict]:
-    p = subprocess.run([_bounds(), "list"], cwd=cwd, capture_output=True, text=True)
-    try:
-        d = json.loads(p.stdout)
-    except json.JSONDecodeError:
-        return []
-    subs = d.get("subsystems", []) if isinstance(d, dict) else []
-    return subs if isinstance(subs, list) else []
-
-
 def _issue_count(cwd: Path, args: list[str]) -> int | None:
-    p = subprocess.run([_bounds(), *args], cwd=cwd, capture_output=True, text=True)
-    try:
-        d = json.loads(p.stdout)
-    except json.JSONDecodeError:
+    d = bounds_json(args, cwd)
+    if not isinstance(d, dict):
         return None
-    return len(d.get("issues", []) or []) if isinstance(d, dict) else None
+    return len(d.get("issues", []) or [])
 
 
 def run_matrix(root: Path) -> dict:
@@ -98,17 +93,11 @@ def run_matrix(root: Path) -> dict:
     res["commands"].append(_run(["init", "--root"], root))
     res["commands"].append(_run(["discover", "--apply"], root))
 
-    subs = _list_subsystems(root)
+    subs = list_subsystems(root)
     if not subs:
         res["notes"].append("no subsystems (unsupported language) — surface-level commands only")
 
-    def pick(*, depended=True):
-        if not subs:
-            return None
-        real = [s for s in subs if "test" not in s.get("name", "").lower()] or subs
-        return max(real, key=lambda s: len(s.get("consumed_by", []) or [])).get("name")
-
-    key = pick()
+    key = pick_subsystem(subs) if subs else None
     sym = _first_symbol(root, key) if key else None
 
     # The full read surface.
@@ -165,7 +154,7 @@ def main() -> int:
         print(json.dumps({"error": f"not a directory: {root}"}))
         return 1
     out = run_matrix(root)
-    out["bounds_version"] = subprocess.run([_bounds(), "--version"], cwd=root,
+    out["bounds_version"] = subprocess.run([bounds_bin(), "--version"], cwd=root,
                                            capture_output=True, text=True).stdout.strip()
     print(json.dumps(out, indent=2, sort_keys=True))
     return 0

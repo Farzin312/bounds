@@ -118,6 +118,74 @@ def test_engine_full_clean(py_project):
     assert report.stats["files_total"] == 2
 
 
+def test_engine_surfaces_equal_specificity_path_overlap(tmp_path):
+    """Duplicate same-path subsystem ownership is a warning in normal validation, not hidden behind describe --full."""
+    _overlap_project(tmp_path)
+
+    report = engine.run(tmp_path, mode="full")
+    overlaps = [i for i in report.issues if i.code == errors.E_SUBSYSTEM_OVERLAP]
+    assert len(overlaps) == 1
+    assert overlaps[0].severity == "warning"
+    assert "aaa" in overlaps[0].message and "bbb" in overlaps[0].message
+
+
+def test_engine_quick_surfaces_equal_specificity_path_overlap(tmp_path):
+    """Quick validation must still surface ownership overlaps; daily agent checks need the same map-smell signal as full validation."""
+    _overlap_project(tmp_path)
+
+    report = engine.run(tmp_path, mode="quick")
+    overlaps = [i for i in report.issues if i.code == errors.E_SUBSYSTEM_OVERLAP]
+    assert len(overlaps) == 1
+    assert overlaps[0].severity == "warning"
+    assert report.ok is True  # advisory, but visible
+
+
+def test_engine_no_structural_drift_for_unsupported_language_subsystem(tmp_path):
+    """A Go (unsupported-language) subsystem with hand-authored exposes must NOT produce
+    E_STRUCTURAL_DRIFT — Bounds has no Go adapter, so those exposes are unverifiable, not stale.
+    The coverage gap for the unmapped Go file is still expected (honest, non-blocking). This is the
+    validate side of the calibrate↔validate agreement on unsupported-language manifests."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: testrepo\nlanguages: [go]\nenforce: "off"\nsubsystems: [payments]\n',
+        encoding="utf-8",
+    )
+    (cfg / "manifests" / "payments.yaml").write_text(
+        "name: payments\nrole: library\ncriticality: core\npaths: [services/payments]\n"
+        "exposes:\n  - {name: Charge, kind: function}\n  - {name: Refund, kind: function}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "services" / "payments").mkdir(parents=True)
+    (tmp_path / "services" / "payments" / "charge.go").write_text(
+        "package payments\nfunc Charge() error { return nil }\nfunc Refund() error { return nil }\n",
+        encoding="utf-8",
+    )
+
+    report = engine.run(tmp_path, mode="full")
+    codes = {i.code for i in report.issues if i.subsystem == "payments"}
+    assert errors.E_STRUCTURAL_DRIFT not in codes, [i.message for i in report.issues]
+    # The honest coverage gap for the unmapped Go file is still expected (whole-repo, not per-sub).
+    assert any(i.code == errors.E_COVERAGE_GAP for i in report.issues)
+
+
+def _overlap_project(tmp_path):
+    """Two subsystems claiming the same directory at identical specificity."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: overlap\nlanguages: [python]\nsubsystems: [aaa, bbb]\n',
+        encoding="utf-8",
+    )
+    for name in ("aaa", "bbb"):
+        (cfg / "manifests" / f"{name}.yaml").write_text(
+            f"name: {name}\nrole: library\ncriticality: leaf\npaths: [pkg]\nexposes: []\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "shared.py").write_text("def shared():\n    pass\n", encoding="utf-8")
+
+
 def test_engine_cache_accelerates_second_run(py_project):
     """First run parses every file (0 cache hits); an unchanged second run parses none and hits the cache for all — content-hash reuse works."""
     first = engine.run(py_project, mode="full")
@@ -139,6 +207,24 @@ def test_engine_quick_detects_dirty_and_propagates(py_project, git_init):
     report = engine.run(py_project, mode="quick")
     assert "models" in report.stats["dirty"]
     assert "svc" in report.stats["propagated"]  # core criticality propagates to its consumer
+    assert report.ok is True  # quick mode never blocks
+
+
+def test_engine_quick_deleted_provider_marks_consumer_stale(py_project, git_init):
+    """--quick: deleting a provider's only source file must still mark its subsystem dirty so the
+    cross_impact check warns the consumer (E_STALE_INTERFACE). The deleted file leaves no on-disk
+    owner, so the cached FileRecord.subsystem is the only source of the owning subsystem."""
+    git_init(py_project)
+    engine.run(py_project, mode="full")  # warm the cache (not a cold run)
+    # Delete the core `models` subsystem's only provider file on disk.
+    (py_project / "src" / "models" / "thing.py").unlink()
+
+    report = engine.run(py_project, mode="quick")
+    assert "models" in report.stats["dirty"]  # the pruned provider's cached owner
+    assert "svc" in report.stats["propagated"]  # core criticality propagates to its consumer
+    stale = [i for i in report.issues if i.code == errors.E_STALE_INTERFACE]
+    assert any(i.subsystem == "svc" for i in stale), report.stats
+    assert all(i.severity == "warning" for i in stale)  # quick mode downgrades to advisory
     assert report.ok is True  # quick mode never blocks
 
 

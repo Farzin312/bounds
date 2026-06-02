@@ -68,7 +68,7 @@ tree-sitter to validate them against your real source, in both directions.
 - **Give agents a small verified contract instead of source** — one cheap CLI call returns a tree-sitter-confirmed public surface (a few hundred tokens for a small subsystem on this repo; cost scales with how many symbols/tables it *exposes*, not how big it is), not a dozen files an agent has to read and guess at.
 - **Answer the database question an agent gets wrong by reading** — "what columns does `orders` have *now*, and is it row-level-security protected?" isn't in one file; it's a `CREATE` plus a dozen `ALTER`s across migrations. Bounds folds them into the current table + RLS-policy surface and a derived **RLS posture** (which tables are exposed *without* RLS). When a migration uses DDL it can't parse, `schema_coverage` says so — so an agent never reads a blind spot as "this doesn't exist."
 - **Show blast radius before a risky change** — `bounds impact` returns the transitive consumer set and the interfaces each one relies on, so you know the reach before you write the edit.
-- **Catch architecture drift in CI before it merges** — boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows.
+- **Catch architecture drift in CI before it merges** — `bounds ci --install --github|--gitlab|--precommit|--all` (auto-detects your host with no flag) wires a `bounds preflight --ci` gate so boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows. An *intentional* surface change is a deliberate re-baseline (`bounds calibrate --dump-baseline`), not a red build.
 
 See [docs/why-bounds.md](docs/why-bounds.md) for the full rationale.
 
@@ -105,15 +105,15 @@ If `bounds --help` does not list `impact`, `discover`, and `agent`, your install
 
 ---
 
-## Scales with your public API, not your code size
+## Scales with what you expose, not your code size
 
 Reading source is **O(files)** — the bigger the subsystem, the more an agent reads. A Bounds contract
-is **O(public API)** — it grows only with what a subsystem *exposes*, not its internal size, so it
-climbs far more slowly: from a few hundred tokens for a small subsystem (a subsystem with 50 internal
-functions and 5 exports stays small).
+is **O(public surface)** — it grows only with what a subsystem *exposes* (its public symbols, tables,
+and dependencies), not its internal size, so it climbs far more slowly: a subsystem with 50 internal
+functions behind 5 exports stays a few hundred tokens.
 
 <div align="center">
-<img src="assets/token-scaling.svg" alt="Line chart: reading a subsystem's source climbs steeply as the subsystem grows, toward tens of thousands of tokens, while a Bounds describe contract grows only with how much public API the subsystem exposes — far more slowly, from a few hundred tokens for a small subsystem" width="700">
+<img src="assets/token-scaling.svg" alt="Line chart: reading a subsystem's source climbs steeply as the subsystem grows, toward tens of thousands of tokens, while a Bounds describe contract grows only with how much a subsystem exposes — its public surface of symbols, tables, and dependencies — far more slowly, from a few hundred tokens for a small subsystem" width="700">
 </div>
 
 The token win *widens* with size.
@@ -134,7 +134,7 @@ bugs it surfaced: **[benchmarks/results/oss-cross-language.md](benchmarks/result
 
 Across all 13 supported-language repos, whole-repo `bounds list` is **98.7–100%** smaller than
 reading every file, and a single `bounds describe` is **54–100%** smaller than its subsystem's
-source. The `describe` spread is real and tracks how much public API a subsystem *exposes*: a typical
+source. The `describe` spread is real and tracks how much a subsystem *exposes*: a typical
 one is a **median of a few hundred tokens**, while a fat-API subsystem (zod's `core`, 831 exports)
 is ~35k. *Honest caveat:* "vs all source" is a generous baseline — nobody reads a whole repo — so
 read 99% as "orientation is near-free," and the **54–100% `describe`** range as the number that
@@ -157,11 +157,45 @@ read source to understand *behavior*.)
 > you reach after a light curation pass, not a one-command guarantee on every repo. The
 > [cross-language report](benchmarks/results/oss-cross-language.md) documents this in full.
 
-**Contributors welcome:** run `python benchmarks/oss_bench.py --repo <path>` (token economics) and
-`python benchmarks/oss_features.py --repo <path>` (full-command matrix), or add your model/tokenizer's
-numbers via [`benchmarks/TEMPLATE.md`](benchmarks/TEMPLATE.md) — see
-[benchmarks/README.md](benchmarks/README.md). See [docs/token-economics.md](docs/token-economics.md)
-for the scaling argument and the context-rot effect.
+**Contributors welcome:** `make benchmark` reports this repo's own coverage + token economics, and
+`make oss-bench REPO=<path>` runs the full coverage + token + command-surface report on any cloned
+repo (one reproducible command, no hand-assembled tables). Add your model/tokenizer's numbers via
+[`benchmarks/TEMPLATE.md`](benchmarks/TEMPLATE.md) — see [benchmarks/README.md](benchmarks/README.md).
+See [docs/token-economics.md](docs/token-economics.md) for the scaling argument and the context-rot
+effect.
+
+## Mapping coverage — aiming for 100%, and closing gaps with an agent
+
+Bounds reports how much of your **library source** it actually mapped — deterministically, no LLM.
+`bounds validate` (`stats.coverage.mapping`), `bounds overview` (`health.validation.mapped_pct`), and
+`bounds discover` all carry the same signal: `mapped_pct`, the unmapped files, and a **by-language
+breakdown** of what's left — so a partial map is always *visible*, never silently half-dark. Tests and
+docs are tracked in their own buckets and never drag the number down.
+
+When `mapped_pct < 100` there are exactly two kinds of gap, and an agent can close either — with the
+CLI as the deterministic verifier:
+
+```mermaid
+flowchart LR
+  D["bounds discover --apply"] --> V{"bounds validate<br/>mapped_pct"}
+  V -->|"100%"| DONE["✓ fully mapped"]
+  V -->|"gap: unowned-supported"| S["add the file to a<br/>manifest's paths:"]
+  V -->|"gap: unsupported language"| AI["agent hand-authors a manifest<br/>from .bounds/manifests/*.yaml"]
+  S --> V
+  AI --> V
+```
+
+- **Unowned but supported** (a Python/TS/JS/SQL/Prisma file in no subsystem) → add it to a manifest's
+  `paths:`. Deterministic, no AI needed.
+- **Unsupported language** (Go/Rust/Java — no adapter yet) → hand the agent the `unmapped_by_language`
+  list and an existing `.bounds/manifests/*.yaml` as a template; it authors the missing manifest
+  (`paths` + `exposes` + `consumes`), then `bounds validate` confirms it clean. Those hand-authored
+  exposes are **durable** — `calibrate` routes a not-found one to `needs_review` (never strips it) and
+  `validate` never flags it as drift, so the work survives. "100%" means 100% of *supported-language*
+  source — Bounds names exactly what it can't yet parse instead of guessing.
+
+The full human-and-AI workflow is in **[docs/coverage.md](docs/coverage.md)**. On this repo `bounds
+validate` reports **100% of source mapped** (36/36 non-test files) — Bounds dogfoods its own gate.
 
 ## Languages & platforms
 
@@ -189,8 +223,16 @@ end-to-end on [click](https://github.com/pallets/click) (Python) and
 [axios](https://github.com/axios/axios) (TypeScript); NestJS/Angular import shapes are covered by the
 resolver test matrix.
 
-Runs on **Linux, macOS, and Windows** (Python 3.10–3.14). Go, Rust, and Java adapters are on the
-roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
+Three honest tiers: **fully supported** (Python, TS/JS, SQL, Prisma — extracted *and* verified),
+**partially supported** (a supported parser with a documented, self-reported gap — e.g. an
+unparseable Postgres DDL statement, flagged `E_SCHEMA_UNPARSED`, with the rest of the file still
+folded), and **unsupported** (Go, Rust, Java — no adapter yet, but **hand-mappable and durable**: a
+hand-authored manifest survives `calibrate`/`validate`, never silently stripped or flagged). Every
+gap surfaces loudly with a next step — never a silent omission. Go and Rust adapters target v0.2.0,
+Java v0.3.0; adding one is a single
+[adapter class](docs/languages-and-platforms.md#adding-a-language-adapter). Runs on **Linux, macOS,
+and Windows** (Python 3.10–3.14). Full
+[support matrix + roadmap](docs/languages-and-platforms.md).
 
 ---
 
@@ -203,6 +245,7 @@ roadmap. See [docs/languages-and-platforms.md](docs/languages-and-platforms.md).
 
 **Reference**
 - [cli-reference.md](docs/cli-reference.md) — every command and flag.
+- [coverage.md](docs/coverage.md) — the mapping-coverage signal, aiming for 100%, and how a human or an agent closes a gap.
 - [ai-agents.md](docs/ai-agents.md) — `agent --sync`, the canonical contract, advisory compliance.
 - [languages-and-platforms.md](docs/languages-and-platforms.md) — language support matrix and cross-platform notes.
 - [install.md](docs/install.md) — all install channels and their current status.
