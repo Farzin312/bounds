@@ -10,6 +10,7 @@ import subprocess
 
 from bounds import config, errors
 from bounds.extract import scan
+from bounds.models import SubsystemCompact
 from bounds.validate import engine
 
 
@@ -41,25 +42,47 @@ def _polyglot(tmp_path):
     return tmp_path
 
 
-def test_mapping_coverage_counts_unsupported_by_language(tmp_path):
-    """mapping_coverage must count unsupported files (Go) as unmapped and bucket them by language; docs/config/assets must never dilute the source denominator."""
+def test_mapping_coverage_supported_only_pct_and_unsupported_split(tmp_path):
+    """The headline % is SUPPORTED-language source only (3/3 Python = 100%, reachable); the 5 Go files
+    are reported beside it as unsupported, and — undeclared here — bucket as `dark`. docs/config/assets
+    must never enter either denominator."""
     _polyglot(tmp_path)
     cov = scan.mapping_coverage(tmp_path, {"svc/m0.py", "svc/m1.py", "svc/m2.py"})
-    assert cov["files_source_total"] == 8
-    assert cov["files_mapped"] == 3
-    assert cov["files_unmapped"] == 5
-    assert cov["mapped_pct"] == 37.5
-    assert cov["unmapped_by_language"] == {"go": 5}
-    assert cov["unsupported_languages"] == ["go"]
-    # The dict now always carries informational tests/docs buckets (empty here — no tests/docs).
+    assert cov["mapped_pct"] == 100.0  # 3/3 supported mapped — unsupported never drags the %
+    assert cov["supported"] == {"total": 3, "mapped": 3, "unowned": 0, "unowned_sample": []}
+    assert cov["unsupported"]["total"] == 5
+    assert cov["unsupported"]["dark"] == 5      # no manifest claims them (subsystems not passed)
+    assert cov["unsupported"]["declared"] == 0
+    assert cov["unsupported"]["by_language"] == {"go": 5}
+    assert sorted(cov["unsupported"]["dark_sample"]) == [f"goservice/f{i}.go" for i in range(5)]
+    # The dict still always carries informational tests/docs buckets (empty here — no tests/docs).
     assert cov["tests"] == {"total": 0, "linked": 0, "unlinked": 0, "unlinked_sample": []}
     assert cov["docs"] == {"total": 0, "linked": 0, "unlinked": 0, "unlinked_sample": []}
-    # docs/config/assets must NOT dilute the denominator.
+    # docs/config/assets must NOT dilute the supported or unsupported denominators.
     (tmp_path / "README.md").write_text("# docs\n")
     (tmp_path / "data.json").write_text("{}\n")
     cov2 = scan.mapping_coverage(tmp_path, {"svc/m0.py", "svc/m1.py", "svc/m2.py"})
-    assert cov2["files_source_total"] == 8  # unchanged: non-source excluded
+    assert cov2["supported"]["total"] == 3      # unchanged: non-source excluded
+    assert cov2["unsupported"]["total"] == 5
     assert cov2["docs"]["total"] == 1  # README.md now tracked as a doc (unlinked → never a gap)
+
+
+def test_declared_unsupported_file_is_covered_not_dark(tmp_path):
+    """The Option-C guarantee: an unsupported-language file a manifest *claims* is `declared`
+    (covered + durable), not `dark` — so hand-authoring a manifest closes the gap. mapped_pct stays
+    100% (supported-only) and coverage_has_gap is False."""
+    _polyglot(tmp_path)
+    subs = {
+        "svc": SubsystemCompact(name="svc", paths=["svc"]),
+        "goservice": SubsystemCompact(name="goservice", paths=["goservice"]),
+    }
+    cov = scan.mapping_coverage(
+        tmp_path, {"svc/m0.py", "svc/m1.py", "svc/m2.py"}, subsystems=subs
+    )
+    assert cov["unsupported"]["declared"] == 5
+    assert cov["unsupported"]["dark"] == 0
+    assert cov["mapped_pct"] == 100.0
+    assert scan.coverage_has_gap(cov) is False
 
 
 def test_test_files_excluded_from_source_denominator_and_never_a_gap(tmp_path):
@@ -85,7 +108,7 @@ def test_test_files_excluded_from_source_denominator_and_never_a_gap(tmp_path):
     report = engine.run(tmp_path, mode="full", enforce="on", include_gitignored=True)
     mapping = report.stats["coverage"]["mapping"]
     # The 4 tests are NOT in the source denominator (only the 3 mapped svc files are).
-    assert mapping["files_source_total"] == 3
+    assert mapping["supported"]["total"] == 3
     assert mapping["mapped_pct"] == 100.0
     assert [i for i in report.issues if i.code == errors.E_COVERAGE_GAP] == []
     # …but they ARE tracked in the tests bucket (unlinked here — informational, not a gap).
@@ -94,23 +117,27 @@ def test_test_files_excluded_from_source_denominator_and_never_a_gap(tmp_path):
 
 
 def test_validate_emits_loud_coverage_gap_nonblocking(tmp_path):
-    """A coverage gap is a loud warning with a next step — visible, but never blocks on its own."""
+    """A coverage gap is a loud warning with a next step — visible, but never blocks on its own.
+
+    The 5 Go files sit under `goservice/`, which no manifest claims, so they are `dark` (the real
+    gap). All 3 supported files are mapped, so mapped_pct is 100% — the gap is driven by dark files,
+    not the headline %."""
     _polyglot(tmp_path)
     report = engine.run(tmp_path, mode="full", enforce="on", include_gitignored=True)
     gaps = [i for i in report.issues if i.code == errors.E_COVERAGE_GAP]
     assert len(gaps) == 1
-    assert "37.5%" in gaps[0].message and "go" in gaps[0].message
+    assert "go" in gaps[0].message and "no manifest claims" in gaps[0].message
     fix = gaps[0].fix
     assert fix  # actionable next step present
-    # The fix distinguishes the unsupported-language gap (no adapter → hand-author a DURABLE manifest)
-    # and points teams who want a hard gate at the opt-in flag — neither should be silently dropped.
-    assert "hand-author" in fix.lower()
+    # The fix names the unsupported-language move (no adapter → author a DURABLE manifest) and points
+    # the agent at a concrete template manifest to copy — neither should be silently dropped.
+    assert "exposes" in fix
     assert "durable" in fix.lower()
-    assert "--fail-on-unowned" in fix
+    assert f"{config.BOUNDS_DIR}/{config.MANIFESTS_DIR}/svc.yaml" in fix  # concrete template_ref
     assert "docs/coverage.md" in fix
     assert gaps[0].severity == "warning"
     # the gap alone is non-blocking (advisory); enforce=on still reports ok unless a real error exists
-    assert report.stats["coverage"]["mapping"]["mapped_pct"] == 37.5
+    assert report.stats["coverage"]["mapping"]["mapped_pct"] == 100.0
 
 
 def test_full_coverage_has_no_gap(tmp_path):

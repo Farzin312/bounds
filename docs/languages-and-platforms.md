@@ -62,16 +62,18 @@ maturity:
 Until an adapter lands, those languages are **unsupported but first-class for mapping**: hand-author a
 manifest and it stays durable (next section). **Want a language sooner?** A well-scoped adapter PR is
 the fastest path — the how-to below is the canonical guide. Or open an issue with the repo + the
-`unmapped_by_language` breakdown from `bounds validate` so we can prioritize by real demand.
+`unsupported.by_language` breakdown from `bounds validate` so we can prioritize by real demand.
 
 ### Compiled / unsupported-language handling
 
 Until an adapter lands, a compiled or otherwise unsupported language (Go, Rust, Java, …) is handled
 honestly rather than ignored:
 
-- **Counted as unsupported in coverage.** Such files show up in `stats.coverage.mapping` as
-  `unmapped_unsupported_language` with a by-language breakdown and a loud, non-blocking
-  `E_COVERAGE_GAP` — a polyglot repo can never look "fully mapped" while half of it is invisible.
+- **Counted as unsupported in coverage.** Such files show up in `stats.coverage.mapping` under
+  `unsupported` with a by-language breakdown, split into `declared` (a manifest claims it → covered)
+  and `dark` (no manifest → fires a loud, non-blocking `E_COVERAGE_GAP`). The headline `mapped_pct` is
+  supported-language source only, so a polyglot repo can never look "fully mapped" while a `dark` file
+  is invisible — yet it stays reachable, because declaring the file moves it `dark → declared`.
 - **Hand-mappable and durable.** Point a subsystem's `paths:` at the source and hand-author (or
   AI-author) the `exposes`. Because Bounds has no adapter to verify them, those exposes are treated as
   **unverifiable, never stale**: `calibrate` routes a declared-but-unfound expose to `needs_review`

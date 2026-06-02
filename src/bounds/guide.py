@@ -67,7 +67,7 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
             # Done only once subsystems exist AND everything is mapped; until then this surfaces the
             # gap loudly so an agent/human knows what's still dark and the durable hand-authored fix
             # for unsupported languages. Not-done before discover (discover, ordered first, is `next`).
-            "done": coverage is not None and coverage.get("files_unmapped", 0) == 0,
+            "done": coverage is not None and not scan.coverage_has_gap(coverage),
         },
         {
             "id": "agents",
@@ -190,26 +190,26 @@ def _coverage(base: Path, subs: dict) -> dict | None:
 
 def _coverage_why(coverage: dict | None) -> str:
     """One-line rationale for the coverage step — names the live gap when there is one."""
-    if not coverage or coverage.get("files_unmapped", 0) == 0:
+    if not coverage or not scan.coverage_has_gap(coverage):
         return (
-            "Bounds is authoritative only for source it mapped; aim for 100% so no library code is "
-            "outside the map. See docs/coverage.md."
+            "Bounds maps 100% of supported-language source deterministically; declared unsupported "
+            "files are covered too. Keep new source mapped so none falls outside the map."
         )
     bits: list[str] = []
-    unowned = coverage.get("unmapped_unowned_supported", 0)
-    unsupported = coverage.get("unmapped_unsupported_language", 0)
+    unowned = coverage["supported"]["unowned"]
+    dark = coverage["unsupported"]["dark"]
     if unowned:
         bits.append(f"{unowned} supported file(s) in no subsystem — add to a manifest's `paths:`")
-    if unsupported:
-        langs = ", ".join(sorted(coverage.get("unsupported_languages", []) or []))
+    if dark:
+        langs = ", ".join(sorted(coverage["unsupported"]["by_language"]))
         bits.append(
-            f"{unsupported} file(s) in unsupported languages"
+            f"{dark} unsupported file(s) no manifest claims"
             + (f" ({langs})" if langs else "")
             + " — hand-author a manifest's `exposes` (durable: calibrate/validate keep it)"
         )
     detail = "; ".join(bits) or "some library source is unmapped"
     return (
-        f"mapped {coverage.get('mapped_pct', 0.0)}% of library source; {detail}. "
+        f"mapped {coverage.get('mapped_pct', 0.0)}% of supported-language source; {detail}. "
         "See docs/coverage.md."
     )
 

@@ -166,38 +166,46 @@ repo (one reproducible command, no hand-assembled tables). Add your model/tokeni
 See [docs/token-economics.md](docs/token-economics.md) for the scaling argument and the context-rot
 effect.
 
-## Mapping coverage — aiming for 100%, and closing gaps with an agent
+## Mapping coverage — 100% of what Bounds can parse, and an agent for the rest
 
-Bounds reports how much of your **library source** it actually mapped — deterministically, no LLM.
+Bounds reports how much of your **supported-language source** it verified — deterministically, no LLM.
 `bounds validate` (`stats.coverage.mapping`), `bounds overview` (`health.validation.mapped_pct`), and
-`bounds discover` all carry the same signal: `mapped_pct`, the unmapped files, and a **by-language
-breakdown** of what's left — so a partial map is always *visible*, never silently half-dark. Tests and
-docs are tracked in their own buckets and never drag the number down.
+`bounds discover` all carry the same signal: `mapped_pct` (**supported-language source only, so 100% is
+reachable**), the unowned files, and a separate, honest account of the **unsupported-language** source
+Bounds has no adapter for — split into `declared` (a manifest claims it → covered) and `dark` (no
+manifest → the real gap). A partial map is always *visible*, never silently half-dark; tests and docs
+are tracked in their own buckets and never drag the number down.
 
-When `mapped_pct < 100` there are exactly two kinds of gap, and an agent can close either — with the
-CLI as the deterministic verifier:
+There are exactly two closeable gaps, and an agent can close either — with the CLI as the deterministic
+verifier:
 
 ```mermaid
 flowchart LR
-  D["bounds discover --apply"] --> V{"bounds validate<br/>mapped_pct"}
-  V -->|"100%"| DONE["✓ fully mapped"]
-  V -->|"gap: unowned-supported"| S["add the file to a<br/>manifest's paths:"]
-  V -->|"gap: unsupported language"| AI["agent hand-authors a manifest<br/>from .bounds/manifests/*.yaml"]
+  D["bounds discover --apply"] --> V{"bounds validate"}
+  V -->|"100% supported + 0 dark"| DONE["✓ fully covered"]
+  V -->|"unowned supported file"| S["add the file to a<br/>manifest's paths:"]
+  V -->|"dark unsupported file"| AI["agent authors a manifest<br/>(copy .bounds/manifests/*.yaml)"]
   S --> V
   AI --> V
 ```
 
 - **Unowned but supported** (a Python/TS/JS/SQL/Prisma file in no subsystem) → add it to a manifest's
-  `paths:`. Deterministic, no AI needed.
-- **Unsupported language** (Go/Rust/Java — no adapter yet) → hand the agent the `unmapped_by_language`
-  list and an existing `.bounds/manifests/*.yaml` as a template; it authors the missing manifest
-  (`paths` + `exposes` + `consumes`), then `bounds validate` confirms it clean. Those hand-authored
-  exposes are **durable** — `calibrate` routes a not-found one to `needs_review` (never strips it) and
-  `validate` never flags it as drift, so the work survives. "100%" means 100% of *supported-language*
-  source — Bounds names exactly what it can't yet parse instead of guessing.
+  `paths:`. Deterministic, no AI needed; `mapped_pct` rises to 100%.
+- **Unsupported language** (shell/Go/Rust/Java — no adapter yet) → the `E_COVERAGE_GAP` fix hands the
+  agent the `by_language` list and a concrete template manifest to copy; it authors `paths` + a
+  hand-written `exposes` (+ `consumes`), then `bounds validate` confirms it clean. That **moves the
+  file from `dark` to `declared`** — the gap closes even though Bounds can't parse it. Those
+  hand-authored exposes are **durable**: `calibrate` routes a not-found one to `needs_review` (never
+  strips it) and `validate` never flags it as drift, so the work survives.
 
-The full human-and-AI workflow is in **[docs/coverage.md](docs/coverage.md)**. On this repo `bounds
-validate` reports **100% of source mapped** (36/36 non-test files) — Bounds dogfoods its own gate.
+So **"100%" means 100% of supported-language source mapped, with zero unclaimed (`dark`) files** —
+Bounds names exactly what it can't yet parse and hands an agent a template, instead of guessing or
+quietly inflating the number. As language adapters ship, files move from `unsupported` to verified
+automatically and the number rises on its own.
+
+The full human-and-AI workflow is in **[docs/coverage.md](docs/coverage.md)**. On this (pure-Python)
+repo `bounds validate` reports **100% of supported-language source mapped** (36/36 non-test files) —
+Bounds dogfoods its own gate.
 
 ## Languages & platforms
 
