@@ -360,7 +360,7 @@ def _render_calibrate_human(payload: dict) -> str:
         if p.get("needs_review"):
             bits.append("review: " + ", ".join(p["needs_review"]))
         if p.get("add_consumes"):
-            bits.append("consumes+: " + ", ".join(p["add_consumes"]))
+            bits.append("consumes+: " + ", ".join(c["subsystem"] for c in p["add_consumes"]))
         lines.append(f"  {name}: " + " | ".join(bits) if bits else f"  {name}")
     return "\n".join(lines)
 
