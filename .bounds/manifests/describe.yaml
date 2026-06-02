@@ -1,15 +1,45 @@
 name: describe
 role: library
 criticality: connector
-description: Tier-1 + Tier-2 `describe` assembly — merges the declared manifest with tree-sitter facts (verified exposes, schema catalog/objects/RLS posture) so an agent reads a subsystem's contract instead of source. Extracted from cli.py; reuses the shared owned-file walk and single-file extractor.
+description: "Tier-1 + Tier-2 `describe` assembly \u2014 merges the declared manifest\
+  \ with tree-sitter facts (verified exposes, schema catalog/objects/RLS posture)\
+  \ so an agent reads a subsystem's contract instead of source. Extracted from cli.py;\
+  \ reuses the shared owned-file walk and single-file extractor."
 paths:
-  - src/bounds/describe.py
+- src/bounds/describe.py
 exposes:
-  - { name: describe_one, kind: function }
-  - { name: extract_owned, kind: function }
-  - { name: project_status, kind: function }
-  - { name: status_report, kind: function }
-  - { name: subsystem_overlaps, kind: function }
-  - { name: subsystem_status, kind: function }
+- name: describe_one
+  kind: function
+- name: extract_owned
+  kind: function
+- name: project_status
+  kind: function
+- name: status_report
+  kind: function
+- name: subsystem_overlaps
+  kind: function
+- name: subsystem_status
+  kind: function
 consumes:
-  - { subsystem: validate, via: schema, interfaces: [fold_subsystem_objects, hash_schema_catalog, schema_catalog, schema_diagnostics, schema_objects, schema_rls_posture] }
+- subsystem: validate
+  via: schema
+  interfaces:
+  - fold_subsystem_objects
+  - hash_schema_catalog
+  - schema_catalog
+  - schema_diagnostics
+  - schema_objects
+  - schema_rls_posture
+- subsystem: extract
+  interfaces:
+  - supported_extensions
+- subsystem: ignore
+  interfaces:
+  - IgnoreMatcher
+  - load_matcher
+- subsystem: manifest
+- subsystem: models
+  interfaces:
+  - Issue
+  - SubsystemCompact
+  - ValidationReport

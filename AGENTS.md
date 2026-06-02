@@ -1,5 +1,5 @@
 <!-- BOUNDS:START -->
-<!-- BOUNDS:GENERATED v=2026.6.24 h=8703a7b2 -->
+<!-- BOUNDS:GENERATED v=2026.6.24 h=579912c4 -->
 > Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agentsync.py`) instead.
 
 ## Bounds — architecture contract for agents
@@ -37,4 +37,9 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 ### Hard rules
 - NEVER read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/manifests/*.yaml`, or `.bounds/root.yaml` directly. The cache is binary; the manifests bypass tree-sitter verification.
 - The CLI is the API for architecture. Use source files only for implementation details after Bounds has scoped the subsystem.
+
+### Optional Spec-Driven Development
+- If this repo enables `sdd:` in Bounds root config, treat Bounds as the verified architecture layer across specify → clarify → plan → tasks → analyze → implement → verify.
+- Bounds does not run the prose workflow and never calls an LLM; it supplies deterministic facts (`overview`, `list`, `describe`, `where`, `impact`) and gates (`validate --quick`, `preflight --ci`, `calibrate --check`).
+- Intentional contract changes belong in the spec: update the manifest, then re-baseline with `bounds calibrate --dump-baseline`.
 <!-- BOUNDS:END -->

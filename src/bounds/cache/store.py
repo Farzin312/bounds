@@ -37,6 +37,16 @@ from ..models import ExtractResult, ImportRef, Symbol
 
 _SQLITE_MAGIC = b"SQLite format 3\x00"
 
+__all__ = [
+    "FileRecord",
+    "State",
+    "inspect",
+    "load_state",
+    "migrate_json_to_sqlite",
+    "prune_missing",
+    "save_state",
+]
+
 # Milliseconds a cache connection waits on a locked database before erroring. Two `bounds
 # validate` runs racing on the same `.bounds/cache.db` should queue briefly, not immediately raise
 # "database is locked"; the writer is a single short transaction, so a few seconds is ample.
@@ -51,6 +61,7 @@ CREATE TABLE IF NOT EXISTS cache (
     language TEXT NOT NULL,
     symbols TEXT,
     imports TEXT,
+    generated INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_cache_subsystem ON cache(subsystem);
@@ -73,6 +84,7 @@ class FileRecord:
     symbols: list[dict] = field(default_factory=list)
     imports: list[dict] = field(default_factory=list)
     subsystem: str = ""
+    generated: bool = False
 
     def to_result(self) -> ExtractResult:
         """Rebuild the :class:`ExtractResult` this record was derived from."""
@@ -83,6 +95,7 @@ class FileRecord:
             imports=[ImportRef.from_dict(i) for i in self.imports],
             content_hash=self.content_hash,
             structure_hash=self.structure_hash,
+            generated=self.generated,
         )
 
     @classmethod
@@ -96,6 +109,7 @@ class FileRecord:
             symbols=[s.to_dict() for s in r.symbols],
             imports=[i.to_dict() for i in r.imports],
             subsystem=subsystem,
+            generated=r.generated,
         )
 
     def to_dict(self) -> dict:
@@ -108,6 +122,7 @@ class FileRecord:
             "language": self.language,
             "symbols": [dict(s) for s in self.symbols],
             "imports": [dict(i) for i in self.imports],
+            "generated": self.generated,
         }
 
     @classmethod
@@ -121,6 +136,7 @@ class FileRecord:
             symbols=[dict(s) for s in (d.get("symbols") or [])],
             imports=[dict(i) for i in (d.get("imports") or [])],
             subsystem=str(d.get("subsystem", "")),
+            generated=bool(d.get("generated", False)),
         )
 
 
@@ -207,6 +223,20 @@ def _schema_version() -> int:
         return 0
 
 
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    """Create or migrate the SQLite cache table to the current writable schema.
+
+    ``CREATE TABLE IF NOT EXISTS`` deliberately preserves existing caches, so a user upgrading
+    from v3 has a valid SQLite table without the v4 ``generated`` column. We must add that column
+    before save_state inserts v4 rows; otherwise the cache becomes permanently cold because writes
+    target a column the preserved table lacks.
+    """
+    conn.executescript(_SCHEMA)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(cache)").fetchall()}
+    if "generated" not in columns:
+        conn.execute("ALTER TABLE cache ADD COLUMN generated INTEGER NOT NULL DEFAULT 0")
+
+
 def _load_sqlite(db_path: Path) -> State:
     try:
         conn = sqlite3.connect(db_path)
@@ -217,7 +247,7 @@ def _load_sqlite(db_path: Path) -> State:
         if conn.execute("PRAGMA user_version").fetchone()[0] != _schema_version():
             return State()
         rows = conn.execute(
-            "SELECT path, subsystem, content_hash, structure_hash, language, symbols, imports FROM cache"
+            "SELECT path, subsystem, content_hash, structure_hash, language, symbols, imports, generated FROM cache"
         ).fetchall()
     except sqlite3.Error:
         return State()
@@ -225,7 +255,7 @@ def _load_sqlite(db_path: Path) -> State:
         conn.close()
 
     files: dict[str, FileRecord] = {}
-    for path, subsystem, chash, shash, lang, symbols, imports in rows:
+    for path, subsystem, chash, shash, lang, symbols, imports, generated in rows:
         files[path] = FileRecord(
             path=path,
             content_hash=chash,
@@ -234,6 +264,7 @@ def _load_sqlite(db_path: Path) -> State:
             symbols=_loads(symbols),
             imports=_loads(imports),
             subsystem=subsystem or "",
+            generated=bool(generated),
         )
     return State(version=config.STATE_VERSION, files=files)
 
@@ -270,13 +301,13 @@ def save_state(project_root: Path, state: State) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
-        conn.executescript(_SCHEMA)
+        _ensure_schema(conn)
         conn.execute(f"PRAGMA user_version = {_schema_version()}")
         with conn:  # transaction: commit on success, rollback on error
             conn.execute("DELETE FROM cache")
             conn.executemany(
                 "INSERT INTO cache (path, subsystem, content_hash, structure_hash, language, "
-                "symbols, imports, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, '')",
+                "symbols, imports, generated, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')",
                 [
                     (
                         rec.path,
@@ -286,6 +317,7 @@ def save_state(project_root: Path, state: State) -> None:
                         rec.language,
                         json.dumps(rec.symbols, sort_keys=True),
                         json.dumps(rec.imports, sort_keys=True),
+                        1 if rec.generated else 0,
                     )
                     for path in sorted(state.files)
                     for rec in (state.files[path],)
@@ -324,7 +356,7 @@ def load_subsystem_records(project_root: Path, subsystem: str) -> list[FileRecor
         if conn.execute("PRAGMA user_version").fetchone()[0] != _schema_version():
             return []
         rows = conn.execute(
-            "SELECT path, subsystem, content_hash, structure_hash, language, symbols, imports "
+            "SELECT path, subsystem, content_hash, structure_hash, language, symbols, imports, generated "
             "FROM cache WHERE subsystem = ? ORDER BY path",
             (subsystem,),
         ).fetchall()
@@ -341,8 +373,9 @@ def load_subsystem_records(project_root: Path, subsystem: str) -> list[FileRecor
             symbols=_loads(symbols),
             imports=_loads(imports),
             subsystem=subsystem or "",
+            generated=bool(generated),
         )
-        for path, subsystem, chash, shash, lang, symbols, imports in rows
+        for path, subsystem, chash, shash, lang, symbols, imports, generated in rows
     ]
 
 

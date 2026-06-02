@@ -47,3 +47,28 @@ def test_schema_valid_subsystem_passes():
         {"name": "auth", "role": "service", "criticality": "core", "paths": ["src/auth"]},
     )
     assert issues == []
+
+
+def test_schema_root_sdd_config_validates_known_agent_and_phases():
+    """The optional SDD block is accepted only for the fields Bounds acts on, so typoed agents/phases do not silently alter generated guidance."""
+    ok = schema.validate_root(
+        {
+            "version": "1",
+            "project": "p",
+            "sdd": {
+                "enabled": True,
+                "agent": "codex",
+                "phases": ["specify", "clarify", "plan", "tasks", "analyze", "implement", "verify"],
+            },
+        }
+    )
+    assert ok == []
+
+    bad = schema.validate_root(
+        {
+            "version": "1",
+            "project": "p",
+            "sdd": {"enabled": "yes", "agent": "robot", "phases": ["specify", "ship"]},
+        }
+    )
+    assert sum(i.code == errors.E_SCHEMA_INVALID for i in bad) == 3

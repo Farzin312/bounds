@@ -1,28 +1,81 @@
 name: cli
 role: service
 criticality: connector
-description: Click command-line entry point + gen-3 command modules (list, describe, validate, preflight, overview, init, discover, calibrate, agent, ci, cache, impact).
+description: Click command-line entry point + gen-3 command modules (list, describe,
+  validate, preflight, overview, init, discover, calibrate, agent, ci, cache, impact).
 paths:
-  - src/bounds/cli.py
-  - src/bounds/discover.py
-  - src/bounds/calibrate.py
-  - src/bounds/agentsync.py
-  - src/bounds/ciconfig.py
+- src/bounds/cli.py
+- src/bounds/discover.py
+- src/bounds/calibrate.py
+- src/bounds/agentsync.py
+- src/bounds/ciconfig.py
 exposes:
-  - { name: main, kind: function }
-  - { name: run_discover, kind: function }
-  - { name: run_calibrate, kind: function }
-  - { name: run_agent, kind: function }
-  - { name: run_ci_install, kind: function }
+- name: main
+  kind: function
+- name: run_discover
+  kind: function
+- name: run_calibrate
+  kind: function
+- name: run_agent
+  kind: function
+- name: run_ci_install
+  kind: function
 consumes:
-  - { subsystem: manifest, via: loader, interfaces: [find_root, load_all, load_root] }
-  - { subsystem: validate, via: engine, interfaces: [run, CheckContext, check_cycles, resolve_import, build_consumer_index, transitive_consumers, index_extracts, schema_catalog, SCHEMA_LANGUAGES] }
-  - { subsystem: extract, via: scan, interfaces: [get_adapter, supported_extensions, extract_file, iter_repo_source, strip_ext, extract_project, adapter_for_language, is_test_file, is_test_symbol, is_framework_entry_file, mapping_coverage, resolve_doc_owners, resolve_test_owners, subsystems_with_unsupported_source] }
-  - { subsystem: cache, via: store, interfaces: [inspect, migrate_json_to_sqlite, prune_missing] }
-  - { subsystem: output, via: output, interfaces: [emit] }
+- subsystem: manifest
+  via: loader
+  interfaces:
+  - find_root
+  - load_all
+  - load_root
+- subsystem: validate
+  via: engine
+  interfaces:
+  - run
+  - CheckContext
+  - check_cycles
+  - resolve_import
+  - build_consumer_index
+  - transitive_consumers
+  - index_extracts
+  - schema_catalog
+  - SCHEMA_LANGUAGES
+- subsystem: extract
+  via: scan
+  interfaces:
+  - get_adapter
+  - supported_extensions
+  - extract_file
+  - iter_repo_source
+  - strip_ext
+  - extract_project
+  - adapter_for_language
+  - is_test_file
+  - is_test_symbol
+  - is_framework_entry_file
+  - mapping_coverage
+  - resolve_doc_owners
+  - resolve_test_owners
+  - subsystems_with_unsupported_source
+- subsystem: cache
+  via: store
+  interfaces:
+  - inspect
+  - migrate_json_to_sqlite
+  - prune_missing
+- subsystem: output
+  via: output
+  interfaces:
+  - emit
+- subsystem: ignore
+  interfaces:
+  - IgnoreMatcher
+  - load_matcher
+- subsystem: models
+  interfaces:
+  - SubsystemCompact
 tests:
-  - tests/cli
-  - tests/agent
-  - tests/discover
+- tests/cli
+- tests/agent
+- tests/discover
 docs:
-  - docs/cli-reference.md
+- docs/cli-reference.md

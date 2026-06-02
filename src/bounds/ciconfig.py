@@ -63,6 +63,8 @@ import yaml
 
 from bounds import errors
 
+__all__ = ["run_ci_install"]
+
 # Recognized targets. These are the canonical file destinations each CI host
 # mandates and cannot be relocated (GitHub Actions => .github/workflows/, GitLab
 # => root .gitlab-ci.yml, pre-commit => root .pre-commit-config.yaml). Public so the
@@ -82,6 +84,18 @@ _TARGET_PATHS = {
 }
 
 # ---- Generated file/templates -------------------------------------------------
+
+_ACTION_INSTALL = """\
+      # External repos install Bounds from git until `bounds-cli` is published on PyPI.
+      # The Bounds repo itself installs the checked-out PR, not the default branch.
+      - name: Install Bounds
+        run: |
+          if [ -f pyproject.toml ] && grep -q '^name = "bounds-cli"' pyproject.toml; then
+            pipx install .
+          else
+            pipx install "git+https://github.com/Farzin312/bounds.git"
+          fi
+"""
 
 # GitHub Actions workflow. The cache key hashes root.yaml + manifests (not the
 # branch) so a new branch reuses main's warmed cache. Runs the strict preflight gate.
@@ -104,14 +118,19 @@ jobs:
         with:
           path: .bounds/cache.db
           key: bounds-${{ hashFiles('.bounds/root.yaml', '.bounds/manifests/**') }}
-      # Installs from git (works today; GitHub runners preinstall pipx).
-      # switch to `bounds-cli` (pipx) once published to PyPI.
-      - run: pipx install "git+https://github.com/Farzin312/bounds.git"
+""" + _ACTION_INSTALL + """\
       # Freshness gate: flag NEW manifest-vs-source drift above the committed baseline.
       # Non-blocking by default (|| true) until you commit a baseline and trust the signal;
       # drop the `|| true` to make new drift fail the build.
       - run: bounds calibrate --check || true
       - run: bounds preflight --ci
+"""
+
+_OLD_ACTION_PYPI_INSTALL = "      - run: pipx install bounds-cli\n"
+_OLD_ACTION_GIT_INSTALL = """\
+      # Installs from git (works today; GitHub runners preinstall pipx).
+      # switch to `bounds-cli` (pipx) once published to PyPI.
+      - run: pipx install "git+https://github.com/Farzin312/bounds.git"
 """
 
 # The pre-commit hook block (a single `repo: local` entry). Fast quick-mode gate.
@@ -158,6 +177,19 @@ def _install_action(project_root: Path) -> bool:
     """Write the GitHub Actions workflow. Return True if created, False if skipped."""
     path = project_root / _TARGET_PATHS["action"]
     if path.exists():
+        text = path.read_text(encoding="utf-8")
+        if _OLD_ACTION_PYPI_INSTALL in text:
+            path.write_text(
+                text.replace(_OLD_ACTION_PYPI_INSTALL, _ACTION_INSTALL),
+                encoding="utf-8",
+            )
+            return True
+        if _OLD_ACTION_GIT_INSTALL in text:
+            path.write_text(
+                text.replace(_OLD_ACTION_GIT_INSTALL, _ACTION_INSTALL),
+                encoding="utf-8",
+            )
+            return True
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_ACTION_YML, encoding="utf-8")

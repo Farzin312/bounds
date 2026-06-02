@@ -99,3 +99,79 @@ def test_guide_cli_is_json_when_piped(tmp_path, monkeypatch):
     assert res.exit_code == 0
     data = json.loads(res.output)
     assert data["mode"] == "guide" and "steps" in data and "daily" in data
+
+
+def test_guide_includes_sdd_track_when_root_enables_it(tmp_path):
+    """An enabled root sdd block adds an SDD phase track to the same JSON payload; absent config keeps today's guide shape."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: sdd\nsubsystems: []\nsdd:\n'
+        "  enabled: true\n  agent: codex\n  phases: [specify, plan, implement, verify]\n",
+        encoding="utf-8",
+    )
+
+    payload = guide.run_guide(tmp_path)
+    assert payload["sdd"]["enabled"] is True
+    assert payload["sdd"]["agent"] == "codex"
+    assert [s["phase"] for s in payload["sdd"]["steps"]] == [
+        "specify",
+        "plan",
+        "implement",
+        "verify",
+    ]
+    assert "bounds validate --quick" == payload["sdd"]["freshness"]["during_implementation"]
+
+
+def test_guide_sdd_flag_forces_preview_without_root_config(tmp_path, monkeypatch):
+    """`bounds guide --sdd` shows the SDD track as a preview without making SDD globally enabled."""
+    monkeypatch.chdir(tmp_path)
+    res = CliRunner().invoke(main, ["guide", "--sdd"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["sdd"]["enabled"] is False
+    assert data["sdd"]["forced"] is True
+    assert [s["phase"] for s in data["sdd"]["steps"]] == [
+        "specify",
+        "clarify",
+        "plan",
+        "tasks",
+        "analyze",
+        "implement",
+        "verify",
+    ]
+
+
+def test_guide_sdd_empty_phase_list_is_respected(tmp_path):
+    """An explicit empty phase list is a real customization, not a signal to fall back to all phases."""
+    cfg = tmp_path / ".bounds"
+    cfg.mkdir()
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: sdd\nsdd:\n  enabled: true\n  phases: []\n',
+        encoding="utf-8",
+    )
+
+    payload = guide.run_guide(tmp_path)
+    assert payload["sdd"]["phases"] == []
+    assert payload["sdd"]["steps"] == []
+
+
+def test_guide_sdd_null_phases_defaults_to_all_phases(tmp_path):
+    """A blank YAML phases value normalizes to the default phase list instead of crashing."""
+    cfg = tmp_path / ".bounds"
+    cfg.mkdir()
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: sdd\nsdd:\n  enabled: true\n  phases:\n',
+        encoding="utf-8",
+    )
+
+    payload = guide.run_guide(tmp_path)
+    assert payload["sdd"]["phases"] == [
+        "specify",
+        "clarify",
+        "plan",
+        "tasks",
+        "analyze",
+        "implement",
+        "verify",
+    ]

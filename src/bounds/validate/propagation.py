@@ -14,6 +14,8 @@ from collections import deque
 from .. import config
 from ..models import SubsystemCompact
 
+__all__ = ["build_consumer_index", "transitive_consumers"]
+
 
 def build_consumer_index(subsystems: dict[str, SubsystemCompact]) -> dict[str, list[str]]:
     """Map each provider subsystem name -> sorted list of subsystems that consume it."""

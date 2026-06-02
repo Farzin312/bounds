@@ -1,17 +1,23 @@
 name: models
 role: library
 criticality: core
-description: The Bounds data model — manifest, extraction, and validation dataclasses shared everywhere.
+description: "The Bounds data model \u2014 manifest, extraction, and validation dataclasses\
+  \ shared everywhere."
 paths:
-  - src/bounds/models.py
+- src/bounds/models.py
 exposes:
-  - { name: Interface, kind: class }
-  - { name: Consumes, kind: class }
-  - { name: SubsystemCompact, kind: class }
-  - { name: RootManifest, kind: class }
-  - { name: Symbol, kind: class }
-  - { name: ImportRef, kind: class }
-  - { name: ExtractResult, kind: class }
-  - { name: Issue, kind: class }
-  - { name: ValidationReport, kind: class }
+- name: SubsystemCompact
+  kind: class
+- name: RootManifest
+  kind: class
+- name: Symbol
+  kind: class
+- name: ImportRef
+  kind: class
+- name: ExtractResult
+  kind: class
+- name: Issue
+  kind: class
+- name: ValidationReport
+  kind: class
 consumes: []

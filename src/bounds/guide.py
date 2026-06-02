@@ -11,13 +11,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import agentsync, gitutil
+from . import agentsync, config, gitutil
 from .extract import scan, supported_extensions
 from .ignore import load_matcher
 from .manifest import loader as manifest_loader
+from .models import RootManifest
 
 
-def run_guide(project_root: Path) -> dict:
+def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
     """Return the setup checklist + daily commands for the project at ``project_root``.
 
     Never raises on a half-set-up or empty project: a missing ``.bounds/`` just means the early
@@ -29,9 +30,10 @@ def run_guide(project_root: Path) -> dict:
 
     n_subsystems = 0
     subs: dict = {}
+    rootm: RootManifest | None = None
     if has_bounds:
         try:
-            _root, subs, _issues = manifest_loader.load_all(base)
+            rootm, subs, _issues = manifest_loader.load_all(base)
             n_subsystems = len(subs)
         except Exception:  # noqa: BLE001 - a broken manifest shouldn't break the guide
             n_subsystems = 0
@@ -92,13 +94,80 @@ def run_guide(project_root: Path) -> dict:
     ]
 
     pending = next((s for s in steps if not s["done"]), None)
-    return {
+    payload = {
         "mode": "guide",
         "steps": steps,
         "daily": daily,
         "next": pending["command"] if pending else None,
         "complete": pending is None,
     }
+    sdd_cfg = _sdd_config(rootm)
+    if sdd or sdd_cfg["enabled"]:
+        payload["sdd"] = {
+            **sdd_cfg,
+            "forced": bool(sdd and not sdd_cfg["enabled"]),
+            "steps": _sdd_steps(sdd_cfg),
+            "freshness": {
+                "contract": "manifests evolve with the spec; intentional surface changes update manifests and re-baseline drift",
+                "during_implementation": "bounds validate --quick",
+                "ci_gate": "bounds preflight --ci",
+                "intentional_change": "bounds calibrate --dump-baseline",
+            },
+        }
+    return payload
+
+
+def _sdd_config(root: RootManifest | None) -> dict:
+    """Resolved optional SDD settings from root.yaml, with deterministic defaults."""
+    raw = root.sdd if root is not None and isinstance(root.sdd, dict) else {}
+    enabled = bool(raw.get("enabled", False))
+    agent = str(raw.get("agent") or "generic")
+    if agent not in config.SDD_AGENTS:
+        agent = "generic"
+    requested = raw.get("phases")
+    if requested is None:
+        requested = config.SDD_PHASES
+    phases = [p for p in config.SDD_PHASES if p in set(requested)]
+    return {"enabled": enabled, "agent": agent, "phases": phases}
+
+
+def _sdd_steps(sdd_cfg: dict) -> list[dict]:
+    """Bounds' deterministic command contract for each enabled SDD phase."""
+    phase_map = {
+        "specify": {
+            "command": "bounds overview && bounds list",
+            "use": "ground the spec in the current subsystem map, coverage, and boundaries",
+        },
+        "clarify": {
+            "command": "bounds describe <name> && bounds where <symbol>",
+            "use": "answer what the current verified contract of a subsystem or symbol is",
+        },
+        "plan": {
+            "command": "bounds impact <name>",
+            "use": "account for the blast radius and declared manifests the plan must respect",
+        },
+        "tasks": {
+            "command": "bounds impact <name>",
+            "use": "scope and order implementation tasks by subsystem dependency edges",
+        },
+        "analyze": {
+            "command": "bounds validate && bounds preflight",
+            "use": "cross-check the plan/tasks against declared boundaries and drift",
+        },
+        "implement": {
+            "command": "bounds validate --quick",
+            "use": "catch drift after each edit; update manifests when the spec intentionally changes surface",
+        },
+        "verify": {
+            "command": "bounds preflight --ci",
+            "use": "run the final architecture gate before review or merge",
+        },
+    }
+    return [
+        {"phase": phase, **phase_map[phase]}
+        for phase in config.SDD_PHASES
+        if phase in set(sdd_cfg.get("phases", config.SDD_PHASES))
+    ]
 
 
 def _coverage(base: Path, subs: dict) -> dict | None:

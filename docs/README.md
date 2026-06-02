@@ -8,12 +8,14 @@ command reference, and the deep dives on how Bounds works and why it pays off.
 - [why-bounds.md](why-bounds.md) — the rationale: giving agents a token-lean verified contract, seeing blast radius before a change, and catching drift in CI.
 - [team-workflow.md](team-workflow.md) — how a team adopts and lives with Bounds day to day.
 - [use-cases.md](use-cases.md) — concrete workflows: pre-PR safety, dropping an agent into a strange repo, enforcing architecture in CI.
+- [sdd.md](sdd.md) — optional Spec-Driven Development integration: where Bounds grounds each phase and how manifests stay fresh with the spec.
 
 ## Reference
 
 - [cli-reference.md](cli-reference.md) — every command, every flag, and the JSON/exit-code contract.
 - [coverage.md](coverage.md) — the mapping-coverage signal, what "aiming for 100%" means, and the human-or-AI workflow for closing a gap.
 - [ai-agents.md](ai-agents.md) — `bounds agent --sync`, the canonical `AGENTS.md` contract, and why agent compliance is advisory (CI is the only hard enforcement).
+- [sdd.md](sdd.md) — the opt-in `root.yaml` SDD block, `bounds guide --sdd`, per-agent wiring, and freshness contract.
 - [languages-and-platforms.md](languages-and-platforms.md) — the language support matrix (Python + TS/JS + SQL + Prisma today) and cross-platform notes.
 - [install.md](install.md) — all install channels and their current status.
 

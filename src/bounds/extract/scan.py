@@ -18,6 +18,20 @@ from ..ignore import IgnoreMatcher, has_generated_marker
 from ..models import ExtractResult, Issue, SubsystemCompact
 from . import get_adapter, supported_extensions
 
+__all__ = [
+    "extract_file",
+    "extract_project",
+    "is_framework_entry_file",
+    "is_test_file",
+    "is_test_symbol",
+    "iter_repo_source",
+    "mapping_coverage",
+    "resolve_doc_owners",
+    "resolve_test_owners",
+    "strip_ext",
+    "subsystems_with_unsupported_source",
+]
+
 
 def walk_supported(base: Path, exts: set[str] | None = None) -> list[Path]:
     """Supported source files under ``base``, symlink-cycle-safe (``exts=None`` → every file).
@@ -593,7 +607,7 @@ def subsystems_with_unsupported_source(
     out: set[str] = set()
     for name in sorted(subsystems):
         sub = subsystems[name]
-        for abs_path in iter_subsystem_files(project_root, sub, None):  # None => every extension
+        for abs_path in iter_subsystem_files(project_root, sub, set(config.KNOWN_SOURCE_EXTS)):
             ext = abs_path.suffix
             if ext in supported or ext not in config.KNOWN_SOURCE_EXTS:
                 continue  # supported (verifiable) or not source code at all
@@ -789,6 +803,7 @@ def extract_file(project_root: Path, rel: str) -> tuple[ExtractResult | None, bo
         return None, False
     generated = has_generated_marker(source)
     result = adapter.extract(rel, source)
+    result.generated = generated
     if result is None or result.error is not None:
         return None, generated
     return result, generated

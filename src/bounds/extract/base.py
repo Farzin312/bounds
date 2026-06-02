@@ -25,6 +25,8 @@ import json
 from .. import errors
 from ..models import ExtractResult, ImportRef, Issue, Symbol
 
+__all__ = ["content_hash"]
+
 
 class LanguageAdapter(ABC):
     """Extracts exported symbols and imports from one language's source files."""
@@ -112,6 +114,7 @@ def make_result(
     imports: list[ImportRef],
     source: bytes,
     error: str | None = None,
+    generated: bool = False,
 ) -> ExtractResult:
     """Build an :class:`ExtractResult` with both hashes filled in.
 
@@ -127,4 +130,5 @@ def make_result(
         content_hash=content_hash(source),
         structure_hash=structure_hash(symbols, imports),
         error=error,
+        generated=generated,
     )

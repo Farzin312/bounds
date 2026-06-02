@@ -41,6 +41,9 @@ import re
 from pathlib import Path
 
 from . import config, errors
+from .manifest import loader as manifest_loader
+
+__all__ = ["run_agent"]
 
 # ---------------------------------------------------------------------------
 # Canonical contract content (committed in AGENTS.md; the single source of truth)
@@ -93,6 +96,11 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 ### Hard rules
 - NEVER read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/manifests/*.yaml`, or `.bounds/root.yaml` directly. The cache is binary; the manifests bypass tree-sitter verification.
 - The CLI is the API for architecture. Use source files only for implementation details after Bounds has scoped the subsystem.
+
+### Optional Spec-Driven Development
+- If this repo enables `sdd:` in Bounds root config, treat Bounds as the verified architecture layer across specify → clarify → plan → tasks → analyze → implement → verify.
+- Bounds does not run the prose workflow and never calls an LLM; it supplies deterministic facts (`overview`, `list`, `describe`, `where`, `impact`) and gates (`validate --quick`, `preflight --ci`, `calibrate --check`).
+- Intentional contract changes belong in the spec: update the manifest, then re-baseline with `bounds calibrate --dump-baseline`.
 """
 
 # The token-lean body shared by every per-agent *pointer* file. Kept short on purpose:
@@ -282,17 +290,85 @@ def _resolve_selection(only: set[str] | None) -> list[str]:
 # ---------------------------------------------------------------------------
 # Expected-body resolution (one home: both sync and check ask "what should this file hold?")
 # ---------------------------------------------------------------------------
-def _expected_body(agent: "_Agent") -> str:
+def _expected_body(agent: "_Agent", sdd_cfg: dict | None = None) -> str:
     """The inner in-marker body (no markers, no stamp) this agent's file should currently hold.
 
     Single source for both the writer (``_sync``) and the verifier (``_check``) so the two can
     never disagree about what "up to date" means.
     """
+    sdd_cfg = sdd_cfg or _sdd_config(None)
     if agent.canonical or agent.path == CANONICAL_NAME:
-        return CANONICAL_BODY.rstrip("\n")
+        return _append_sdd_body(CANONICAL_BODY.rstrip("\n"), "canonical", sdd_cfg)
     if agent.dedicated:
-        return _dedicated_body(agent).rstrip("\n")
-    return _pointer_block_body(agent.fmt).rstrip("\n")
+        return _append_sdd_body(_dedicated_body(agent).rstrip("\n"), agent.key, sdd_cfg)
+    return _append_sdd_body(_pointer_block_body(agent.fmt).rstrip("\n"), agent.key, sdd_cfg)
+
+
+def _sdd_config(root: Path | None) -> dict:
+    """Return resolved SDD config for generated agent artifacts, fail-soft when absent/broken."""
+    raw = {}
+    if root is not None:
+        try:
+            found = manifest_loader.find_root(root)
+            if found is not None:
+                rootm = manifest_loader.load_root(found)
+                if isinstance(rootm.sdd, dict):
+                    raw = rootm.sdd
+        except Exception:  # noqa: BLE001 - agent sync must still work with a broken root manifest
+            raw = {}
+    enabled = bool(raw.get("enabled", False))
+    agent = str(raw.get("agent") or "generic")
+    if agent not in config.SDD_AGENTS:
+        agent = "generic"
+    requested = raw.get("phases")
+    if requested is None:
+        requested = config.SDD_PHASES
+    phases = [p for p in config.SDD_PHASES if p in set(requested)]
+    return {"enabled": enabled, "agent": agent, "phases": phases}
+
+
+def _append_sdd_body(body: str, agent_key: str, sdd_cfg: dict) -> str:
+    """Append the active SDD contract to generated agent text only when opted in."""
+    if not sdd_cfg.get("enabled"):
+        return body
+    return body.rstrip("\n") + "\n\n" + _sdd_body(agent_key, sdd_cfg).rstrip("\n")
+
+
+def _sdd_body(agent_key: str, sdd_cfg: dict) -> str:
+    """Agent-facing SDD phase map expressed as Bounds commands, not a new workflow engine."""
+    phase_uses = {
+        "specify": ("`bounds overview` / `bounds list`", "ground the spec in the real subsystem map, coverage, and boundaries"),
+        "clarify": ("`bounds describe <name>` / `bounds where <symbol>`", "answer what the current verified contract of X is"),
+        "plan": ("`bounds impact <name>`", "include blast radius and declared boundaries in the implementation plan"),
+        "tasks": ("`bounds impact <name>`", "scope and order tasks by subsystem dependency edges"),
+        "analyze": ("`bounds validate` / `bounds preflight`", "cross-check plan/tasks against architecture before coding"),
+        "implement": ("`bounds validate --quick`", "catch drift after each edit; manifest updates are part of intentional spec changes"),
+        "verify": ("`bounds preflight --ci`", "final deterministic architecture gate"),
+    }
+    lines = [
+        "## Bounds in Spec-Driven Development",
+        "",
+        f"SDD is enabled for `{sdd_cfg.get('agent', 'generic')}`; this `{agent_key}` artifact wires Bounds into the project's customized SDD loop.",
+        "Bounds stays zero-LLM: it provides verified architecture facts and gates while the agent handles prose spec work.",
+        "",
+        "### Phase contract",
+    ]
+    for phase in config.SDD_PHASES:
+        if phase not in set(sdd_cfg.get("phases", config.SDD_PHASES)):
+            continue
+        command, use = phase_uses[phase]
+        lines.append(f"- **{phase}** → {command} — {use}.")
+    lines.extend(
+        [
+            "",
+            "### Freshness contract",
+            "- If the spec intentionally changes public surface, update the manifest in the same spec/plan change.",
+            "- Run `bounds calibrate --dump-baseline` only after the manifest reflects the intended contract.",
+            "- `bounds validate --quick` in the edit loop catches accidental drift; `bounds preflight --ci` is the final gate.",
+            "- For unsupported-language subsystems, keep hand-authored exposes in the manifest; calibrate routes unverifiable entries to review instead of deleting them.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _front_matter(agent: "_Agent") -> str:
@@ -581,12 +657,17 @@ def _sync(root: Path, selected: list[str]) -> dict:
     "everything already current" instead of looking like nothing happened.
     """
     buckets = _Buckets()
+    sdd_cfg = _sdd_config(root)
 
     # 1. Canonical AGENTS.md — always written, as a marked block so any other AGENTS.md
     #    content the project keeps is preserved.
     canonical_path = root / CANONICAL_NAME
     rel_canonical = CANONICAL_NAME
-    outcome = _upsert_block(canonical_path, _MARKDOWN, CANONICAL_BODY.rstrip("\n"))
+    outcome = _upsert_block(
+        canonical_path,
+        _MARKDOWN,
+        _expected_body(_AGENTS["codex"], sdd_cfg),
+    )
     buckets.record(outcome, rel_canonical)
 
     # 2. Per-tool files for the selected agents (AGENTS.md already handled above).
@@ -599,7 +680,7 @@ def _sync(root: Path, selected: list[str]) -> dict:
         outcome = _upsert_block(
             root / Path(agent.path),
             agent.fmt,
-            _expected_body(agent),
+            _expected_body(agent, sdd_cfg),
             prefix=_front_matter(agent),
             dedicated=agent.dedicated,
         )
@@ -614,7 +695,8 @@ def _sync(root: Path, selected: list[str]) -> dict:
                 continue
             done.add(art.path)
             outcome = _upsert_block(
-                root / Path(art.path), art.fmt, art.body.rstrip("\n"),
+                root / Path(art.path), art.fmt,
+                _append_sdd_body(art.body.rstrip("\n"), key, sdd_cfg),
                 prefix=art.front, dedicated=True,
             )
             buckets.record(outcome, Path(art.path).as_posix())
@@ -937,12 +1019,13 @@ def _check(root: Path, selected: list[str]) -> dict:
     """
     detected = set(_detect(root)["detected"])
     targets = [k for k in selected if k in detected]
+    sdd_cfg = _sdd_config(root)
 
     configured: list[str] = []
     missing: list[str] = []
     stale: list[str] = []
     for key in targets:
-        status = _config_status(root, _AGENTS[key])
+        status = _config_status(root, _AGENTS[key], sdd_cfg)
         if status == "missing":
             missing.append(key)
         elif status == "stale":
@@ -961,7 +1044,7 @@ def _check(root: Path, selected: list[str]) -> dict:
     return result
 
 
-def _config_status(root: Path, agent: "_Agent") -> str:
+def _config_status(root: Path, agent: "_Agent", sdd_cfg: dict | None = None) -> str:
     """Classify ``agent`` as ``missing`` / ``stale`` / ``configured`` across ALL its files.
 
     The primary signal is the pointer/canonical file (``missing`` ⇒ never synced; ``stale`` ⇒
@@ -972,13 +1055,15 @@ def _config_status(root: Path, agent: "_Agent") -> str:
     non-destructively, and several agents (codex/opencode) are fully wired by ``AGENTS.md`` alone,
     so requiring their optional artifact would falsely flag them after a single-agent sync.
     """
-    pointer = _target_status(root, agent.path, agent.fmt, _expected_body(agent),
+    sdd_cfg = sdd_cfg or _sdd_config(root)
+    pointer = _target_status(root, agent.path, agent.fmt, _expected_body(agent, sdd_cfg),
                              agent.dedicated, _front_matter(agent))
     if pointer != "configured":
         return pointer  # missing (never synced) or stale (outdated) — primary signal wins
     for art in _AGENT_ARTIFACTS.get(agent.key, ()):
         if (root / Path(art.path)).exists():
-            if _target_status(root, art.path, art.fmt, art.body.rstrip("\n"), True, art.front) != "configured":
+            body = _append_sdd_body(art.body.rstrip("\n"), agent.key, sdd_cfg)
+            if _target_status(root, art.path, art.fmt, body, True, art.front) != "configured":
                 return "stale"  # a present artifact is broken/outdated — re-sync to refresh
     return "configured"
 

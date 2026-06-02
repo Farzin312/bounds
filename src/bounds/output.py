@@ -13,6 +13,8 @@ import sys
 
 from .errors import BoundsError
 
+__all__ = ["emit"]
+
 # Severity groups, in the order they render and rank.
 _SEVERITY_ORDER = ("error", "warning", "info")
 _BULLETS = {"error": "✗", "warning": "⚠", "info": "ℹ"}
@@ -408,6 +410,18 @@ def _render_guide_human(payload: dict) -> str:
         lines.append("daily commands:")
         for d in daily:
             lines.append(f"  {d.get('command', ''):<{width}}  — {d.get('use', '')}")
+    sdd = payload.get("sdd") or {}
+    if sdd:
+        agent = sdd.get("agent", "generic")
+        forced = " (preview)" if sdd.get("forced") else ""
+        lines.append("")
+        lines.append(f"sdd track: {agent}{forced}")
+        for step in sdd.get("steps", []) or []:
+            lines.append(f"  {step.get('phase', ''):<9} {step.get('command', '')}")
+            lines.append(f"            {step.get('use', '')}")
+        freshness = sdd.get("freshness") or {}
+        if freshness:
+            lines.append(f"  freshness: {freshness.get('contract', '')}")
     return "\n".join(lines)
 
 

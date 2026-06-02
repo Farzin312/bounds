@@ -14,7 +14,7 @@ from pathlib import Path
 from .. import config, errors, gitutil
 from ..cache import store as cache_store
 from ..extract import content_hash, get_adapter, supported_extensions, scan
-from ..ignore import IgnoreMatcher, load_matcher
+from ..ignore import IgnoreMatcher, has_generated_marker, load_matcher
 from ..manifest import loader as manifest_loader
 from ..models import Issue, ValidationReport
 from . import propagation
@@ -136,6 +136,7 @@ def run(
     # ---- Extraction (cache-accelerated) ----
     extracts: dict[str, "object"] = {}
     dirty: set[str] = set()
+    generated_files: set[str] = set()
     parsed = 0
     cache_hits = 0
     state_changed = False
@@ -148,7 +149,10 @@ def run(
 
         # Quick mode: a file git says is unchanged is trusted from cache without hashing/parsing.
         if mode == "quick" and rel not in changed_rel and prev is not None and not scan.is_oversized(abs_path):
-            extracts[rel] = prev.to_result()
+            cached = prev.to_result()
+            extracts[rel] = cached
+            if cached.generated:
+                generated_files.add(rel)
             if prev.subsystem != owner:
                 prev.subsystem = owner  # keep the cached owner current (partial reads)
                 state_changed = True
@@ -186,7 +190,10 @@ def run(
 
         chash = content_hash(source)
         if prev is not None and prev.content_hash == chash:
-            extracts[rel] = prev.to_result()
+            cached = prev.to_result()
+            extracts[rel] = cached
+            if cached.generated:
+                generated_files.add(rel)
             if prev.subsystem != owner:
                 prev.subsystem = owner  # keep the cached owner current (partial reads)
                 state_changed = True
@@ -194,6 +201,9 @@ def run(
             continue
 
         result = adapter.extract(rel, source)
+        result.generated = has_generated_marker(source)
+        if result.generated:
+            generated_files.add(rel)
         parsed += 1
         if result.error:
             issues.append(
@@ -252,6 +262,7 @@ def run(
         dirty=dirty,
         propagated=propagated,
         unsupported_owners=unsupported_owners,
+        generated_files=generated_files,
     )
     for check in CHECKS_BY_MODE.get(mode, []):
         issues.extend(check(ctx))

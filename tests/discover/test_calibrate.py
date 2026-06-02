@@ -88,6 +88,27 @@ def test_calibrate_flags_ghost_consumes_interface(tmp_path):
     assert ("GHOST",) in removed  # db never exposes GHOST
 
 
+def test_calibrate_adds_imported_interfaces_to_existing_edge(tmp_path):
+    """A named import across an existing bare consume edge should enrich that edge with the interface name."""
+    _build(tmp_path)
+    cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
+    auth_path = cfg / "auth.yaml"
+    auth = yaml.safe_load(auth_path.read_text(encoding="utf-8"))
+    auth["consumes"] = [{"subsystem": "db"}]
+    auth_path.write_text(yaml.safe_dump(auth, sort_keys=False), encoding="utf-8")
+
+    result = run_calibrate(tmp_path, subsystem="auth")
+    auth_proposal = result["subsystems"]["auth"]
+    assert auth_proposal["add_consume_interfaces"] == [
+        {"subsystem": "db", "interfaces": ["query"]}
+    ]
+
+    run_calibrate(tmp_path, subsystem="auth", apply=True)
+    updated = yaml.safe_load(auth_path.read_text(encoding="utf-8"))
+    db_edge = next(c for c in updated["consumes"] if c["subsystem"] == "db")
+    assert db_edge["interfaces"] == ["query"]
+
+
 def test_calibrate_role_criticality_never_touched(tmp_path):
     """Calibrate reconciles only exposes/consumes vs source — human-declared role/criticality are never proposed."""
     _build(tmp_path)
@@ -128,6 +149,10 @@ def test_calibrate_apply_drops_fully_stale_edge_to_bare(tmp_path):
     # An edge whose ONLY interface is a ghost must not be left as `interfaces: []`.
     _build(tmp_path)
     cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
+    (tmp_path / "src" / "auth" / "login.py").write_text(
+        "def login(u):\n    pass\n",
+        encoding="utf-8",
+    )
     # auth consumes db with only a ghost interface.
     (cfg / "auth.yaml").write_text(
         yaml.safe_dump(

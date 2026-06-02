@@ -18,6 +18,8 @@ from ..extract.scan import is_framework_entry_file, is_test_file, is_test_symbol
 from ..models import ExtractResult, Issue, RootManifest, SubsystemCompact
 from .schema import SCHEMA_LANGUAGES, _fold_subsystem_schema, schema_diagnostics
 
+__all__ = ["CheckContext", "check_cycles", "index_extracts", "resolve_import"]
+
 # Sentinel for "not yet computed" so a genuinely absent tsconfig (cached as None) isn't reloaded.
 _UNSET = object()
 
@@ -71,6 +73,9 @@ class CheckContext:
     # file. checks are pure (CheckContext)->list[Issue], so the count is threaded here (the
     # engine reads it after running checks) rather than returned. Only check_boundary writes it.
     unresolved_local_imports: int = 0
+    # Files with a generated-code marker. The engine reads this from source only when it parses a
+    # file, then caches it so quick validation can skip generated exports without source rereads.
+    generated_files: set[str] = field(default_factory=set)
 
     def files_of(self, subsystem: str) -> list[str]:
         """Extracted files owned by ``subsystem`` (sorted, only those present in extracts)."""
@@ -353,7 +358,14 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
                 for p in ctx.files_of(name) if is_framework_entry_file(p)
                 for s in ctx.extracts[p].symbols if s.exported
             }
-            for extra in sorted(actual - declared - test_case_exports - framework_exports):
+            generated_exports = {
+                s.name
+                for p in ctx.files_of(name) if p in ctx.generated_files
+                for s in ctx.extracts[p].symbols if s.exported
+            }
+            for extra in sorted(
+                actual - declared - test_case_exports - framework_exports - generated_exports
+            ):
                 if extra in declared_table_parents:
                     continue
                 issues.append(

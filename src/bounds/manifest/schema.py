@@ -12,6 +12,8 @@ from __future__ import annotations
 from .. import config, errors
 from ..models import Issue
 
+__all__ = []
+
 
 def validate_root(data: dict) -> list[Issue]:
     """Validate a root-manifest dict, returning schema Issues (never raises).
@@ -87,6 +89,81 @@ def validate_root(data: dict) -> list[Issue]:
 
     issues.extend(_validate_role_defs(data.get("roles")))
     issues.extend(_validate_criticality_defs(data.get("criticality")))
+    issues.extend(_validate_sdd(data.get("sdd")))
+    return issues
+
+
+def _validate_sdd(sdd) -> list[Issue]:
+    """Validate the optional root ``sdd:`` block.
+
+    The block is intentionally small and opt-in. Unknown extra keys are allowed so a project can
+    keep its own SDD conventions next to Bounds' settings, but the fields Bounds acts on must be
+    predictable: ``enabled`` is boolean, ``agent`` is one supported label, and ``phases`` is a
+    list drawn from the canonical phase names.
+    """
+    if sdd is None:
+        return []
+    if not isinstance(sdd, dict):
+        return [
+            Issue(
+                code=errors.E_SCHEMA_INVALID,
+                severity="error",
+                message="root manifest 'sdd' must be a mapping",
+                fix="define SDD as `sdd: { enabled: true, agent: codex }` or remove the block",
+            )
+        ]
+
+    issues: list[Issue] = []
+    enabled = sdd.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        issues.append(
+            Issue(
+                code=errors.E_SCHEMA_INVALID,
+                severity="error",
+                message="root manifest 'sdd.enabled' must be true or false",
+                fix="set `sdd.enabled: true` to opt in, or remove the sdd block",
+            )
+        )
+
+    agent = sdd.get("agent")
+    if agent is not None and str(agent) not in config.SDD_AGENTS:
+        issues.append(
+            Issue(
+                code=errors.E_SCHEMA_INVALID,
+                severity="error",
+                message=(
+                    "root manifest 'sdd.agent' must be one of "
+                    f"{list(config.SDD_AGENTS)}, got {agent!r}"
+                ),
+                fix="set `sdd.agent` to the coding agent whose project wiring you want Bounds to describe",
+            )
+        )
+
+    phases = sdd.get("phases")
+    if phases is not None:
+        if not isinstance(phases, list) or not all(isinstance(p, str) for p in phases):
+            issues.append(
+                Issue(
+                    code=errors.E_SCHEMA_INVALID,
+                    severity="error",
+                    message="root manifest 'sdd.phases' must be a list of phase names",
+                    fix=f"make `sdd.phases` a list drawn from {list(config.SDD_PHASES)}",
+                )
+            )
+        else:
+            unknown = sorted({p for p in phases if p not in config.SDD_PHASES})
+            if unknown:
+                issues.append(
+                    Issue(
+                        code=errors.E_SCHEMA_INVALID,
+                        severity="error",
+                        message=(
+                            "root manifest 'sdd.phases' contains unknown phase(s): "
+                            + ", ".join(unknown)
+                        ),
+                        fix=f"use the canonical phase names: {list(config.SDD_PHASES)}",
+                    )
+                )
     return issues
 
 

@@ -26,6 +26,8 @@ from pathlib import Path
 
 from . import config
 
+__all__ = ["IgnoreMatcher", "has_generated_marker", "load_matcher"]
+
 # Header markers that identify auto-generated source (case-insensitive). Only the first slice of the
 # file is inspected (head-only scan) so a passing mention deep in a body never trips — that head-only
 # window is the false-positive guard, so it is deliberately not widened. Beyond the original

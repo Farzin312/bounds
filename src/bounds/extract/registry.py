@@ -15,6 +15,8 @@ from .python import PythonAdapter
 from .sql import SqlAdapter
 from .typescript import TypeScriptAdapter
 
+__all__ = ["adapter_for_language", "get_adapter", "supported_extensions"]
+
 # extension -> singleton adapter instance; built on first use.
 _ADAPTERS: dict[str, LanguageAdapter] | None = None
 # language_name -> singleton adapter instance.

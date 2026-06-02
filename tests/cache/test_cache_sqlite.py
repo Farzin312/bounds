@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 from bounds import config
 from bounds.cache import store
 from bounds.models import ExtractResult, ImportRef, Symbol
 
 
-def _result(path: str) -> ExtractResult:
+def _result(path: str, *, generated: bool = False) -> ExtractResult:
     return ExtractResult(
         path=path,
         language="python",
@@ -17,6 +18,7 @@ def _result(path: str) -> ExtractResult:
         imports=[ImportRef(module="os", names=["getpid"], line=1)],
         content_hash="c" * 64,
         structure_hash="s" * 64,
+        generated=generated,
     )
 
 
@@ -53,6 +55,58 @@ def test_roundtrip_preserves_records_and_owner(tmp_path):
     result = rec.to_result()
     assert result.exported_names() == {"login"}
     assert result.imports[0].module == "os"
+    assert result.generated is False
+
+
+def test_roundtrip_preserves_generated_flag(tmp_path):
+    """BOUNDS-021: cache generated-file state so quick validation does not reread source to skip generated exports."""
+    _init_bounds(tmp_path)
+    state = store.State()
+    state.put(_result("src/auth/generated.py", generated=True), subsystem="auth")
+    store.save_state(tmp_path, state)
+
+    rec = store.load_state(tmp_path).get("src/auth/generated.py")
+    assert rec is not None
+    assert rec.generated is True
+    assert rec.to_result().generated is True
+
+    partial = store.load_subsystem_records(tmp_path, "auth")
+    assert [r.generated for r in partial] == [True]
+
+
+def test_save_state_migrates_v3_sqlite_schema_before_generated_insert(tmp_path):
+    """A v3 cache.db without the generated column must be ALTERed before v4 inserts, or upgrades leave the cache unwritable."""
+    _init_bounds(tmp_path)
+    db = tmp_path / config.BOUNDS_DIR / config.CACHE_FILE
+    conn = sqlite3.connect(db)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE cache (
+                path TEXT PRIMARY KEY,
+                subsystem TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL,
+                structure_hash TEXT NOT NULL,
+                language TEXT NOT NULL,
+                symbols TEXT,
+                imports TEXT,
+                updated_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX idx_cache_subsystem ON cache(subsystem);
+            PRAGMA user_version = 3;
+            """
+        )
+    finally:
+        conn.close()
+
+    state = store.State()
+    state.put(_result("src/auth/generated.py", generated=True), subsystem="auth")
+    store.save_state(tmp_path, state)
+
+    loaded = store.load_state(tmp_path)
+    rec = loaded.get("src/auth/generated.py")
+    assert rec is not None
+    assert rec.generated is True
 
 
 def test_partial_read_by_subsystem(tmp_path):

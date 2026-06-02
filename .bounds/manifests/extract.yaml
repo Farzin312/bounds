@@ -1,28 +1,55 @@
 name: extract
 role: library
 criticality: connector
-description: Tree-sitter extraction of exported symbols and imports per language (zero LLM).
+description: Tree-sitter extraction of exported symbols and imports per language (zero
+  LLM).
 paths:
-  - src/bounds/extract
+- src/bounds/extract
 exposes:
-  - { name: get_adapter, kind: function }
-  - { name: supported_extensions, kind: function }
-  - { name: content_hash, kind: function }
-  - { name: extract_file, kind: function }
-  - { name: iter_repo_source, kind: function }
-  - { name: strip_ext, kind: function }
-  - { name: extract_project, kind: function }
-  - { name: adapter_for_language, kind: function }
-  - { name: is_test_file, kind: function }
-  - { name: is_test_symbol, kind: function }
-  - { name: is_framework_entry_file, kind: function }
-  - { name: mapping_coverage, kind: function }
-  - { name: resolve_doc_owners, kind: function }
-  - { name: resolve_test_owners, kind: function }
-  - { name: subsystems_with_unsupported_source, kind: function }
+- name: get_adapter
+  kind: function
+- name: supported_extensions
+  kind: function
+- name: content_hash
+  kind: function
+- name: extract_file
+  kind: function
+- name: iter_repo_source
+  kind: function
+- name: strip_ext
+  kind: function
+- name: extract_project
+  kind: function
+- name: adapter_for_language
+  kind: function
+- name: is_test_file
+  kind: function
+- name: is_test_symbol
+  kind: function
+- name: is_framework_entry_file
+  kind: function
+- name: mapping_coverage
+  kind: function
+- name: resolve_doc_owners
+  kind: function
+- name: resolve_test_owners
+  kind: function
+- name: subsystems_with_unsupported_source
+  kind: function
 consumes:
-  - { subsystem: models, via: models, interfaces: [Symbol, ImportRef, ExtractResult] }
+- subsystem: models
+  via: models
+  interfaces:
+  - ExtractResult
+  - ImportRef
+  - Issue
+  - SubsystemCompact
+  - Symbol
+- subsystem: ignore
+  interfaces:
+  - IgnoreMatcher
+  - has_generated_marker
 tests:
-  - tests/extract
+- tests/extract
 docs:
-  - docs/languages-and-platforms.md
+- docs/languages-and-platforms.md

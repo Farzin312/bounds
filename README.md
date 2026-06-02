@@ -23,7 +23,7 @@ the two diverge**.
 [![Zero LLM](https://img.shields.io/badge/structural%20validation-zero%20LLM-brightgreen.svg)](docs/how-it-works.md)
 [![GitHub stars](https://img.shields.io/github/stars/Farzin312/bounds?logo=github&label=stars&color=blue)](https://github.com/Farzin312/bounds/stargazers)
 
-[Quick start](#quick-start) · [Why use it](docs/why-bounds.md) · [How it works](docs/how-it-works.md) · [Token economics](docs/token-economics.md) · [CLI reference](docs/cli-reference.md) · [For AI agents](docs/ai-agents.md) · [Docs](docs/README.md)
+[Quick start](#quick-start) · [Why use it](docs/why-bounds.md) · [How it works](docs/how-it-works.md) · [SDD](docs/sdd.md) · [Token economics](docs/token-economics.md) · [CLI reference](docs/cli-reference.md) · [For AI agents](docs/ai-agents.md) · [Docs](docs/README.md)
 
 </div>
 
@@ -60,7 +60,7 @@ tree-sitter to validate them against your real source, in both directions.
 - **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface or a table changes.
 - **`bounds discover` / `bounds calibrate`** — set up manifests for a repo that has none in one command, then keep them honest against what tree-sitter actually finds in your source.
 - **`bounds agent --sync`** — wire Bounds into eight coding agents (Claude Code, Codex, Gemini, Cursor, …) with one command. It generates each tool's *native* invokable command/skill — an auto-triggering Claude/Codex **skill**, a Gemini/OpenCode **command**, a Copilot **prompt file**, a Windsurf **workflow** — plus the shared `AGENTS.md` contract, so the agent reaches for Bounds on its own. Bare `bounds agent` lists which agents are present (read-only).
-- **`bounds guide`** — a state-aware setup checklist (init → discover → wire agents → CI) for humans and agents; `bounds --help` groups every command by purpose.
+- **`bounds guide`** — a state-aware setup checklist (init → discover → wire agents → CI) for humans and agents; `bounds guide --sdd` previews the optional Spec-Driven Development track; `bounds --help` groups every command by purpose.
 - **Deterministic** — same input, same byte-stable output. No network, no flakiness.
 
 ## Why use it
@@ -69,6 +69,7 @@ tree-sitter to validate them against your real source, in both directions.
 - **Answer the database question an agent gets wrong by reading** — "what columns does `orders` have *now*, and is it row-level-security protected?" isn't in one file; it's a `CREATE` plus a dozen `ALTER`s across migrations. Bounds folds them into the current table + RLS-policy surface and a derived **RLS posture** (which tables are exposed *without* RLS). When a migration uses DDL it can't parse, `schema_coverage` says so — so an agent never reads a blind spot as "this doesn't exist."
 - **Show blast radius before a risky change** — `bounds impact` returns the transitive consumer set and the interfaces each one relies on, so you know the reach before you write the edit.
 - **Catch architecture drift in CI before it merges** — `bounds ci --install --github|--gitlab|--precommit|--all` (auto-detects your host with no flag) wires a `bounds preflight --ci` gate so boundary violations and stale contracts become a failing check with a fix suggestion, not a convention nobody follows. An *intentional* surface change is a deliberate re-baseline (`bounds calibrate --dump-baseline`), not a red build.
+- **Ground Spec-Driven Development in the real architecture** — opt in with `sdd:` in `.bounds/root.yaml` and Bounds becomes the verified architecture layer across specify → clarify → plan → tasks → analyze → implement → verify. It does not replace your agent's SDD prompts; it gives them `overview`/`describe`/`impact` facts and `validate`/`preflight` gates so specs, manifests, and implementation stay aligned.
 
 See [docs/why-bounds.md](docs/why-bounds.md) for the full rationale.
 
@@ -82,6 +83,7 @@ pipx install "git+https://github.com/Farzin312/bounds.git"
 
 cd your-project
 bounds guide                 # state-aware setup checklist (what to run next)
+bounds guide --sdd           # preview the optional SDD phase track
 bounds discover --apply      # auto-generate root.yaml + manifests from your source
 bounds agent --sync          # teach Claude/Codex/Gemini/Cursor/etc. to query Bounds first
 bounds describe auth         # one subsystem's verified surface, as JSON
@@ -242,11 +244,13 @@ and Windows** (Python 3.10–3.14). Full
 - [why-bounds.md](docs/why-bounds.md) — the rationale: token-lean agent context, blast radius, drift control.
 - [team-workflow.md](docs/team-workflow.md) — how a team adopts Bounds day to day.
 - [use-cases.md](docs/use-cases.md) — concrete workflows: pre-PR safety, onboarding, CI enforcement.
+- [sdd.md](docs/sdd.md) — optional Spec-Driven Development integration and freshness contract.
 
 **Reference**
 - [cli-reference.md](docs/cli-reference.md) — every command and flag.
 - [coverage.md](docs/coverage.md) — the mapping-coverage signal, aiming for 100%, and how a human or an agent closes a gap.
 - [ai-agents.md](docs/ai-agents.md) — `agent --sync`, the canonical contract, advisory compliance.
+- [sdd.md](docs/sdd.md) — `root.yaml` opt-in, `guide --sdd`, and per-agent SDD wiring.
 - [languages-and-platforms.md](docs/languages-and-platforms.md) — language support matrix and cross-platform notes.
 - [install.md](docs/install.md) — all install channels and their current status.
 

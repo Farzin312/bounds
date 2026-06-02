@@ -73,7 +73,7 @@ def test_github_workflows_dir_created_when_absent(tmp_path):
 
 
 def test_action_cache_key_and_preflight(tmp_path):
-    """The GitHub Action must key its cache on manifests/root (not the branch), run calibrate --check then preflight --ci, and install from the git ref via pipx (works today; PyPI publish pending) — never the squatted bare `bounds` PyPI name."""
+    """The GitHub Action must key its cache on manifests/root, run both gates, and install Bounds without PyPI."""
     ciconfig.run_ci_install(tmp_path, targets={"action"})
     text = _read(tmp_path / ".github/workflows/bounds.yml")
 
@@ -83,15 +83,66 @@ def test_action_cache_key_and_preflight(tmp_path):
     # Remote CI runs the freshness gate then the strict gate.
     assert "bounds calibrate --check" in text
     assert "bounds preflight --ci" in text
-    # Installs from the git ref via pipx (works today — bounds-cli is not on PyPI yet;
-    # GitHub runners ship pipx). Never the squatted bare `bounds` PyPI name.
+    # External repos install from the git ref; the Bounds repo itself installs the checked-out PR.
     assert 'pipx install "git+https://github.com/Farzin312/bounds.git"' in text
+    assert "pipx install ." in text
     assert "pipx install bounds\n" not in text and "pipx install bounds " not in text
     assert "pipx install bounds-cli" not in text  # PyPI name not used until published
     # Intent to switch once published is recorded.
-    assert "once published to PyPI" in text
+    assert "published on PyPI" in text
     # Skip convention is documented.
     assert "[skip bounds]" in text
+
+
+def test_existing_action_with_pypi_install_is_migrated(tmp_path):
+    """Existing generated Bounds workflows with the unpublished PyPI install line must be migrated in place."""
+    path = tmp_path / ".github" / "workflows" / "bounds.yml"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "name: bounds\n"
+        "jobs:\n"
+        "  bounds:\n"
+        "    steps:\n"
+        "      - run: pipx install bounds-cli\n"
+        "      - run: bounds preflight --ci\n",
+        encoding="utf-8",
+    )
+
+    result = ciconfig.run_ci_install(tmp_path, targets={"action"})
+    text = _read(path)
+
+    assert result["created"] == [".github/workflows/bounds.yml"]
+    assert 'pipx install "git+https://github.com/Farzin312/bounds.git"' in text
+    assert "pipx install ." in text
+    assert "pipx install bounds-cli" not in text
+
+
+def test_existing_action_with_git_install_is_migrated_to_checkout_aware_install(tmp_path):
+    """Existing git-only Bounds workflows must be migrated so Bounds' own PR CI tests the checkout."""
+    ciconfig.run_ci_install(tmp_path, targets={"action"})
+    path = tmp_path / ".github" / "workflows" / "bounds.yml"
+    old = path.read_text(encoding="utf-8").replace(
+        "      # External repos install Bounds from git until `bounds-cli` is published on PyPI.\n"
+        "      # The Bounds repo itself installs the checked-out PR, not the default branch.\n"
+        "      - name: Install Bounds\n"
+        "        run: |\n"
+        "          if [ -f pyproject.toml ] && grep -q '^name = \"bounds-cli\"' pyproject.toml; then\n"
+        "            pipx install .\n"
+        "          else\n"
+        "            pipx install \"git+https://github.com/Farzin312/bounds.git\"\n"
+        "          fi\n",
+        "      # Installs from git (works today; GitHub runners preinstall pipx).\n"
+        "      # switch to `bounds-cli` (pipx) once published to PyPI.\n"
+        "      - run: pipx install \"git+https://github.com/Farzin312/bounds.git\"\n",
+    )
+    path.write_text(old, encoding="utf-8")
+
+    result = ciconfig.run_ci_install(tmp_path, targets={"action"})
+    text = _read(path)
+
+    assert result["created"] == [".github/workflows/bounds.yml"]
+    assert "pipx install ." in text
+    assert "Install Bounds" in text
 
 
 def test_precommit_uses_quick_gate(tmp_path):

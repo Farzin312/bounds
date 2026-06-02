@@ -16,7 +16,15 @@ jobs:
         with:
           path: .bounds/cache.db
           key: bounds-${{ hashFiles('.bounds/root.yaml', '.bounds/manifests/**') }}
-      - run: pipx install bounds-cli
+      # External repos install Bounds from git until `bounds-cli` is published on PyPI.
+      # The Bounds repo itself installs the checked-out PR, not the default branch.
+      - name: Install Bounds
+        run: |
+          if [ -f pyproject.toml ] && grep -q '^name = "bounds-cli"' pyproject.toml; then
+            pipx install .
+          else
+            pipx install "git+https://github.com/Farzin312/bounds.git"
+          fi
       # Freshness gate: flag NEW manifest-vs-source drift above the committed baseline.
       # Non-blocking by default (|| true) until you commit a baseline and trust the signal;
       # drop the `|| true` to make new drift fail the build.

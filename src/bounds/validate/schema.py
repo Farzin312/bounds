@@ -20,6 +20,16 @@ from dataclasses import dataclass, field
 from .. import errors
 from ..models import ExtractResult
 
+__all__ = [
+    "SCHEMA_LANGUAGES",
+    "fold_subsystem_objects",
+    "hash_schema_catalog",
+    "schema_catalog",
+    "schema_diagnostics",
+    "schema_objects",
+    "schema_rls_posture",
+]
+
 # Languages whose extracted symbols carry DDL ``schema_op`` metadata and therefore fold into a
 # table catalog: raw SQL migrations and Prisma ``model`` blocks (an external ``schema.sql``
 # snapshot is just a .sql file, so it rides the SQL path with no special-casing).
