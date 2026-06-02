@@ -8,8 +8,7 @@ and that an agent with no committable command mechanism (aider) gets none rather
 
 from __future__ import annotations
 
-import tomllib
-
+import pytest
 import yaml
 
 from bounds import agentsync
@@ -62,6 +61,7 @@ def test_gemini_command_is_valid_toml_with_args(tmp_path):
     """Gemini's command file must be valid TOML carrying prompt/description and the {{args}} placeholder — malformed TOML or a missing placeholder breaks /bounds arg forwarding."""
     root = _mk_root(tmp_path)
     agentsync.run_agent(root, mode="sync", only={"gemini"})
+    tomllib = pytest.importorskip("tomllib")  # stdlib 3.11+; skip the TOML-parse assert on 3.10
     data = tomllib.loads((root / ".gemini/commands/bounds.toml").read_text(encoding="utf-8"))
     assert "prompt" in data and "description" in data
     assert "{{args}}" in data["prompt"]  # Gemini argument placeholder

@@ -21,7 +21,7 @@ from bounds.validate.checks import (
     check_structural_drift,
 )
 
-from tests.validate._validate_helpers import _ctx
+from _validate_helpers import _ctx  # sibling module (pytest adds tests/validate/ to sys.path)
 
 
 # ===========================================================================
