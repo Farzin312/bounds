@@ -111,13 +111,15 @@ When SDD is enabled in the root manifest, the generated block in each of these f
 how Bounds grounds and checks each SDD phase. Without that opt-in, the generated files stay focused
 on the general Bounds command contract.
 
-Shared files (`AGENTS.md`, `GEMINI.md`) get a marked Bounds block that leaves your other content
-intact; hand-written configs are never clobbered. The pointer is only the *instruction* layer — it
-tells the agent to use Bounds. Most agents also get a native artifact that lets them *invoke* (or
-auto-trigger) Bounds; see the next section.
+Shared files (`AGENTS.md`, `GEMINI.md`, and — for Claude — the always-loaded `CLAUDE.md`) get a
+marked Bounds block that leaves your other content intact; hand-written configs are never clobbered.
+If `CLAUDE.md` doesn't exist yet it is created; if it does, the block is appended without touching
+your own instructions. The pointer is only the *instruction* layer — it tells the agent to use
+Bounds. Most agents also get a native artifact that lets them *invoke* (or auto-trigger) Bounds; see
+the next section.
 
 **What ships vs what's generated:** only `AGENTS.md` is **committed** to the repo (the cross-ecosystem
-standard file). Every per-tool pointer above — `.claude/commands/bounds.md`, `GEMINI.md`,
+standard file). Every per-tool pointer above — `CLAUDE.md`, `.claude/commands/bounds.md`, `GEMINI.md`,
 `.cursor/rules/bounds.mdc`, `.windsurf/rules/bounds.md`, `.aider.conf.yml`,
 `.github/copilot-instructions.md` — plus the native command/skill artifacts (see
 [Native commands & skills](#native-commands--skills-not-just-a-pointer)) is **gitignored and

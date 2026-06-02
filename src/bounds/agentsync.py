@@ -190,6 +190,17 @@ _AGENTS = {
     "windsurf": _Agent("windsurf", ".windsurf/rules/bounds.md", True, _MARKDOWN),
 }
 
+# Always-loaded project memory files. A marked Bounds pointer is upserted here so the agent learns
+# about Bounds from the file it ALWAYS reads — not only from an on-demand command/skill. The write
+# is non-destructive (``_upsert_block`` creates the file if absent, else refreshes only the marked
+# block, preserving the human's own content). Only agents whose always-loaded file is NOT already
+# their pointer/canonical target need an entry: gemini→GEMINI.md, codex/opencode→AGENTS.md and
+# copilot→its instructions file are already that file, and cursor/windsurf use always-on rule files,
+# so the pointer write already lands where the tool always looks. Claude's pointer is a slash-command
+# (``.claude/commands/bounds.md``, invoked on demand), so ``CLAUDE.md`` was never wired — this closes
+# that gap. The pointer body is the same one every per-agent pointer uses.
+_MEMORY_FILES = {"claude": "CLAUDE.md"}
+
 
 # ---------------------------------------------------------------------------
 # Version + hash stamping (confined to agent-config files; never structural JSON)
@@ -687,6 +698,22 @@ def _sync(root: Path, selected: list[str]) -> dict:
         )
         buckets.record(outcome, Path(agent.path).as_posix())
 
+    # 2b. Always-loaded memory files (e.g. Claude's CLAUDE.md). A marked pointer block so the agent
+    #     is told about Bounds from the file it ALWAYS reads, not only an on-demand command/skill.
+    #     Non-destructive: created if absent, else the block is added/refreshed while the human's own
+    #     content is preserved byte-for-byte. The body is the shared per-agent pointer body.
+    for key in selected:
+        mem = _MEMORY_FILES.get(key)
+        if mem is None or mem in done:
+            continue
+        done.add(mem)
+        outcome = _upsert_block(
+            root / Path(mem),
+            _MARKDOWN,
+            _append_sdd_body(_AGENT_POINTER_BODY.rstrip("\n"), key, sdd_cfg),
+        )
+        buckets.record(outcome, Path(mem).as_posix())
+
     # 3. Targeted, invokable command/skill files (native to each agent). Each is bounds-owned
     #    (dedicated), so it is marker-managed + idempotent like the rest. Agents with no
     #    committable command mechanism (aider) have none — never faked.
@@ -1066,6 +1093,14 @@ def _config_status(root: Path, agent: "_Agent", sdd_cfg: dict | None = None) -> 
             body = _append_sdd_body(art.body.rstrip("\n"), agent.key, sdd_cfg)
             if _target_status(root, art.path, art.fmt, body, True, art.front) != "configured":
                 return "stale"  # a present artifact is broken/outdated — re-sync to refresh
+    # An always-loaded memory file (CLAUDE.md) that exists but lacks/holds an outdated bounds block
+    # downgrades to stale so the gate tells you to re-sync. A merely-absent one does not (an
+    # idempotent --sync creates it non-destructively), mirroring the optional-artifact rule above.
+    mem = _MEMORY_FILES.get(agent.key)
+    if mem is not None and (root / Path(mem)).exists():
+        mem_body = _append_sdd_body(_AGENT_POINTER_BODY.rstrip("\n"), agent.key, sdd_cfg)
+        if _target_status(root, mem, _MARKDOWN, mem_body, False, "") != "configured":
+            return "stale"
     return "configured"
 
 
