@@ -627,10 +627,13 @@ def run_discover(project_root, *, apply=False, namespace=None,
 def run_calibrate(project_root, *, subsystem: str | None = None, apply=False) -> dict
     # Diff each subsystem's declared exposes/consumes against tree-sitter reality. add (found,
     # undeclared), remove (declared, gone — UNLESS consumed → needs_review, or internal:true →
-    # exempt), consumes add/remove. role/criticality never changed. Default diff-only; apply
-    # rewrites the manifest YAML. Raises E_SUBSYSTEM_NOT_FOUND for an unknown --subsystem.
-    # → {mode, applied, subsystems:{<name>:{add_exposes,remove_exposes,needs_review,
-    #    add_consumes,remove_consumes}}, summary:{added,removed,needs_review,consumes_added,consumes_removed}}
+    # exempt), consumes add/remove. A consumes edge to a non-existent subsystem is surfaced as
+    # unknown_consumes (never auto-removed — could be a forward ref; --prune-unknown opts in on
+    # apply). role/criticality never changed. Default diff-only; apply rewrites the manifest YAML.
+    # Raises E_SUBSYSTEM_NOT_FOUND for an unknown --subsystem.
+    # → {mode, applied, subsystems:{<name>:{add_exposes,remove_exposes,needs_review,add_consumes,
+    #    add_consume_interfaces,remove_consumes,unknown_consumes}}, summary:{added,removed,
+    #    needs_review,consumes_added,consume_interfaces_added,consumes_removed,consumes_unknown}}
 
 # The freshness gate: detect-only, never writes a manifest. A "drift key" is a stable
 # identifier for one proposed reconciliation; the committed baseline records keys that already

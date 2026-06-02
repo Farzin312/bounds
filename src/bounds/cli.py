@@ -768,9 +768,13 @@ def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
               help="Exit non-zero on NEW drift above the committed baseline (CI gate; never writes).")
 @click.option("--dump-baseline", "do_dump", is_flag=True, default=False,
               help="Record current drift as the accepted baseline in .bounds/drift-baseline.json.")
+@click.option("--prune-unknown", "do_prune", is_flag=True, default=False,
+              help="With --apply, also remove consumes edges that name a non-existent subsystem "
+                   "(stale/typo'd refs that keep validate reporting 'unresolved'). Off by default "
+                   "so a genuine forward reference survives.")
 @_human
 def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
-                  do_check: bool, do_dump: bool, human: bool) -> None:
+                  do_check: bool, do_dump: bool, do_prune: bool, human: bool) -> None:
     """Keep contracts aligned with extracted source after code changes."""
     # Diff/apply/dump-baseline are interactive actions → announce in a terminal; --check is a
     # CI gate consumed by automation → keep it JSON-default (it still honors explicit --human).
@@ -797,7 +801,9 @@ def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
             output.emit(payload, human)
             sys.exit(config.EXIT_OK if payload["ok"] else config.EXIT_BLOCKED)
         with _progress("calibrating..."):
-            payload = calibrate_mod.run_calibrate(root, subsystem=subsystem, apply=do_apply)
+            payload = calibrate_mod.run_calibrate(
+                root, subsystem=subsystem, apply=do_apply, prune_unknown=do_prune
+            )
         output.emit(payload, human)
 
     _run(human, go)

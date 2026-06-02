@@ -183,6 +183,48 @@ def test_calibrate_clean_subsystem_absent_from_proposal(tmp_path):
     assert result["summary"]["removed"] == 0
 
 
+def _set_auth_consumes(tmp_path, edges):
+    cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
+    auth = yaml.safe_load((cfg / "auth.yaml").read_text())
+    auth["consumes"] = edges
+    (cfg / "auth.yaml").write_text(yaml.safe_dump(auth, sort_keys=False), encoding="utf-8")
+
+
+def test_calibrate_surfaces_consumes_to_unknown_subsystem(tmp_path):
+    """A consumes edge naming a subsystem that doesn't exist is SURFACED (not silently left, the
+    old behaviour): it appears in the proposal's `unknown_consumes` and the summary count, giving
+    calibrate a fix path for the dangling refs that otherwise keep validate stuck on 'unresolved'."""
+    _build(tmp_path)
+    _set_auth_consumes(tmp_path, [
+        {"subsystem": "db", "interfaces": ["query"]},
+        {"subsystem": "ghostsub", "interfaces": ["x"]},
+    ])
+    result = run_calibrate(tmp_path, subsystem="auth")
+    assert result["subsystems"]["auth"]["unknown_consumes"] == ["ghostsub"]
+    assert result["summary"]["consumes_unknown"] == 1
+
+
+def test_calibrate_prune_unknown_removes_dangling_edge_only_when_asked(tmp_path):
+    """Plain --apply KEEPS a dangling consumes edge (it might be a genuine forward reference);
+    --prune-unknown --apply removes it while keeping real edges. Forward-ref workflow preserved by
+    default, opt-in cleanup available. Also exercises the prune-only apply path (no other change)."""
+    _build(tmp_path)
+    cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
+
+    # Default apply: the ghost edge survives (could be a forward reference).
+    _set_auth_consumes(tmp_path, [{"subsystem": "db", "interfaces": ["query"]}, {"subsystem": "ghostsub"}])
+    run_calibrate(tmp_path, subsystem="auth", apply=True)
+    auth = yaml.safe_load((cfg / "auth.yaml").read_text())
+    assert any(c["subsystem"] == "ghostsub" for c in auth["consumes"])
+
+    # Opt-in prune: ghost edge removed, the real db edge kept.
+    _set_auth_consumes(tmp_path, [{"subsystem": "db", "interfaces": ["query"]}, {"subsystem": "ghostsub"}])
+    run_calibrate(tmp_path, subsystem="auth", apply=True, prune_unknown=True)
+    auth = yaml.safe_load((cfg / "auth.yaml").read_text())
+    names = {c["subsystem"] for c in auth["consumes"]}
+    assert "ghostsub" not in names and "db" in names
+
+
 # ---- Unsupported-language durability (Go/Rust/Java — no adapter) ----
 def _build_unsupported(tmp_path):
     """A Go subsystem (unsupported language) with hand-authored exposes + a pure-Python subsystem.

@@ -341,10 +341,13 @@ def _derive_status(issues: list) -> str:
     (``errors.SEVERITY``) rather than the live one — except an issue whose *live* severity is
     ``info`` (e.g. an undeclared-export drift) is never error-class.
     """
-    if any(i.code == errors.E_UNRESOLVED_REFERENCE for i in issues):
-        return "unresolved"
+    # Errors outrank warning-level unresolved references: when both apply the actionable "stale"
+    # (drift to fix) must win over the benign "unresolved" (forward refs, fine mid-adoption), or a
+    # consumer branching on status does nothing about real drift. Mirrors engine._status.
     if any(i.severity != "info" and errors.SEVERITY.get(i.code) == "error" for i in issues):
         return "stale"
+    if any(i.code == errors.E_UNRESOLVED_REFERENCE for i in issues):
+        return "unresolved"
     return "fresh"
 
 

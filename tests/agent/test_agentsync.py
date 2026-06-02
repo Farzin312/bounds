@@ -161,6 +161,47 @@ def test_claude_command_forwards_arguments(tmp_path):
     assert fm_idx < start_idx
 
 
+def test_sync_creates_claude_md_memory_pointer(tmp_path):
+    """Syncing Claude must wire CLAUDE.md — the always-loaded memory file — not only the on-demand
+    slash command, so an agent learns about Bounds without invoking anything. Created when absent."""
+    root = _mk_root(tmp_path)
+    report = agentsync.run_agent(root, mode="sync", only={"claude"})
+    claude_md = root / "CLAUDE.md"
+    assert claude_md.is_file()
+    text = claude_md.read_text(encoding="utf-8")
+    assert "<!-- BOUNDS:START -->" in text and "bounds describe" in text
+    assert "CLAUDE.md" in report["created"]
+
+
+def test_sync_appends_to_existing_claude_md_non_destructively(tmp_path):
+    """An existing CLAUDE.md keeps the human's content byte-for-byte; the Bounds block is appended
+    in markers (the documented non-destructive contract), never a clobber."""
+    root = _mk_root(tmp_path)
+    own = "# House rules\n\nMy own instructions. Keep these.\n"
+    (root / "CLAUDE.md").write_text(own, encoding="utf-8")
+    agentsync.run_agent(root, mode="sync", only={"claude"})
+    text = (root / "CLAUDE.md").read_text(encoding="utf-8")
+    assert own in text  # preserved verbatim
+    assert "<!-- BOUNDS:START -->" in text and "<!-- BOUNDS:END -->" in text
+    # Idempotent: a second sync neither duplicates the block nor re-touches the file.
+    again = agentsync.run_agent(root, mode="sync", only={"claude"})
+    assert (root / "CLAUDE.md").read_text(encoding="utf-8").count("<!-- BOUNDS:START -->") == 1
+    assert "CLAUDE.md" in again["unchanged"]
+
+
+def test_check_flags_claude_md_missing_bounds_block_as_stale(tmp_path):
+    """Once Claude is synced, a CLAUDE.md that exists but no longer carries the Bounds block (a
+    human removed it, or it predates the wiring) downgrades the agent to `stale` so the gate tells
+    you to re-sync — the regression the user hit (Bounds never reaching CLAUDE.md)."""
+    root = _mk_root(tmp_path)
+    agentsync.run_agent(root, mode="sync", only={"claude"})
+    assert agentsync.run_agent(root, mode="check", only={"claude"})["ok"] is True
+    # Human keeps CLAUDE.md but drops the Bounds block.
+    (root / "CLAUDE.md").write_text("# Just my rules\n", encoding="utf-8")
+    check = agentsync.run_agent(root, mode="check", only={"claude"})
+    assert "claude" in check["stale"] and check["ok"] is False
+
+
 def test_sync_paths_are_sorted_posix(tmp_path):
     """Reported paths must be sorted and posix-formed (no backslashes) so output is byte-stable cross-platform (determinism + posix-path constraints)."""
     root = _mk_root(tmp_path)
@@ -334,7 +375,7 @@ def test_only_filters_to_single_agent_but_canonical_always_written(tmp_path):
     assert not (root / ".gemini/commands/bounds.toml").exists()  # other agents untouched
     assert not (root / "GEMINI.md").exists()
     assert set(report["created"]) == {
-        "AGENTS.md", ".claude/commands/bounds.md", ".claude/skills/bounds/SKILL.md",
+        "AGENTS.md", "CLAUDE.md", ".claude/commands/bounds.md", ".claude/skills/bounds/SKILL.md",
     }
 
 

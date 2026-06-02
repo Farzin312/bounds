@@ -6,6 +6,7 @@ import json
 
 from click.testing import CliRunner
 
+from bounds import output
 from bounds.cli import main
 
 
@@ -715,6 +716,31 @@ def test_human_renderers_are_clean_summaries(monkeypatch, py_project):
     assert "blast radius" in im and "consumers" in im
     cal = _invoke(monkeypatch, py_project, ["calibrate", "--human"]).output
     assert cal.startswith("calibrate:")
+
+
+def test_calibrate_human_renders_proposed_consumes_edges():
+    """Regression: `add_consumes` entries are {subsystem, interfaces} dicts, not strings, so the
+    human renderer must read `["subsystem"]` — joining the dicts directly raised TypeError and
+    crashed `bounds calibrate` (TTY/--human) to E_INTERNAL on any repo with a new consumes edge to
+    propose. The fixture-based calibrate --human test misses this (its graph proposes no consumes)."""
+    payload = {
+        "mode": "calibrate",
+        "applied": False,
+        "subsystems": {
+            "orders": {
+                "add_exposes": [],
+                "remove_exposes": [],
+                "needs_review": [],
+                "add_consumes": [{"subsystem": "billing", "interfaces": ["charge"]}],
+                "add_consume_interfaces": [],
+                "remove_consumes": [],
+            }
+        },
+        "summary": {"added": 0, "removed": 0, "needs_review": 0,
+                    "consumes_added": 1, "consumes_removed": 0},
+    }
+    rendered = output._render_calibrate_human(payload)
+    assert "consumes+: billing" in rendered  # subsystem name, not the dict's repr
 
 
 def test_action_commands_emit_json_when_not_a_tty(monkeypatch, py_project):

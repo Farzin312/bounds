@@ -558,10 +558,16 @@ def _source_universe(
 
 
 def _status(issues: list[Issue]) -> str:
-    if any(i.code == errors.E_UNRESOLVED_REFERENCE for i in issues):
-        return "unresolved"
+    # Errors (drift / boundary violations — "run calibrate") outrank warning-level unresolved
+    # references ("forward refs, fine mid-adoption"). When BOTH are present the headline must
+    # report the actionable state, not the benign one: a status of "unresolved" tells an agent or
+    # CI "nothing to do" (see docs/team-workflow.md), so letting it mask real drift would suppress
+    # the very signal that should trigger a calibrate. Severity wins; the forward refs stay in the
+    # issues list either way.
     if any(i.severity == "error" for i in issues):
         return "stale"
+    if any(i.code == errors.E_UNRESOLVED_REFERENCE for i in issues):
+        return "unresolved"
     return "fresh"
 
 
