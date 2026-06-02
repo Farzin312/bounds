@@ -56,6 +56,8 @@ consumes:
   - resolve_doc_owners
   - resolve_test_owners
   - subsystems_with_unsupported_source
+  - coverage_has_gap
+  - unsupported_surface_files
 - subsystem: cache
   via: store
   interfaces:

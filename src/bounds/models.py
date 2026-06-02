@@ -318,9 +318,10 @@ class Issue:
     subsystem: str | None = None
     file: str | None = None
     fix: str | None = None
+    count: int = 1  # >1 when this issue rolls up N findings into one (token-lean); magnitude preserved
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "code": self.code,
             "severity": self.severity,
             "message": self.message,
@@ -328,6 +329,9 @@ class Issue:
             "file": self.file,
             "fix": self.fix,
         }
+        if self.count != 1:
+            d["count"] = self.count  # emitted only when it rolls up >1 finding (keeps lean issues lean)
+        return d
 
     def sort_key(self) -> tuple:
         sev_rank = {"error": 0, "warning": 1, "info": 2}.get(self.severity, 3)

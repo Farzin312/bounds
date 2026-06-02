@@ -16,9 +16,10 @@ from pathlib import Path, PurePosixPath
 from .. import config, errors
 from ..ignore import IgnoreMatcher, has_generated_marker
 from ..models import ExtractResult, Issue, SubsystemCompact
-from . import get_adapter, supported_extensions
+from . import content_hash, get_adapter, supported_extensions
 
 __all__ = [
+    "coverage_has_gap",
     "extract_file",
     "extract_project",
     "is_framework_entry_file",
@@ -30,6 +31,7 @@ __all__ = [
     "resolve_test_owners",
     "strip_ext",
     "subsystems_with_unsupported_source",
+    "unsupported_surface_files",
 ]
 
 
@@ -262,7 +264,7 @@ def path_specificity(rel: str, paths, files=None) -> int:
 def resolve_owners(
     project_root: Path,
     subsystems: dict[str, SubsystemCompact],
-    exts: set[str],
+    exts: set[str] | None,
     matcher: IgnoreMatcher | None = None,
     repo: Path | None = None,
     include_gitignored: bool = False,
@@ -274,6 +276,10 @@ def resolve_owners(
     sub-package keeps its own code instead of the alphabetically-first parent swallowing it (which
     used to starve the child and report false structural drift). Ties in specificity break to the
     sorted-first subsystem name for determinism.
+
+    ``exts`` is the extension allow-set (e.g. :func:`supported_extensions`); pass ``None`` to include
+    **every** extension (the :func:`iter_subsystem_files` convention) — used by coverage's declared/
+    dark split and :func:`unsupported_surface_files`, which must see unsupported-language files too.
 
     Optionally **ignore-aware**: pass ``matcher`` (``.boundsignore``) and/or ``repo`` (the git root,
     for ``.gitignore``) to drop files the validation engine would skip, so a caller like ``describe``
@@ -624,6 +630,43 @@ def subsystems_with_unsupported_source(
     return out
 
 
+def unsupported_surface_files(
+    project_root: Path,
+    subsystems: dict[str, "SubsystemCompact"],
+    matcher: IgnoreMatcher | None = None,
+    repo: Path | None = None,
+    include_gitignored: bool = False,
+) -> dict[str, dict[str, str]]:
+    """``{subsystem: {rel-posix: content_hash}}`` for each owned UNSUPPORTED-language source file.
+
+    The basis for staleness detection of hand-authored ``exposes`` (:data:`errors.E_UNSUPPORTED_SURFACE_STALE`):
+    Bounds has no adapter for these files, so the only deterministic evidence that a declared surface
+    may be outdated is "the file changed". Reuses :func:`resolve_owners` (most-specific owner wins,
+    ignore/gitignore-aware) so ownership matches validate/calibrate, then hashes each owned file whose
+    extension is a known source language with no adapter. Unlike
+    :func:`subsystems_with_unsupported_source` this **reads file bytes** (to hash), so it is off the
+    ``--quick`` budget — callers gate it. Oversized/unreadable files are skipped; test files excluded.
+    Deterministic: per-subsystem maps are sorted by path.
+    """
+    supported = supported_extensions()
+    owners = resolve_owners(project_root, subsystems, None, matcher, repo, include_gitignored)
+    out: dict[str, dict[str, str]] = {}
+    for rel, (owner, abs_path) in owners.items():
+        ext = abs_path.suffix
+        if ext in supported or ext not in config.KNOWN_SOURCE_EXTS:
+            continue  # supported (verifiable elsewhere) or not source code at all
+        if is_test_file(rel):
+            continue  # a test in an unsupported language is not the public surface exposes describes
+        source, _ = read_source_bytes(abs_path)
+        if source is None:
+            continue  # oversized/unreadable — nothing to hash
+        out.setdefault(owner, {})[rel] = content_hash(source)
+    return {name: dict(sorted(files.items())) for name, files in sorted(out.items())}
+
+
+_COVERAGE_SAMPLE_CAP = 10  # token-lean: coverage buckets preview at most this many sorted paths
+
+
 def mapping_coverage(
     project_root: Path,
     owned: set[str],
@@ -632,28 +675,28 @@ def mapping_coverage(
     include_gitignored: bool = False,
     subsystems: dict[str, "SubsystemCompact"] | None = None,
 ) -> dict:
-    """How much of the repo's *library source code* Bounds actually mapped, an honest breakdown of
-    what it could not, plus separate docs/tests linkage buckets — the metric that stops a polyglot
-    repo from looking fully mapped while half of it is an unsupported language.
+    """How much of the repo's *supported-language* source Bounds verified, plus an honest, separately
+    tracked account of the unsupported-language source it can't yet parse — the metric that stops a
+    polyglot repo from looking fully mapped while half of it is a language with no adapter.
 
     Walks every non-ignored file (``config.DEFAULT_IGNORES`` + ``.boundsignore``), counts only files
-    whose extension is in :data:`config.KNOWN_SOURCE_EXTS` (docs/config/assets are excluded so they
-    can't dilute the %). **Test files are excluded from the source denominator entirely** (recognized
-    via :func:`is_test_file`) and tracked in a separate ``tests`` bucket: a repo's tests can never
-    drag the mapped % down or be flagged as an unmapped-source gap. Each non-test source file is:
-      - **mapped** — owned by a subsystem (``rel in owned``),
-      - **unowned-supported** — Bounds *has* an adapter for it, it's just not in any manifest's
-        paths (fix: add it to a manifest — deterministically mappable),
-      - **unsupported** — no adapter for that language yet (fix: hand-author/AI-author a manifest, or
-        it waits for an adapter).
-    Returns source counts, ``mapped_pct``, a sorted by-language breakdown of the unmapped source, and
-    two informational buckets — ``tests`` and ``docs`` — each ``{total, linked, unlinked,
-    unlinked_sample}`` computed via :func:`resolve_test_owners`/:func:`resolve_doc_owners`
-    (``subsystems`` required for linkage; absent ⇒ all unlinked). Deterministic; safe to skip on the
-    ``--quick`` hot path (callers gate it). Honors ``.gitignore`` when ``repo`` is given and
-    ``include_gitignored`` is False, so the denominator matches the gitignore-aware file universe the
-    rest of validation uses (a gitignored owned file is excluded from both numerator and denominator,
-    never miscounted as unmapped).
+    whose extension is in :data:`config.KNOWN_SOURCE_EXTS` (docs/config/assets excluded so they can't
+    dilute the %). **Test files are excluded from the source denominator entirely** (via
+    :func:`is_test_file`) and tracked in a separate ``tests`` bucket. Each non-test source file is
+    classified by whether Bounds has an adapter for it:
+      - **supported** — has an adapter; ``mapped`` if owned by a subsystem (``rel in owned``) else
+        ``unowned`` (the deterministic gap: add it to a manifest's ``paths:``).
+      - **unsupported** — no adapter yet; ``declared`` if a manifest claims it (covered — the
+        hand-authored ``exposes`` are durable) else ``dark`` (the real gap: author a manifest).
+    ``mapped_pct`` is **supported-language source only** (``mapped / (mapped + unowned)``) so 100% is
+    reachable and means "100% of what Bounds can parse"; unsupported source is reported beside it
+    (``declared`` vs ``dark``), never folded into the %. Returns ``mapped_pct`` plus ``supported`` /
+    ``unsupported`` / ``tests`` / ``docs`` blocks (each with sorted samples capped at
+    :data:`_COVERAGE_SAMPLE_CAP`). ``subsystems`` resolves all-extension ownership (so a declared
+    unsupported file counts as covered) and doc/test linkage; absent ⇒ unsupported files are all
+    ``dark`` and docs/tests all unlinked. Deterministic; safe to skip on the ``--quick`` hot path
+    (callers gate it). Honors ``.gitignore`` when ``repo`` is given and ``include_gitignored`` is
+    False, matching the gitignore-aware file universe the rest of validation uses.
     """
     supported = supported_extensions()
     # Collect source-code candidates first so gitignore can be applied in one batched call (parity
@@ -676,39 +719,77 @@ def mapping_coverage(
         ignored = gitutil.gitignored(repo, [c[0] for c in candidates])
         candidates = [c for c in candidates if c[0] not in ignored]
 
-    mapped = unowned_supported = unsupported = 0
+    # Ownership over EVERY extension (not just supported) so a hand-authored manifest that claims an
+    # unsupported-language file makes it `declared` (covered + durable) instead of `dark`. Reuses the
+    # one owner resolver (never a second copy of the assignment rule); bounded by declared paths, and
+    # only ever runs off the --quick hot path (callers gate it). Absent subsystems ⇒ nothing declared.
+    owned_all: set[str] = set()
+    if subsystems:
+        owned_all = set(resolve_owners(project_root, subsystems, None, matcher, repo, include_gitignored))
+
+    sup_total = sup_mapped = sup_unowned = 0
+    unsup_total = unsup_declared = unsup_dark = 0
     by_lang: dict[str, int] = {}
-    unsupported_langs: set[str] = set()
+    unowned_rels: list[str] = []
+    dark_rels: list[str] = []
     for rel, ext, lang in candidates:
-        if rel in owned:
-            mapped += 1
-            continue
-        by_lang[lang] = by_lang.get(lang, 0) + 1
         if ext in supported:
-            unowned_supported += 1
+            sup_total += 1
+            if rel in owned:
+                sup_mapped += 1
+            else:
+                sup_unowned += 1
+                unowned_rels.append(rel)
         else:
-            unsupported += 1
-            unsupported_langs.add(lang)
-    total = mapped + unowned_supported + unsupported
-    pct = round(mapped / total * 100, 1) if total else 100.0
-    if total and mapped < total and pct >= 100.0:
-        pct = 99.9  # never display a rounded 100% while a gap remains
+            unsup_total += 1
+            by_lang[lang] = by_lang.get(lang, 0) + 1
+            if rel in owned_all:
+                unsup_declared += 1
+            else:
+                unsup_dark += 1
+                dark_rels.append(rel)
+    # Headline % is SUPPORTED source only — the deterministic figure a repo can drive to 100% by
+    # adding files to a manifest's `paths:`. Unsupported source sits beside it (declared vs dark),
+    # never folded in, so "100%" means "100% of what Bounds can parse" — reachable and honest.
+    pct = round(sup_mapped / sup_total * 100, 1) if sup_total else 100.0
+    if sup_total and sup_mapped < sup_total and pct >= 100.0:
+        pct = 99.9  # never display a rounded 100% while a supported-source gap remains
 
     subs = subsystems or {}
     test_owners = resolve_test_owners(project_root, subs, matcher, repo, include_gitignored)
     doc_owners = resolve_doc_owners(project_root, subs, matcher, repo, include_gitignored)
     return {
-        "files_source_total": total,
-        "files_mapped": mapped,
-        "files_unmapped": unowned_supported + unsupported,
         "mapped_pct": pct,
-        "unmapped_unowned_supported": unowned_supported,
-        "unmapped_unsupported_language": unsupported,
-        "unmapped_by_language": dict(sorted(by_lang.items())),
-        "unsupported_languages": sorted(unsupported_langs),
+        "supported": {
+            "total": sup_total,
+            "mapped": sup_mapped,
+            "unowned": sup_unowned,
+            "unowned_sample": sorted(unowned_rels)[:_COVERAGE_SAMPLE_CAP],
+        },
+        "unsupported": {
+            "total": unsup_total,
+            "declared": unsup_declared,
+            "dark": unsup_dark,
+            "dark_sample": sorted(dark_rels)[:_COVERAGE_SAMPLE_CAP],
+            "by_language": dict(sorted(by_lang.items())),
+        },
         "tests": _linkage_bucket(test_owners),
         "docs": _linkage_bucket(doc_owners),
     }
+
+
+def coverage_has_gap(mapping: dict) -> bool:
+    """True when validation should surface an ``E_COVERAGE_GAP`` for this coverage ``mapping``.
+
+    The gap is the *closeable* set: supported files in no subsystem (deterministic — add to
+    ``paths:``) and unsupported files no manifest claims (``dark``). A ``declared`` unsupported file
+    is **covered** (durable hand-authored manifest) and is never a gap. The single predicate shared by
+    the engine, guide, discover and overview so they never disagree on "is coverage complete?".
+    Fail-soft: a missing/empty mapping (e.g. the --quick path omits it) reports no gap rather than
+    raising, matching the advisory-never-crash contract.
+    """
+    return mapping.get("supported", {}).get("unowned", 0) > 0 \
+        or mapping.get("unsupported", {}).get("dark", 0) > 0
 
 
 def _linkage_bucket(owners: dict[str, str | None]) -> dict:
@@ -724,7 +805,7 @@ def _linkage_bucket(owners: dict[str, str | None]) -> dict:
         "total": len(owners),
         "linked": linked,
         "unlinked": len(unlinked),
-        "unlinked_sample": unlinked[:10],
+        "unlinked_sample": unlinked[:_COVERAGE_SAMPLE_CAP],
     }
 
 

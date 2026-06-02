@@ -1,51 +1,60 @@
-# Mapping coverage — aiming for 100%, honest when it isn't
+# Mapping coverage — 100% of what Bounds can parse, honest about the rest
 
 Bounds' goal is to map a repo's structural surface **deterministically, without an LLM**, and to map
-**all of it**. When it can't — an unsupported language, a directory no manifest covers — it must say
-so loudly and tell you the next step, never silently leave half the repo dark. This page explains the
-coverage signal and how a human *or an AI* closes a gap.
+**100% of every language it has an adapter for**. For a language it can't yet parse, it must say so
+loudly, name exactly what's unparsed, and hand you (or an AI) a template to declare it — never silently
+leave half the repo dark, and never quietly inflate the number by pretending unparsed files don't
+exist. This page explains the coverage signal and how a human *or an AI* closes a gap.
 
 ## The signal
 
-`bounds validate`, `bounds discover`, and `bounds overview` report mapping coverage over the repo's
-**library source code** (docs/config/assets are excluded so they can't dilute the number; **test
-files are excluded too** and tracked in their own bucket — see *Docs & tests* below):
+`bounds validate`, `bounds discover`, and `bounds overview` report mapping coverage. The headline
+`mapped_pct` is over **supported-language source** (a language Bounds has an adapter for), so 100% is
+reachable; unsupported-language source is reported beside it, split into `declared` (a manifest claims
+it → covered) and `dark` (no manifest → the real gap). docs/config/assets are excluded so they can't
+dilute the number, and **test files are excluded too** and tracked in their own bucket (see *Docs &
+tests* below):
 
 ```jsonc
 // bounds validate  →  stats.coverage.mapping
 {
-  "files_source_total": 8,             // NON-TEST library source only
-  "files_mapped": 3,
-  "files_unmapped": 5,
-  "mapped_pct": 37.5,                   // over non-test library source
-  "unmapped_unowned_supported": 0,     // supported language, just not in a manifest yet
-  "unmapped_unsupported_language": 5,  // no adapter for this language yet
-  "unmapped_by_language": { "go": 5 },
-  "unsupported_languages": ["go"],
+  "mapped_pct": 100.0,                  // SUPPORTED-language source only — reachable
+  "supported": {
+    "total": 3, "mapped": 3, "unowned": 0,   // unowned = supported file in no subsystem (deterministic fix)
+    "unowned_sample": []                      // up to 10 sorted rel-posix paths
+  },
+  "unsupported": {                      // no adapter yet — named, never folded into mapped_pct
+    "total": 5,
+    "declared": 5,                      // a manifest claims it → covered; hand-authored exposes durable
+    "dark": 0,                          // no manifest claims it → the real gap; drive to 0
+    "dark_sample": [],
+    "by_language": { "go": 5 }
+  },
   // Informational linkage buckets — tracked, NEVER a blocking gap (see "Docs & tests"):
   "tests": { "total": 12, "linked": 11, "unlinked": 1, "unlinked_sample": ["tests/misc.py"] },
   "docs":  { "total": 6,  "linked": 4,  "unlinked": 2, "unlinked_sample": ["docs/notes.md"] }
 }
 ```
 
-When `files_unmapped > 0`, `validate` emits one **loud, non-blocking** `E_COVERAGE_GAP` warning and
-`discover` adds a `next_step` — e.g. *"mapped 37.5% of library source (3/8 non-test files); unmapped:
-5 in unsupported languages (go×5) (tests/docs are tracked separately, never a gap)"* with the fix
-below. It is a **warning, not an error**: an incomplete map is honest, not a CI failure on its own
-(you opt into stricter gates — see *CI* below). **The gap fires only on unmapped non-test library
-source** — a repo's tests can never drag the % down or be flagged.
+A gap is the **closeable** set — supported files in no subsystem (`supported.unowned`) and unsupported
+files no manifest claims (`unsupported.dark`). When one remains, `validate` emits one **loud,
+non-blocking** `E_COVERAGE_GAP` warning and `discover` adds a `next_step` — e.g. *"mapped 100% of
+supported-language source (3/3 files); gap: 5 unsupported-language file(s) no manifest claims (go×5)"*
+with a numbered fix and a concrete template manifest to copy. It is a **warning, not an error**: an
+incomplete map is honest, not a CI failure on its own (you opt into stricter gates — see *CI* below). A
+**declared** unsupported file is already covered and never a gap; tests/docs are tracked separately and
+never drag the % down or fire the gap.
 
 `bounds overview` carries the same signal in `health.validation.mapped_pct`, plus a `trust_note` and
 `next_steps`. This is the agent-facing rule: Bounds is authoritative for verified symbols in mapped
-source; if `mapped_pct < 100`, use Bounds to scope first, then follow the `E_COVERAGE_GAP` fix or
-inspect source where the map is incomplete.
+source; when a gap remains, use Bounds to scope first, then follow the `E_COVERAGE_GAP` fix.
 
-Two kinds of gap, two fixes:
+Two kinds of closeable gap, two fixes:
 
 | Gap | What it means | How to close it |
 |-----|---------------|-----------------|
-| **unowned-supported** | Bounds *has* an adapter (Python/TS/JS/SQL/Prisma) but the file is in no subsystem's `paths` | add it to a manifest — deterministic, no AI needed |
-| **unsupported language** | no adapter yet (Go, Rust, Java, …) | hand-author (or AI-author) a manifest in the format below, then verify |
+| **unowned supported** | Bounds *has* an adapter (Python/TS/JS/SQL/Prisma/shell) but the file is in no subsystem's `paths` | add it to a manifest — deterministic, no AI needed; `mapped_pct` rises |
+| **dark unsupported** | no adapter yet (Go, Rust, Java, …) and no manifest claims it | hand-author (or AI-author) a manifest in the format below — the file moves `dark → declared`, then verify |
 
 ### Unsupported-language exposes are durable
 
@@ -66,6 +75,28 @@ a declared expose is gone, so it treats such exposes as **unverifiable, never st
 (`scan.subsystems_with_unsupported_source`), so the two can never disagree about an
 unsupported-language manifest. A **pure supported-language** subsystem is unaffected: a genuinely
 stale expose there is still proposed for removal and still flags drift.
+
+### Keeping a hand-authored surface honest as the repo grows
+
+"Never auto-stripped" cuts both ways: if the unsupported file later changes (a renamed/removed Go
+function), nothing *extracted* exists to prove the hand-authored `exposes` is now wrong. Bounds closes
+that lifecycle hole **deterministically, no LLM** — by content hash, not by parsing:
+
+1. **Confirm** the surface once with `bounds calibrate --dump-baseline`. Alongside the drift baseline
+   it writes a committed `.bounds/surface-baseline.json` — a per-file content hash of every
+   unsupported-language file your manifests own. (Committed, unlike the gitignored `cache.db`, so the
+   signal works in CI and on a fresh clone. Pure-supported repos get no such file.)
+2. **Edit** happens over time — someone changes `charge.go`.
+3. **`bounds validate`** (full / `preflight`, off the `--quick` path) compares the live files to that
+   baseline and emits a non-blocking **`E_UNSUPPORTED_SURFACE_STALE`** warning naming the changed
+   subsystem + file: *"re-verify `payments.exposes` against the changed file(s)."* This is the precise
+   moment an agent (or human) should re-read the file and patch the `exposes`.
+4. **Re-confirm** with `bounds calibrate --dump-baseline` once the exposes match again; the warning
+   clears. New unsupported files that appear are a *coverage* concern (`dark`), not staleness, so
+   additions never trigger it — only a changed or removed confirmed file does.
+
+So as a repo using Bounds grows, the hand-authored part of the map can't silently rot: Bounds tells
+you exactly when to re-run the AI (or edit by hand) to patch it.
 
 ### Compiled languages (Go, Rust, Java, …)
 
@@ -114,17 +145,20 @@ tests:                     # optional, authoritative
   `docs/auth.md` or `tests/test_auth.py` never overclaims the whole `docs/` or `tests/` directory.
 
 **Tests and docs are tracked, never a blocking gap.** They are excluded from the source denominator
-(`mapped_pct` is over non-test library source) and reported only in the informational `tests`/`docs`
+(`mapped_pct` is over non-test supported-language source) and reported only in the informational `tests`/`docs`
 buckets — an unlinked test or doc is surfaced (so you *can* link it) but never fires `E_COVERAGE_GAP`
 and never fails CI. This is deliberate: no repo's tests get flagged as an unmapped-source gap by
 default. `bounds describe <name> --full` shows a subsystem's linked docs/tests (explicit + convention).
 
 ## 100%-or-guidance
 
-Library source aims for **100% mapped**, and when a gap remains the report names the **exact minimal
-manifest action** to close it (add the file to a subsystem's `paths:`, or scaffold one with
-`bounds init --subsystem <name>`). Tests and docs are *tracked* toward full linkage but are never a
-blocking gap — so "100%" is a goal for source, and a visible, opt-in target for docs/tests.
+Supported-language source aims for **100% mapped** (reachable — `mapped / (mapped + unowned)`), and the
+unsupported side aims for **0 `dark` files**. When either gap remains the report names the **exact
+minimal manifest action** to close it (add the file to a subsystem's `paths:`, or scaffold one with
+`bounds init --subsystem <name>`; for an unsupported language, declare it so it moves `dark →
+declared`). Tests and docs are *tracked* toward full linkage but are never a blocking gap. So "100%"
+means 100% of what Bounds can parse, with zero unclaimed source — honest and reachable, not an
+all-language denominator that pretends an adapter exists where it doesn't.
 
 ## Closing a gap (humans and AI)
 
@@ -176,7 +210,7 @@ adapters), so it is recorded, not hidden:
 
 **Report a gap.** If Bounds left source unmapped that you think it should have handled — a supported
 file it missed, or a language you want supported — open an issue with the repo and the
-`unmapped_by_language` breakdown. That data is how the supported-language list and the discovery
+`unsupported.by_language` breakdown. That data is how the supported-language list and the discovery
 heuristics get better. Contributors: see [known-issues.md](known-issues.md) and [testing.md](testing.md).
 
 ## CI: how coverage and partial maps interact with the gate

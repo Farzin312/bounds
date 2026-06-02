@@ -51,6 +51,8 @@ exposes:
   kind: const
 - name: E_UNSUPPORTED_LANGUAGE
   kind: const
+- name: E_UNSUPPORTED_SURFACE_STALE
+  kind: const
 - name: E_USAGE
   kind: const
 - name: SEVERITY

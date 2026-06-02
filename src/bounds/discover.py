@@ -33,6 +33,7 @@ import yaml
 from . import config, errors, gitutil, tsconfig
 from .extract import adapter_for_language, supported_extensions
 from .extract.scan import (
+    coverage_has_gap,
     extract_file,
     extract_project,
     is_framework_entry_file,
@@ -257,17 +258,23 @@ def run_discover(
         "written": sorted(written),
         "skipped": sorted(skipped),
     }
-    if coverage["files_unmapped"] > 0:
-        has_unsupported = bool(coverage["unsupported_languages"])
+    if coverage_has_gap(coverage):
+        sup, unsup = coverage["supported"], coverage["unsupported"]
+        has_dark = unsup["dark"] > 0
+        bits: list[str] = []
+        if sup["unowned"]:
+            bits.append(f"{sup['unowned']} supported file(s) in no subsystem")
+        if has_dark:
+            langs = ", ".join(sorted(unsup["by_language"]))
+            bits.append(f"{unsup['dark']} unsupported-language file(s) no manifest claims"
+                        + (f" ({langs})" if langs else ""))
+        detail = "; ".join(bits) or "some library source"
         result["next_step"] = (
-            f"mapped {coverage['mapped_pct']}% of source; "
-            f"{coverage['files_unmapped']} file(s) unmapped"
-            + (f" in unsupported languages ({', '.join(coverage['unsupported_languages'])})"
-               if has_unsupported else "")
-            + ". To reach 100%: `bounds init --subsystem <name>` and add the files to its `paths`, "
+            f"mapped {coverage['mapped_pct']}% of supported-language source; {detail}. "
+            "To close it: `bounds init --subsystem <name>` and add the files to its `paths`, "
             "or have an AI author the manifest in the same format — then `bounds validate`."
             + (" Hand-authored exposes for an unsupported language are durable (calibrate/validate "
-               "keep them, never strip or flag as drift)." if has_unsupported else "")
+               "keep them, never strip or flag as drift)." if has_dark else "")
             + " See docs/coverage.md."
         )
     notice = _apply_notice(applied, written, skipped)

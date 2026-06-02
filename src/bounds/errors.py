@@ -35,6 +35,11 @@ E_SCHEMA_NO_ORDER = "E_SCHEMA_NO_ORDER"
 E_SCHEMA_UNPARSED = "E_SCHEMA_UNPARSED"
 E_UNSUPPORTED_LANGUAGE = "E_UNSUPPORTED_LANGUAGE"
 E_EXTRACTION_FAILED = "E_EXTRACTION_FAILED"
+# A subsystem's UNSUPPORTED-language source file changed since its hand-authored `exposes` were last
+# confirmed (committed in .bounds/surface-baseline.json via `calibrate --dump-baseline`). Bounds has
+# no adapter to verify the surface, so this is the deterministic "re-verify your exposes" signal — a
+# warning, never a hard block; re-confirm by re-dumping the baseline.
+E_UNSUPPORTED_SURFACE_STALE = "E_UNSUPPORTED_SURFACE_STALE"
 # An adapter's extracted output violated its own declared self-consistency contract
 # (see extract.base.LanguageAdapter.check_contract). Advisory by construction: a
 # contract violation is a regression signal, surfaced as a warning, never a hard block.
@@ -69,6 +74,7 @@ SEVERITY = {
     E_SCHEMA_NO_ORDER: "warning",
     E_SCHEMA_UNPARSED: "warning",
     E_UNSUPPORTED_LANGUAGE: "warning",
+    E_UNSUPPORTED_SURFACE_STALE: "warning",
     E_EXTRACTION_FAILED: "warning",
     E_ADAPTER_CONTRACT: "warning",
 }
@@ -115,6 +121,7 @@ __all__ = [
     "E_UNOWNED_FILE",
     "E_UNRESOLVED_REFERENCE",
     "E_UNSUPPORTED_LANGUAGE",
+    "E_UNSUPPORTED_SURFACE_STALE",
     "E_USAGE",
     "SEVERITY",
 ]

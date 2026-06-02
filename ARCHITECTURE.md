@@ -257,15 +257,17 @@ class ValidationReport:
                                    #   report implies (unresolved_local_imports is measured in boundary modes:
                                    #   full/preflight/audit; quick reports 0).
                                    # coverage.mapping (full modes only; omitted on --quick):
-                                   #   {files_source_total, files_mapped, files_unmapped, mapped_pct,
-                                   #    unmapped_unowned_supported, unmapped_unsupported_language,
-                                   #    unmapped_by_language, unsupported_languages,
+                                   #   {mapped_pct,                       # SUPPORTED-language source only — reachable
+                                   #    supported:{total,mapped,unowned,unowned_sample},
+                                   #    unsupported:{total,declared,dark,dark_sample,by_language},
                                    #    tests:{total,linked,unlinked,unlinked_sample},
                                    #    docs: {total,linked,unlinked,unlinked_sample}}
-                                   #   NOTE: test files are EXCLUDED from the source denominator
-                                   #   (files_source_total / mapped_pct count non-test library source
-                                   #   only) and tracked in the tests bucket — a repo's tests can never
-                                   #   drag mapped_pct down or be flagged E_COVERAGE_GAP. Docs (.md/.mdx/
+                                   #   mapped_pct = mapped/(mapped+unowned) over SUPPORTED source, so 100%
+                                   #   is reachable; unsupported source sits beside it as declared (a
+                                   #   manifest claims it → covered) vs dark (the real gap). E_COVERAGE_GAP
+                                   #   fires on supported.unowned>0 OR unsupported.dark>0. NOTE: test files
+                                   #   are EXCLUDED from the denominator and tracked in the tests bucket —
+                                   #   they can never drag mapped_pct down or fire the gap. Docs (.md/.mdx/
                                    #   .rst) are informational. Linkage = explicit manifest docs:/tests:
                                    #   (most-specific wins) then convention; see §5.
 ```
@@ -827,7 +829,7 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_CYCLE_DETECTED` | error | circular subsystem dependency |
 | `E_ORPHAN_EXPORT` | warning | exposed interface consumed by no one |
 | `E_UNRESOLVED_REFERENCE` | warning | forward ref to unknown subsystem/interface |
-| `E_COVERAGE_GAP` | warning | repo source files mapped to no subsystem (or an unsupported language); reports mapped % of **non-test library source** + the concrete fix. Test/doc files are tracked in their own buckets and never counted as a gap |
+| `E_COVERAGE_GAP` | warning | a closeable coverage gap — a supported file in no subsystem (`supported.unowned`) or an unsupported-language file no manifest claims (`unsupported.dark`); reports `mapped_pct` of **supported-language source** (so 100% is reachable) + a numbered fix and template. A `declared` unsupported file is covered, and test/doc files are tracked in their own buckets — none counted as a gap |
 | `E_SUBSYSTEM_OVERLAP` | warning | two subsystems declare the identical path/file at equal specificity, so ownership rides on the sorted-first tie-break; surfaced by `describe` (advisory) |
 | `E_UNOWNED_FILE` | error / warning | tracked source file owned by no subsystem (`--fail-on-unowned`); a `root.entry_points` match degrades to a non-blocking warning |
 | `E_EXTERNAL_SYMLINK` | warning | a scanned path resolves outside the project via a symlink (skipped unless `--follow-symlinks`) |
@@ -840,6 +842,7 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do, invalid subsystem name) |
 | `E_INTERNAL` | fatal | an unexpected (non-`BoundsError`) exception escaped a command body; the top-level guard converts it to a generic `{"error":{code,message,fix}}` (no traceback leaked) instead of crashing |
 | `E_UNSUPPORTED_LANGUAGE` | warning | file extension has no adapter (skipped) |
+| `E_UNSUPPORTED_SURFACE_STALE` | warning | a subsystem's unsupported-language source file changed since its hand-authored `exposes` were confirmed in `.bounds/surface-baseline.json` (`calibrate --dump-baseline`); the deterministic "re-verify your exposes" signal. Off the `--quick` path; opt-in (no baseline ⇒ no signal) |
 | `E_EXTRACTION_FAILED` | warning | could not extract a file — tree-sitter parse error, unreadable, or over `MAX_FILE_BYTES`. An OWNED file is never silently dropped; it always emits this. |
 | `E_ADAPTER_CONTRACT` | warning | adapter output violated its declared self-consistency contract — a Prisma relation field leaked as a column, or an all-unparsable SQL migration with a revision header that masked the failure. Advisory only (never blocks). |
 

@@ -283,7 +283,7 @@ def _render_overview_human(payload: dict) -> str:
         f"  validation: {v.get('errors', 0)} errors, {v.get('warnings', 0)} warnings"
         f"   (drift: {v.get('structural_drift', 0)}, boundaries: {v.get('boundary_violations', 0)}, "
         f"overlaps: {v.get('ownership_overlaps', 0)})"
-        f"   mapped: {v.get('mapped_pct', 0.0)}%",
+        f"   source mapped: {v.get('mapped_pct', 0.0)}%",
     ]
     # Informational doc/test linkage (tracked, never a gap) — one short line each, only when present.
     for label in ("tests", "docs"):
@@ -543,9 +543,12 @@ def _render_report_dict_human(payload: dict) -> str:
     lines.append(f"status: {status}")
     lines.append(f"mode:   {mode}")
     lines.append(_format_stats_line(stats))
-    # JSON-first parity: surface the docs/tests linkage the JSON carries in stats.coverage.mapping
-    # as one short informational line each (tests/docs are tracked, never a blocking gap).
-    lines.extend(_format_linkage_lines(((stats.get("coverage") or {}).get("mapping") or {})))
+    # JSON-first parity: surface the source-coverage % and the docs/tests linkage the JSON carries in
+    # stats.coverage.mapping as clean lines (not buried in the stats repr). Tests/docs are tracked,
+    # never a blocking gap.
+    mapping = (stats.get("coverage") or {}).get("mapping") or {}
+    lines.extend(_format_coverage_line(mapping))
+    lines.extend(_format_linkage_lines(mapping))
 
     by_severity: dict[str, list[dict]] = {sev: [] for sev in _SEVERITY_ORDER}
     other: list[dict] = []
@@ -587,11 +590,45 @@ def _render_report_dict_human(payload: dict) -> str:
 
 
 def _format_stats_line(stats: dict) -> str:
-    """Render the stats mapping as a compact, deterministic ``key=value`` line."""
+    """Render the stats mapping as a compact, deterministic ``key=value`` line.
+
+    The nested ``coverage.mapping`` block is rendered on its own clean lines (``_format_coverage_line``
+    / ``_format_linkage_lines``), so here we flatten ``coverage``'s scalar fields and omit ``mapping``
+    rather than dumping a brace-soup dict repr that buries ``mapped_pct``.
+    """
     if not stats:
         return "stats:  (none)"
-    parts = [f"{key}={stats[key]}" for key in sorted(stats)]
+    parts: list[str] = []
+    for key in sorted(stats):
+        val = stats[key]
+        if key == "coverage" and isinstance(val, dict):
+            parts.extend(f"{ck}={val[ck]}" for ck in sorted(val) if ck != "mapping")
+        else:
+            parts.append(f"{key}={val}")
     return "stats:  " + " ".join(parts)
+
+
+def _format_coverage_line(mapping: dict) -> list[str]:
+    """One clean line for SOURCE mapping coverage (re-renders ``stats.coverage.mapping``).
+
+    Labeled "source mapped" to distinguish it from "schema parse coverage" (the ``E_SCHEMA_UNPARSED``
+    signal) — two different things both once called "coverage". Omitted when there is no mapping
+    block (e.g. ``--quick``, which skips the coverage scan).
+    """
+    if not mapping:
+        return []
+    sup = mapping.get("supported") or {}
+    unsup = mapping.get("unsupported") or {}
+    line = (f"source mapped: {mapping.get('mapped_pct', 0.0)}% "
+            f"({sup.get('mapped', 0)}/{sup.get('total', 0)} supported files)")
+    extra: list[str] = []
+    if unsup.get("declared"):
+        extra.append(f"{unsup['declared']} declared")
+    if unsup.get("dark"):
+        extra.append(f"{unsup['dark']} dark")
+    if extra:
+        line += " — unsupported: " + ", ".join(extra)
+    return [line]
 
 
 def _format_linkage_lines(mapping: dict) -> list[str]:
@@ -666,12 +703,14 @@ def _render_schema_security(payload: dict) -> list[str]:
     coverage = payload.get("schema_coverage")
     if coverage and not coverage.get("complete", True):
         lines.append("")
-        lines.append(f"⚠ schema coverage: PARTIAL — {coverage.get('unextracted_files', 0)} "
-                     "file(s) had DDL that could not be fully parsed; a table/policy not listed "
-                     "may still exist (not authoritative). Use --full to list them.")
+        n = coverage.get("unextracted_files", 0)
+        lines.append(f"⚠ schema parse coverage: PARTIAL — {n} file(s) had DDL Bounds could not fully parse.")
+        note = coverage.get("note")
+        if note:  # surface the JSON note verbatim (was a hardcoded substitute — a parity drift)
+            lines.append(f"  {note}")
     elif coverage:
         lines.append("")
-        lines.append("schema coverage: complete")
+        lines.append("schema parse coverage: complete")
     diagnostics = payload.get("schema_diagnostics")
     if diagnostics:
         lines.append(f"schema diagnostics ({len(diagnostics)}):")

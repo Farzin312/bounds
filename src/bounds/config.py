@@ -47,6 +47,12 @@ GITIGNORE_APPEND_HEADER = "# Added by Bounds — regenerable cache artifacts"
 # above this baseline, so a PR is never blocked by pre-existing rot it didn't introduce.
 DRIFT_BASELINE_FILE = "drift-baseline.json"
 
+# Committed snapshot of each subsystem's UNSUPPORTED-language source (per-file content hash), written
+# by `calibrate --dump-baseline`. `validate` compares the live files against it and emits
+# E_UNSUPPORTED_SURFACE_STALE when one changed since the hand-authored exposes were confirmed.
+# Committed (unlike the gitignored cache.db) so the signal survives a fresh clone and works in CI.
+SURFACE_BASELINE_FILE = "surface-baseline.json"
+
 # A subsystem name is a single path segment used to build `<MANIFESTS_DIR>/<name>.yaml`. Only
 # letters, digits, '-' and '_' are allowed so a name can never traverse out of the manifests dir
 # (e.g. `../../tmp/x`) or carry a path separator. The single source both cli.init and the loader
@@ -67,8 +73,10 @@ SCHEMA_VERSION = "1"
 # and canonicalises table names (see extract/sql.py, validate/schema.py). v3: PythonAdapter honours
 # a literal `__all__` for the export surface and resolves same-file Django-model inheritance
 # transitively (see extract/python.py). v4: cache records persist the per-file generated-code flag
-# so validate can skip generated exports without rereading source on the quick path.
-STATE_VERSION = "4"
+# so validate can skip generated exports without rereading source on the quick path. v5: shell (bash)
+# adapter added — `.sh`/`.bash`/`.zsh` now extract function symbols instead of being skipped, so a
+# cache built before it must rebuild to pick up the new surface (see extract/shell.py).
+STATE_VERSION = "5"
 
 # The documented command to refresh a stale git/pipx install. Surfaced by `upgrade-check`
 # and embedded in the generated agent contract; kept here as the single source so the two
@@ -117,6 +125,7 @@ __all__ = [
     "STATE_VERSION",
     "SUBSYS_DIR",
     "SUBSYS_FILE",
+    "SURFACE_BASELINE_FILE",
     "UPGRADE_INSTALL_CMD",
     "VALID_CRITICALITY",
     "VALID_ENFORCE",

@@ -89,7 +89,10 @@ name; bump `config.STATE_VERSION` whenever extraction output changes for unchang
 describe assembly · `locate.py` backs `where`+`impact` · `cli.py` command wiring (arg-parse + one
 `go()` per command, no business logic; `_progress(msg)` = the one loading-spinner seam — wrap compute
 only, never `output.emit`) · `discover.py` · `calibrate.py` · `agentsync.py` ·
-`ciconfig.py` · `gitutil.py` git detection + changed-file diff (backs `--quick`) ·
+`surface.py` committed unsupported-language surface baseline (`.bounds/surface-baseline.json`,
+written by `calibrate --dump-baseline`) → `validate` emits `E_UNSUPPORTED_SURFACE_STALE` when a
+hand-authored expose's file changes (digests come from `scan.unsupported_surface_files`; depends only
+on `config`, no import cycle) · `ciconfig.py` · `gitutil.py` git detection + changed-file diff (backs `--quick`) ·
 `ignore.py` `.boundsignore` + generated-code detection ·
 `update_check.py`/`upgrade.py` GitHub-release check + `pipx` self-upgrade · `output.py` JSON/human emit.
 

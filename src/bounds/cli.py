@@ -33,6 +33,7 @@ from . import (
     update_check,
 )
 from .cache import store as cache_store
+from .extract.scan import coverage_has_gap
 from .ignore import IgnoreMatcher
 from .manifest import loader as manifest_loader
 from .validate import engine as validate_engine
@@ -420,7 +421,9 @@ def preflight_cmd(include_ignored: bool, include_gitignored: bool, follow_symlin
                 include_ignored=include_ignored, include_gitignored=include_gitignored,
                 follow_symlinks=follow_symlinks, fail_on_unowned=fail_on_unowned,
             )
-        counts = Counter(i.code for i in report.issues)
+        counts: Counter = Counter()
+        for i in report.issues:
+            counts[i.code] += i.count  # sum magnitude (rolled-up issues carry count>1), not issue rows
         payload = report.to_dict()
         payload["checks"] = {
             "structural_drift": counts.get(errors.E_STRUCTURAL_DRIFT, 0),
@@ -466,7 +469,9 @@ def overview_cmd(human: bool) -> None:
         # cache); reuse its error counts + mapping coverage rather than re-walking the tree.
         with _progress("checking health..."):
             report = validate_engine.run(root, mode="full", persist=False)
-        counts = Counter(i.code for i in report.issues)
+        counts: Counter = Counter()
+        for i in report.issues:
+            counts[i.code] += i.count  # sum magnitude (rolled-up issues carry count>1), not issue rows
         cov = report.stats.get("coverage", {})
         mapping = cov.get("mapping") or {}
         validation_errors = report.errors()
@@ -482,23 +487,22 @@ def overview_cmd(human: bool) -> None:
             "mapped_pct": mapping.get("mapped_pct", 0.0),
         }
         next_steps: list[str] = []
-        mapped_pct = validation["mapped_pct"]
-        if mapped_pct < 100.0:
+        if coverage_has_gap(mapping):
             # Name WHAT is unmapped and the right move per gap kind — so an agent reading overview is
             # told loudly which files are dark and that unsupported-language manifests are durable
             # (hand-author once; calibrate/validate won't strip or flag them). JSON-first: the same
-            # mapping fields the human view re-renders.
-            unsupported_n = mapping.get("unmapped_unsupported_language", 0)
-            unowned_n = mapping.get("unmapped_unowned_supported", 0)
+            # mapping fields the human view re-renders. A `dark`-only gap can still sit at 100% mapped
+            # (all supported source owned), so gate on the gap predicate, not the % alone.
+            sup, unsup = mapping.get("supported", {}), mapping.get("unsupported", {})
             bits: list[str] = []
-            if unowned_n:
+            if sup.get("unowned"):
                 bits.append(
-                    f"{unowned_n} supported file(s) in no subsystem — add to a manifest's `paths:`"
+                    f"{sup['unowned']} supported file(s) in no subsystem — add to a manifest's `paths:`"
                 )
-            if unsupported_n:
-                langs = ", ".join(sorted(mapping.get("unsupported_languages", []) or []))
+            if unsup.get("dark"):
+                langs = ", ".join(sorted(unsup.get("by_language", {})))
                 bits.append(
-                    f"{unsupported_n} file(s) in unsupported languages"
+                    f"{unsup['dark']} unsupported-language file(s) no manifest claims"
                     + (f" ({langs})" if langs else "")
                     + " — hand-author a manifest's `exposes` (durable: calibrate/validate keep it)"
                 )

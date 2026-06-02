@@ -36,6 +36,10 @@ exposes:
   kind: function
 - name: subsystems_with_unsupported_source
   kind: function
+- name: coverage_has_gap
+  kind: function
+- name: unsupported_surface_files
+  kind: function
 consumes:
 - subsystem: models
   via: models

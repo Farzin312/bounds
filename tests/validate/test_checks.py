@@ -64,6 +64,28 @@ def test_drift_undeclared_extra_on_leaf_is_info():
         assert not any(i.severity == "error" for i in issues), crit
 
 
+def test_drift_undeclared_exports_roll_up_into_one_issue_with_count():
+    """Many undeclared exports in one subsystem collapse to a SINGLE info issue carrying `count` (the
+    magnitude) and a capped symbol sample — the token-discipline rollup, so a large repo doesn't dump
+    one issue per symbol into agent context. Names beyond the cap become '+N more'."""
+    syms = [Symbol("keep", "function", 1, True)] + [
+        Symbol(f"x{i}", "function", i + 2, True) for i in range(8)  # 8 undeclared exports
+    ]
+    subs = {"a": Sub(name="a", criticality="leaf", paths=["x"], exposes=[Interface("keep")])}
+    extracts = {"x/f.py": ExtractResult("x/f.py", "python", syms)}
+    drift = [
+        i for i in check_structural_drift(_ctx(subs, extracts, {"x/f.py": "a"}))
+        if i.code == errors.E_STRUCTURAL_DRIFT and i.severity == "info"
+    ]
+    assert len(drift) == 1            # ONE rolled issue, not 8 separate ones
+    assert drift[0].count == 8        # magnitude preserved so overview's drift tally is unchanged
+    assert "8 symbol(s) not declared" in drift[0].message
+    assert "+3 more" in drift[0].message  # 8 - cap(5) = 3 elided
+    for nm in ("x0", "x1", "x2", "x3", "x4"):
+        assert nm in drift[0].message     # first 5 sorted names shown
+    assert "x5" not in drift[0].message   # beyond the cap — elided into "+3 more", never dumped
+
+
 def test_drift_no_undeclared_flag_when_exposes_empty():
     """A subsystem declaring no exposes (e.g. not yet calibrated) gets zero undeclared-drift info — drift needs a declared set to drift from."""
     subs = {"a": Sub(name="a", criticality="leaf", paths=["x"], exposes=[])}

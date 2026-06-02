@@ -143,7 +143,8 @@ def test_engine_quick_surfaces_equal_specificity_path_overlap(tmp_path):
 def test_engine_no_structural_drift_for_unsupported_language_subsystem(tmp_path):
     """A Go (unsupported-language) subsystem with hand-authored exposes must NOT produce
     E_STRUCTURAL_DRIFT — Bounds has no Go adapter, so those exposes are unverifiable, not stale.
-    The coverage gap for the unmapped Go file is still expected (honest, non-blocking). This is the
+    Because a manifest *claims* the Go file (`paths: services/payments`), it is `declared` → covered,
+    so NO E_COVERAGE_GAP fires either: hand-authoring the manifest closed the gap. This is the
     validate side of the calibrate↔validate agreement on unsupported-language manifests."""
     cfg = tmp_path / ".bounds"
     (cfg / "manifests").mkdir(parents=True)
@@ -165,8 +166,12 @@ def test_engine_no_structural_drift_for_unsupported_language_subsystem(tmp_path)
     report = engine.run(tmp_path, mode="full")
     codes = {i.code for i in report.issues if i.subsystem == "payments"}
     assert errors.E_STRUCTURAL_DRIFT not in codes, [i.message for i in report.issues]
-    # The honest coverage gap for the unmapped Go file is still expected (whole-repo, not per-sub).
-    assert any(i.code == errors.E_COVERAGE_GAP for i in report.issues)
+    # The Go file is DECLARED by the manifest → covered (durable), not a gap: no E_COVERAGE_GAP.
+    assert not any(i.code == errors.E_COVERAGE_GAP for i in report.issues), \
+        [i.message for i in report.issues]
+    mapping = report.stats["coverage"]["mapping"]
+    assert mapping["unsupported"]["declared"] == 1
+    assert mapping["unsupported"]["dark"] == 0
 
 
 def _overlap_project(tmp_path):

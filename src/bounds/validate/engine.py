@@ -11,7 +11,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .. import config, errors, gitutil
+from .. import config, errors, gitutil, surface
 from ..cache import store as cache_store
 from ..extract import content_hash, get_adapter, supported_extensions, scan
 from ..ignore import IgnoreMatcher, has_generated_marker, load_matcher
@@ -294,10 +294,29 @@ def run(
             project_root, set(file_owner), matcher,
             repo=repo, include_gitignored=include_gitignored, subsystems=subsystems,
         )
-        # The gap fires only on unmapped NON-TEST library source (mapping_coverage already excludes
-        # test files from files_unmapped) — a repo's tests/docs are tracked, never a blocking gap.
-        if mapping["files_unmapped"] > 0:
-            issues.append(_coverage_gap_issue(mapping))
+        # The gap fires only on the CLOSEABLE set — supported files in no subsystem and unsupported
+        # files no manifest claims (`dark`). Declared unsupported files are covered (durable), and
+        # tests/docs are tracked separately — none of those block.
+        if scan.coverage_has_gap(mapping):
+            issues.append(_coverage_gap_issue(mapping, project_root, subsystems))
+
+        # Unsupported-language surface staleness (off --quick): a hand-authored expose for a file
+        # Bounds can't parse has no extraction to verify against, so the deterministic signal that it
+        # may be outdated is "the file changed since it was confirmed". Compare the live unsupported
+        # surface to the COMMITTED baseline (.bounds/surface-baseline.json, written by
+        # `calibrate --dump-baseline`); absent baseline ⇒ no signal (opt-in, like the drift baseline).
+        baseline = surface.load_baseline(project_root)
+        if baseline and subsystems:
+            # The baseline is always dumped gitignore-filtered (calibrate's default); validate passes
+            # its own flag. A `--include-gitignored` run makes `current_surface` a SUPERSET of the
+            # baseline, never a subset — and `stale_subsystems` ignores additions (only changed/removed
+            # baseline files are stale), so the asymmetry can't produce a spurious signal. Don't
+            # "fix" it by forcing the flag here.
+            current_surface = scan.unsupported_surface_files(
+                project_root, subsystems, matcher, repo=repo, include_gitignored=include_gitignored
+            )
+            for name, changed in surface.stale_subsystems(baseline, current_surface).items():
+                issues.append(_surface_stale_issue(name, changed))
 
     status = _status(issues)
     unowned_blocks = any(i.severity == "error" for i in unowned)
@@ -336,58 +355,90 @@ def run(
 # ===========================================================================
 # Helpers
 # ===========================================================================
-def _coverage_gap_issue(mapping: dict) -> Issue:
-    """One loud, advisory issue summarizing unmapped NON-TEST source + the concrete next step.
+_SURFACE_SAMPLE_CAP = 5  # token-lean: name at most this many changed files, then "+N more"
 
-    "100%-or-guidance": fired only when unmapped library source remains (tests/docs are tracked in
-    their own buckets and never a gap). The message names what is unmapped; the fix names the exact
-    minimal manifest action — distinguishing the two gap kinds, because the right move differs:
 
-      * **unowned-supported** (we have an adapter — Python/TS/JS/SQL/Prisma — the file is just in no
-        subsystem): a deterministic fix — add the file to a manifest's `paths:`.
-      * **unsupported language** (no adapter yet — Go/Rust/Java/…): hand-author (or AI-author) a
-        manifest; those exposes are DURABLE (calibrate routes them to needs_review, validate never
-        flags them as drift), so the work survives.
+def _surface_stale_issue(subsystem: str, changed: list[str]) -> Issue:
+    """Advisory warning: a subsystem's UNSUPPORTED-language source changed since its hand-authored
+    ``exposes`` were confirmed, so the surface may be outdated (Bounds has no adapter to verify it).
+    Names a capped sample of the changed/removed files and tells the agent to re-verify, then
+    re-confirm — the deterministic "re-run" trigger, no LLM."""
+    n = len(changed)
+    sample = ", ".join(changed[:_SURFACE_SAMPLE_CAP])
+    if n > _SURFACE_SAMPLE_CAP:
+        sample += f", +{n - _SURFACE_SAMPLE_CAP} more"
+    return Issue(
+        errors.E_UNSUPPORTED_SURFACE_STALE,
+        "warning",
+        f"subsystem '{subsystem}': {n} unsupported-language file(s) changed since its exposes "
+        f"were confirmed ({sample})",
+        subsystem=subsystem,
+        count=n,
+        fix=f"re-verify {subsystem}.exposes against the changed file(s), then "
+        "`bounds calibrate --dump-baseline` to re-confirm",
+    )
 
-    The fix also points at `--fail-on-unowned` for teams that WANT an unmapped supported file to be a
-    hard CI gate. Test/doc linkage is reported separately in stats, never here.
+
+def _sample_manifest_path(project_root: Path, subsystems: dict) -> str | None:
+    """A concrete existing manifest an agent can copy as a template (alphabetically first), or None."""
+    for name in sorted(subsystems or {}):
+        rel = f"{config.BOUNDS_DIR}/{config.MANIFESTS_DIR}/{name}.yaml"
+        if (project_root / rel).is_file():
+            return rel
+    return None
+
+
+def _coverage_gap_issue(mapping: dict, project_root: Path, subsystems: dict) -> Issue:
+    """One loud, advisory issue for the CLOSEABLE coverage gap + a concrete, agent-followable procedure.
+
+    Fired only when a closeable gap remains. Two gap kinds, two moves (named separately because the
+    right fix differs):
+
+      * **supported file in no subsystem** (we have an adapter — Python/TS/JS/SQL/Prisma/shell): a
+        deterministic fix — add it to a subsystem's `paths:`.
+      * **unsupported-language file no manifest claims** (`dark`, no adapter yet): author a manifest;
+        the `exposes` you hand-write are DURABLE (calibrate routes them to needs_review, validate
+        never flags them as drift). A *declared* unsupported file is already covered and never here.
+
+    The `fix` carries a numbered procedure and a concrete `template_ref` so a JSON-first agent can act
+    without opening the docs. The headline % is supported-language source only — reachable. Test/doc
+    linkage is reported separately in stats, never here.
     """
+    sup = mapping["supported"]
+    unsup = mapping["unsupported"]
     parts = []
-    has_unsupported = bool(mapping["unmapped_unsupported_language"])
-    if has_unsupported:
-        langs = ", ".join(f"{lang}×{n}" for lang, n in sorted(mapping["unmapped_by_language"].items())
-                          if lang in mapping["unsupported_languages"])
-        parts.append(f"{mapping['unmapped_unsupported_language']} in unsupported languages ({langs})")
-    if mapping["unmapped_unowned_supported"]:
-        parts.append(f"{mapping['unmapped_unowned_supported']} supported file(s) in no subsystem")
+    if sup["unowned"]:
+        parts.append(f"{sup['unowned']} supported file(s) in no subsystem")
+    if unsup["dark"]:
+        langs = ", ".join(f"{lang}×{n}" for lang, n in sorted(unsup["by_language"].items()))
+        parts.append(f"{unsup['dark']} unsupported-language file(s) no manifest claims ({langs})")
     detail = "; ".join(parts) or "some source files"
 
-    # Tailor the fix to which gap(s) are present so the advice is never generic. The two moves are
-    # genuinely different (deterministic add vs. durable hand-authored manifest); say so explicitly.
-    fixes: list[str] = []
-    if mapping["unmapped_unowned_supported"]:
-        fixes.append(
-            "supported files (Python/TS/JS/SQL/Prisma) in no subsystem → add each to a subsystem's "
-            "`paths:` (`bounds init --subsystem <name>` scaffolds one) — deterministic, no AI"
+    template_ref = _sample_manifest_path(project_root, subsystems)
+    steps: list[str] = []
+    if sup["unowned"]:
+        steps.append(
+            "supported files (Python/TS/JS/SQL/Prisma/shell) → add each to a subsystem's `paths:` "
+            "(`bounds init --subsystem <name>` scaffolds one) — deterministic, no AI"
         )
-    if has_unsupported:
-        fixes.append(
-            "unsupported-language files (no adapter yet) → hand-author (or AI-author) a manifest's "
-            "`exposes` from an existing `.bounds/manifests/*.yaml` template; those exposes are "
-            "DURABLE (calibrate keeps them as needs_review, validate never flags them as drift) so "
-            "the work survives"
+    if unsup["dark"]:
+        tmpl = f" (copy `{template_ref}` as a template)" if template_ref else ""
+        steps.append(
+            "unsupported-language files (no adapter yet) → author a manifest with `paths:` + a "
+            f"hand-written `exposes:`{tmpl}, then re-run `bounds validate`; those exposes are DURABLE "
+            "(calibrate keeps them as needs_review, validate never flags them as drift)"
         )
     fix = (
-        "reach 100% — " + "; ".join(fixes) + ". Verify with `bounds validate` (see docs/coverage.md). "
-        "Want unmapped supported files to BLOCK CI instead of warn? `bounds validate --fail-on-unowned`. "
-        "Report gaps so the supported-language list grows."
+        "reach 100% of supported source + 0 dark files — " + "; ".join(steps)
+        + f". {unsup['declared']} unsupported file(s) are already covered by a manifest. "
+        "See docs/coverage.md."
     )
     return Issue(
         errors.E_COVERAGE_GAP,
         "warning",
-        f"mapped {mapping['mapped_pct']}% of library source "
-        f"({mapping['files_mapped']}/{mapping['files_source_total']} non-test files); unmapped: {detail} "
-        f"(tests/docs are tracked separately, never a gap)",
+        f"mapped {mapping['mapped_pct']}% of supported-language source "
+        f"({sup['mapped']}/{sup['total']} files); gap: {detail} "
+        f"({unsup['declared']} unsupported file(s) already covered; tests/docs tracked separately)",
         fix=fix,
     )
 

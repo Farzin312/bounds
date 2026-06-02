@@ -35,16 +35,19 @@ def _issue(
     subsystem: str | None = None,
     file: str | None = None,
     fix: str | None = None,
+    count: int = 1,
 ) -> Issue:
     """Construct an :class:`Issue`, defaulting its severity from the single-source
     ``errors.SEVERITY`` table. An explicit ``severity`` overrides it for the
     context-dependent cases — e.g. an undeclared export surfaced at ``info`` rather than the
     code's canonical ``error`` — so the table stays the one home for canonical severities.
+    ``count`` (>1) marks an issue that rolls up that many findings into one line.
     """
     return Issue(
         code,
         severity or errors.SEVERITY[code],
         message,
+        count=count,
         subsystem=subsystem,
         file=file,
         fix=fix,
@@ -295,6 +298,9 @@ def resolve_import(
 # ===========================================================================
 # Check 1 — structural drift
 # ===========================================================================
+_DRIFT_SAMPLE_CAP = 5  # token-lean: a rolled-up drift issue names at most this many symbols, then "+N more"
+
+
 def check_structural_drift(ctx: CheckContext) -> list[Issue]:
     issues: list[Issue] = []
     for name in sorted(ctx.subsystems):
@@ -363,18 +369,33 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
                 for p in ctx.files_of(name) if p in ctx.generated_files
                 for s in ctx.extracts[p].symbols if s.exported
             }
-            for extra in sorted(
-                actual - declared - test_case_exports - framework_exports - generated_exports
-            ):
-                if extra in declared_table_parents:
-                    continue
+            extras = [
+                extra
+                for extra in sorted(
+                    actual - declared - test_case_exports - framework_exports - generated_exports
+                )
+                if extra not in declared_table_parents
+            ]
+            # Roll the per-symbol undeclared-export drift into ONE info issue per subsystem: on a large
+            # repo this is the dominant agent-context bloat (one issue per symbol = thousands of tokens
+            # a `bounds validate --quick` dumps after every edit). `count` carries the true magnitude so
+            # overview's drift tally is unchanged; the message names a capped sample. Severity stays
+            # info (never blocks). The declared-but-missing branch above stays per-item — it is
+            # error-severity, gate-relevant, and usually few.
+            if extras:
+                n = len(extras)
+                sample = ", ".join(extras[:_DRIFT_SAMPLE_CAP])
+                if n > _DRIFT_SAMPLE_CAP:
+                    sample += f", +{n - _DRIFT_SAMPLE_CAP} more"
                 issues.append(
                     _issue(
                         errors.E_STRUCTURAL_DRIFT,
-                        f"subsystem '{name}' exports '{extra}' which is not declared in exposes",
+                        f"subsystem '{name}' exports {n} symbol(s) not declared in exposes: {sample}",
                         severity="info",
                         subsystem=name,
-                        fix=f"add '{extra}' to {name}.exposes if it is part of the public surface",
+                        count=n,
+                        fix=f"add them to {name}.exposes if part of the public surface, "
+                        "or run `bounds calibrate` to sync the manifest",
                     )
                 )
     return issues
