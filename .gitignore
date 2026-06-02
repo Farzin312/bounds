@@ -38,9 +38,9 @@ __editable__.*
 GEMINI.md
 # Per-agent native command/skill artifacts (also `bounds agent --sync` output, same policy).
 .claude/skills/bounds/SKILL.md
-.codex/skills/bounds/SKILL.md
+.agents/skills/bounds/SKILL.md
 .gemini/commands/bounds.toml
-.opencode/command/bounds.md
+.opencode/commands/bounds.md
 .github/prompts/bounds.prompt.md
 .cursor/commands/bounds.md
 .windsurf/workflows/bounds.md

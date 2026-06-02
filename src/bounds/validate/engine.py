@@ -214,7 +214,19 @@ def run(
         extracts[rel] = result
 
     before_prune = set(state.files)
-    state.prune(set(file_owner))
+    live = set(file_owner)
+    # A provider file that was deleted on disk is gone from the on-disk owner map, so the
+    # extraction loop above never marks its subsystem dirty (it only iterates present files).
+    # In quick mode that silently starves propagation: cross_impact then never warns the
+    # deleted provider's consumers (E_STALE_INTERFACE). Recover the owner from the CACHED
+    # FileRecord (the only surviving source) and mark it dirty BEFORE pruning the row. Skipped
+    # on a cold first run (no prior cache) so a fresh repo marks nothing dirty.
+    if not was_cold:
+        for path in before_prune - live:
+            cached = state.files[path]
+            if cached.subsystem:
+                dirty.add(cached.subsystem)
+    state.prune(live)
     if set(state.files) != before_prune:
         state_changed = True
     if persist and state_changed:

@@ -304,6 +304,14 @@ def _render_impact_human(payload: dict) -> str:
     label = "subsystem" if "subsystem" in payload else "interface"
     lines = [f"impact of {label} '{target}': blast radius {payload.get('blast_radius', 0)}"
              + (" (lower bound)" if payload.get("blast_radius_is_lower_bound") else "")]
+    # Re-render the honesty fields the JSON carries (parity rule): criticality + basis tell the
+    # reader *how* the radius was derived; both are present on the subsystem payload, basis on both.
+    crit = payload.get("criticality")
+    basis = payload.get("basis")
+    meta = [bit for bit in ((f"criticality {crit}" if crit else None),
+                            (f"basis {basis}" if basis else None)) if bit]
+    if meta:
+        lines.append("  " + " · ".join(meta))
     if payload.get("providers"):
         lines.append(f"  provided by: {', '.join(payload['providers'])}")
     direct = payload.get("direct_consumers", []) or []
@@ -320,6 +328,11 @@ def _render_impact_human(payload: dict) -> str:
         lines.append(f"  undeclared importers (from --verify): {len(undeclared)}")
         for e in undeclared:
             lines.append(f"    {e.get('consumer', '?')}: {', '.join(e.get('files', []))}")
+    # The note carries the "this is a lower bound — run --verify" guidance the JSON includes;
+    # surface it last so the human view never drops information the JSON has (parity rule).
+    note = payload.get("note")
+    if note:
+        lines.append(f"  note: {note}")
     return "\n".join(lines)
 
 

@@ -624,6 +624,9 @@ def _write(project_root: Path, root_proposal: dict, candidates: list[dict]) -> t
     """
     cfg = project_root / config.BOUNDS_DIR
     (cfg / config.MANIFESTS_DIR).mkdir(parents=True, exist_ok=True)
+    # Ensure the regenerable, binary cache is gitignored whenever discover scaffolds .bounds/ —
+    # same self-contained .gitignore init writes (shared template, idempotent).
+    config.ensure_bounds_gitignore(cfg)
     written: list[str] = []
     skipped: list[str] = []
 

@@ -95,6 +95,17 @@ def test_discover_apply_writes_manifests(tmp_path):
     assert "no unmapped supported source" in again["notice"]
 
 
+def test_discover_apply_ensures_gitignore(tmp_path):
+    """apply=True scaffolds .bounds/.gitignore (regenerable cache armor) with the three entries."""
+    _project(tmp_path)
+    run_discover(tmp_path, apply=True)
+    gi = tmp_path / config.BOUNDS_DIR / config.GITIGNORE_FILE
+    assert gi.is_file()
+    body = gi.read_text(encoding="utf-8")
+    for entry in ("cache.db", "cache.db-journal", "state.json"):
+        assert entry in body
+
+
 def test_discover_namespace_tag(tmp_path):
     """A namespace= arg tags every kept candidate with that namespace, so a monorepo slice can be grouped on discovery."""
     _project(tmp_path)

@@ -454,3 +454,74 @@ def test_init_root_idempotent(tmp_path, monkeypatch):
         tmp_path / ".bounds" / "root.yaml"
     ]  # exists, unchanged
     assert _json(second)["skipped"]  # reported as skipped, not recreated
+
+
+def test_init_subsystem_rejects_path_traversal(tmp_path, monkeypatch):
+    """A traversal subsystem name is rejected (E_USAGE, exit 2) and writes NOTHING outside .bounds/manifests/."""
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--root"])
+    before = sorted(p.name for p in tmp_path.iterdir())
+    result = runner.invoke(main, ["init", "--subsystem", "../../tmp/PWNED"])
+    assert result.exit_code == 2
+    assert _json(result)["error"]["code"] == "E_USAGE"
+    # No file escaped the manifests dir, and the tree above .bounds/ is untouched.
+    assert not (tmp_path.parent.parent / "tmp" / "PWNED.yaml").exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == before
+    manifests = tmp_path / ".bounds" / "manifests"
+    assert not manifests.exists() or list(manifests.glob("*.yaml")) == []
+
+
+def test_init_subsystem_accepts_legitimate_names(tmp_path, monkeypatch):
+    """Legitimate names (letters/digits/'-'/'_') still scaffold normally."""
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--root"])
+    for name in ("widgets", "data_store", "api-v2"):
+        result = runner.invoke(main, ["init", "--subsystem", name])
+        assert result.exit_code == 0, name
+        assert (tmp_path / ".bounds" / "manifests" / f"{name}.yaml").exists()
+
+
+def test_init_root_writes_gitignore(tmp_path, monkeypatch):
+    """init --root scaffolds .bounds/.gitignore with the three regenerable cache entries."""
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["init", "--root"])
+    assert result.exit_code == 0
+    gi = tmp_path / ".bounds" / ".gitignore"
+    assert gi.exists()
+    body = gi.read_text(encoding="utf-8")
+    for entry in ("cache.db", "cache.db-journal", "state.json"):
+        assert entry in body
+    assert ".bounds/.gitignore" in _json(result)["created"]
+
+
+def test_init_root_gitignore_idempotent(tmp_path, monkeypatch):
+    """A second init --root reports the .gitignore as skipped and does not duplicate it."""
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--root"])
+    gi = tmp_path / ".bounds" / ".gitignore"
+    first_body = gi.read_text(encoding="utf-8")
+    second = runner.invoke(main, ["init", "--root"])
+    assert second.exit_code == 0
+    assert ".bounds/.gitignore" in _json(second)["skipped"]
+    assert gi.read_text(encoding="utf-8") == first_body  # unchanged, not duplicated
+
+
+def test_run_guard_converts_unexpected_exception_to_json_error(tmp_path, monkeypatch):
+    """A non-BoundsError raised in a command body becomes a generic JSON error (E_INTERNAL, exit 2), never a raw traceback."""
+    monkeypatch.chdir(tmp_path)
+    # Force an unexpected failure deep in a real command body (list -> load_all -> find_root).
+    from bounds import cli as cli_mod
+
+    def _boom(_start):
+        raise RuntimeError("secret stack detail that must not leak")
+
+    monkeypatch.setattr(cli_mod.manifest_loader, "find_root", _boom)
+    result = CliRunner().invoke(main, ["list"])
+    assert result.exit_code == 2
+    payload = _json(result)
+    assert payload["error"]["code"] == "E_INTERNAL"
+    assert "secret stack detail" not in result.output  # no traceback leak
+    assert payload["error"]["fix"]

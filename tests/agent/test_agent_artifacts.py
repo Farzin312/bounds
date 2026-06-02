@@ -28,7 +28,7 @@ def _frontmatter(text: str) -> dict:
 # Path each capable agent's targeted artifact must land at.
 _ARTIFACTS = {
     "claude": ".claude/skills/bounds/SKILL.md",
-    "codex": ".codex/skills/bounds/SKILL.md",
+    "codex": ".agents/skills/bounds/SKILL.md",
     "gemini": ".gemini/commands/bounds.toml",
     "opencode": ".opencode/commands/bounds.md",
     "copilot": ".github/prompts/bounds.prompt.md",
@@ -71,7 +71,7 @@ def test_skill_files_have_valid_autotrigger_frontmatter(tmp_path):
     """Claude/codex SKILL.md front-matter must name the skill 'bounds' and describe WHEN to use it (the auto-trigger matcher) — without it the skill never fires."""
     root = _mk_root(tmp_path)
     agentsync.run_agent(root, mode="sync", only={"claude", "codex"})
-    for rel in (".claude/skills/bounds/SKILL.md", ".codex/skills/bounds/SKILL.md"):
+    for rel in (".claude/skills/bounds/SKILL.md", ".agents/skills/bounds/SKILL.md"):
         fm = _frontmatter((root / rel).read_text(encoding="utf-8"))
         assert fm.get("name") == "bounds"
         # The description is the auto-trigger matcher — it must describe WHEN to use bounds.
@@ -160,7 +160,7 @@ def test_check_ignores_absent_optional_artifact(tmp_path):
     import shutil
     root = _mk_root(tmp_path)
     agentsync.run_agent(root, mode="sync", only={"codex"})
-    shutil.rmtree(root / ".codex")  # drop the optional native skill
+    shutil.rmtree(root / ".agents")  # drop the optional native skill (cross-tool .agents/skills/)
     result = agentsync.run_agent(root, mode="check")
     assert "codex" in result["configured"]
 

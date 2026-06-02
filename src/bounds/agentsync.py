@@ -512,10 +512,11 @@ _ARTIFACT_DESC = "Read this project's architecture via the Bounds CLI, not raw .
 # Per-agent native artifacts. Keys mirror AGENT_KEYS; an agent absent here (aider) gets only its
 # always-on pointer, since it has no committable command mechanism to target.
 _AGENT_ARTIFACTS: dict[str, tuple[_Artifact, ...]] = {
-    # Claude & Codex: auto-triggering skills (the description fires them). Tool-specific dirs so
-    # the two tools don't both load one shared copy.
+    # Claude & Codex: auto-triggering skills (the description fires them). Claude keeps its own
+    # `.claude/skills/`; Codex loads from the cross-tool open Agent Skills location
+    # `.agents/skills/` (the shared spec Codex/Cursor/Gemini/Copilot/VS Code adopted).
     "claude": (_Artifact(".claude/skills/bounds/SKILL.md", _MARKDOWN, _SKILL_BODY, _skill_front()),),
-    "codex": (_Artifact(".codex/skills/bounds/SKILL.md", _MARKDOWN, _SKILL_BODY, _skill_front()),),
+    "codex": (_Artifact(".agents/skills/bounds/SKILL.md", _MARKDOWN, _SKILL_BODY, _skill_front()),),
     # Gemini: TOML custom command -> /bounds.
     "gemini": (_Artifact(".gemini/commands/bounds.toml", _YAML, _GEMINI_TOML_BODY),),
     # OpenCode: Markdown custom command -> /bounds (project commands live in `.opencode/commands/`,

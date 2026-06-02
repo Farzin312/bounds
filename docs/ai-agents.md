@@ -162,7 +162,7 @@ in that tool's own format and location:
 | Agent | Native artifact | Kind | Argument syntax |
 |-------|-----------------|------|-----------------|
 | **Claude Code** | `.claude/skills/bounds/SKILL.md` (+ the `/bounds` dispatcher at `.claude/commands/bounds.md`) | Auto-triggering skill | — |
-| **Codex CLI** | `.codex/skills/bounds/SKILL.md` | Auto-triggering skill | — |
+| **Codex CLI** | `.agents/skills/bounds/SKILL.md` | Auto-triggering skill | — |
 | **Gemini** | `.gemini/commands/bounds.toml` | TOML custom command | `{{args}}` |
 | **OpenCode** | `.opencode/commands/bounds.md` | Markdown command | `$ARGUMENTS` |
 | **GitHub Copilot** | `.github/prompts/bounds.prompt.md` | Prompt file | `${input:…}` |

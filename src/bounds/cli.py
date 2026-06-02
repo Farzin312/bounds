@@ -125,6 +125,22 @@ def _run(human: bool, fn, ci: bool = False):
     except errors.BoundsError as err:
         output.emit(err.to_dict(), human, ci=ci)
         sys.exit(config.EXIT_FATAL)
+    except SystemExit:
+        # A command body may legitimately call sys.exit (e.g. non-zero from validate);
+        # let it propagate untouched rather than masking it as an internal error.
+        raise
+    except Exception:  # noqa: BLE001 - top-level guard: never leak a raw traceback to an agent
+        # Any unexpected, non-BoundsError failure becomes a generic fatal error object so the
+        # JSON-first contract holds (one {"error":{...}} object, exit 2) instead of a Python
+        # traceback. The message is intentionally generic — no stack trace in the payload.
+        err = errors.BoundsError(
+            errors.E_INTERNAL,
+            "an unexpected internal error occurred",
+            fix="re-run with -H/--human for more context, or file an issue at "
+            "https://github.com/Farzin312/bounds/issues",
+        )
+        output.emit(err.to_dict(), human, ci=ci)
+        sys.exit(config.EXIT_FATAL)
 
 
 def _interactive_human(explicit_human: bool) -> bool:
@@ -612,6 +628,15 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
                 "--namespace requires --subsystem",
                 fix="pass --subsystem <name> together with --namespace <ns>",
             )
+        # Guard before any path is built: a subsystem name is interpolated into
+        # `<MANIFESTS_DIR>/<name>.yaml`, so an unvalidated name like `../../tmp/x` would
+        # write OUTSIDE .bounds/. relative_to() is lexical and would NOT catch it.
+        if subsystem and not config.is_valid_subsystem_name(subsystem):
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                f"invalid subsystem name {subsystem!r}",
+                fix="use only letters, digits, '-' and '_'",
+            )
         existing = manifest_loader.find_root(Path.cwd())
         project = existing or Path.cwd()
         bounds_dir = project / config.BOUNDS_DIR
@@ -630,6 +655,13 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
                     encoding="utf-8",
                 )
                 created.append(rel)
+            # Gitignore the regenerable, binary cache (.bounds/README claims it's gitignored).
+            # Idempotent: report created vs already-present like root.yaml does.
+            gitignore_rel = (bounds_dir / config.GITIGNORE_FILE).relative_to(project).as_posix()
+            if config.ensure_bounds_gitignore(bounds_dir):
+                created.append(gitignore_rel)
+            else:
+                skipped.append(gitignore_rel)
 
         result: dict = {"created": created, "skipped": skipped}
 

@@ -181,6 +181,24 @@ def test_engine_quick_detects_dirty_and_propagates(py_project, git_init):
     assert report.ok is True  # quick mode never blocks
 
 
+def test_engine_quick_deleted_provider_marks_consumer_stale(py_project, git_init):
+    """--quick: deleting a provider's only source file must still mark its subsystem dirty so the
+    cross_impact check warns the consumer (E_STALE_INTERFACE). The deleted file leaves no on-disk
+    owner, so the cached FileRecord.subsystem is the only source of the owning subsystem."""
+    git_init(py_project)
+    engine.run(py_project, mode="full")  # warm the cache (not a cold run)
+    # Delete the core `models` subsystem's only provider file on disk.
+    (py_project / "src" / "models" / "thing.py").unlink()
+
+    report = engine.run(py_project, mode="quick")
+    assert "models" in report.stats["dirty"]  # the pruned provider's cached owner
+    assert "svc" in report.stats["propagated"]  # core criticality propagates to its consumer
+    stale = [i for i in report.issues if i.code == errors.E_STALE_INTERFACE]
+    assert any(i.subsystem == "svc" for i in stale), report.stats
+    assert all(i.severity == "warning" for i in stale)  # quick mode downgrades to advisory
+    assert report.ok is True  # quick mode never blocks
+
+
 def test_engine_enforce_gates_blocking(py_project):
     """enforce drives gating: with drift present, enforce=off reports stale but ok; enforce=on blocks with an E_STRUCTURAL_DRIFT error."""
     # Introduce drift: manifest declares Thing, but the source no longer exports it.

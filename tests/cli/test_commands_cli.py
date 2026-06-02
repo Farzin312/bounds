@@ -78,6 +78,17 @@ def test_impact_unknown_subsystem_is_fatal(monkeypatch, py_project):
     assert "E_SUBSYSTEM_NOT_FOUND" in res.output
 
 
+def test_impact_human_surfaces_note_criticality_basis(monkeypatch, py_project):
+    """impact --human re-renders the same data the JSON carries: the note, criticality, and basis are no longer dropped (JSON-first parity)."""
+    data = json.loads(_invoke(monkeypatch, py_project, ["impact", "models"]).output)
+    human = _invoke(monkeypatch, py_project, ["impact", "models", "--human"]).output
+    # Every honesty field present in the JSON appears in the human render.
+    assert data["criticality"] in human          # e.g. "core"
+    assert data["basis"] in human                 # "declared-consumes"
+    assert "lower bound" in human                 # the note's guidance
+    assert "--verify" in human                    # the note tells you how to cross-check
+
+
 def test_schema_describe_impact_and_column_contract(monkeypatch, tmp_path):
     """End-to-end SQL contract: describe verifies a table's sorted columns from migrations, impact tracks its consumers, and dropping a consumed column drifts as E_CONTRACT_MISSING_EXPORT."""
     _write_schema_project(tmp_path)

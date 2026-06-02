@@ -6,6 +6,7 @@ on it without risking an import cycle.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -18,10 +19,33 @@ SUBSYS_FILE = "bounds.yaml"
 MANIFESTS_DIR = "manifests"
 CACHE_FILE = "cache.db"  # binary SQLite extraction cache (context armor)
 STATE_FILE = "state.json"  # legacy JSON cache; read once for auto-migration to cache.db
+GITIGNORE_FILE = ".gitignore"  # written under .bounds/ to keep the regenerable cache uncommitted
+
+# The .bounds/.gitignore body. Lists only the REGENERABLE, binary, context-armor cache artifacts —
+# never the manifests or root.yaml, which are human-authored and MUST stay committed. Kept here as
+# the single template both `init --root` and `discover --apply` write, so they can't drift.
+GITIGNORE_TEMPLATE = """# Bounds cache artifacts — regenerable, binary (context armor), machine-only.
+# Do NOT commit these; manifests and root.yaml ARE committed.
+cache.db
+cache.db-journal
+state.json
+"""
 # Committed drift baseline for `calibrate --check`: the set of manifest-vs-source
 # discrepancies that already exist on the main branch. The check flags only NEW drift
 # above this baseline, so a PR is never blocked by pre-existing rot it didn't introduce.
 DRIFT_BASELINE_FILE = "drift-baseline.json"
+
+# A subsystem name is a single path segment used to build `<MANIFESTS_DIR>/<name>.yaml`. Only
+# letters, digits, '-' and '_' are allowed so a name can never traverse out of the manifests dir
+# (e.g. `../../tmp/x`) or carry a path separator. The single source both cli.init and the loader
+# validate against, so a write path and a read path can never disagree on what's safe.
+SUBSYSTEM_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def is_valid_subsystem_name(name: str) -> bool:
+    """True when ``name`` is a safe single-segment subsystem name (no traversal/separators)."""
+    return bool(SUBSYSTEM_NAME_RE.match(name))
+
 
 # ---- Schema / versioning ----
 SCHEMA_VERSION = "1"
@@ -181,3 +205,18 @@ def uses_legacy_layout(project_root) -> bool:
     """True when ``project_root`` is being read from the legacy ``.compact/`` directory."""
     root = Path(project_root)
     return not (root / BOUNDS_DIR).is_dir() and (root / LEGACY_DIR).is_dir()
+
+
+def ensure_bounds_gitignore(bounds_dir) -> bool:
+    """Idempotently write ``<bounds_dir>/.gitignore`` with the regenerable-cache entries.
+
+    Returns ``True`` if the file was created, ``False`` if it already existed (left untouched).
+    The single seam both ``init --root`` and ``discover --apply`` use so the .bounds/ cache
+    (binary, regenerable) is never accidentally committed and the two paths can't diverge.
+    """
+    path = Path(bounds_dir) / GITIGNORE_FILE
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(GITIGNORE_TEMPLATE, encoding="utf-8")
+    return True

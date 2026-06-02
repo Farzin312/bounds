@@ -45,6 +45,12 @@ E_MANIFEST_NOT_FOUND = "E_MANIFEST_NOT_FOUND"
 E_MANIFEST_PARSE_ERROR = "E_MANIFEST_PARSE_ERROR"
 E_SUBSYSTEM_NOT_FOUND = "E_SUBSYSTEM_NOT_FOUND"
 E_USAGE = "E_USAGE"
+# Catch-all for an unexpected (non-BoundsError) exception that escaped a command body. The
+# top-level guard in cli._run converts it to this code so an agent always sees a structured
+# {"error":{...}} object (exit 2) instead of a raw Python traceback leaking into stdout/stderr.
+# The message stays generic on purpose (no stack trace in JSON); the fix points at re-running
+# with more context or filing an issue.
+E_INTERNAL = "E_INTERNAL"
 
 # Severity lookup for emitted Issue codes (advisory; engine may override per context).
 SEVERITY = {
