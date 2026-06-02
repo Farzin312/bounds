@@ -18,15 +18,43 @@
 > Token counts are tokenizer-specific. State the tokenizer. No hardware specs —
 > hardware is not a variable for token / retrieval / correctness metrics.
 
-## 1. Token economics (headline)
+## 1. Mapping coverage + token economics (headline)
 
-Paste the table emitted by `make benchmark` (`python benchmarks/run.py`):
+`make benchmark` (`python benchmarks/run.py`) emits **both** sections below in
+one block. Paste the whole thing here, including the tokenizer line:
 
 ```
-<paste the full markdown output here, including the tokenizer line>
+<paste the full markdown output here — the `## Mapping coverage` section AND the
+`## Token economics` table, including the tokenizer line>
 ```
+
+### Mapping coverage
+
+How much of the repo's library source Bounds actually mapped — the authoritative
+`bounds validate` metric (`stats.coverage.mapping`). Fill in from the block above:
+
+| Field | Value |
+|-------|-------|
+| Mapped source (`mapped_pct`) | **<NN.N>%** (`<files_mapped>` / `<files_source_total>` non-test source files) |
+| Unmapped (unowned-supported) | <N> (Bounds has an adapter, just not in a manifest — fixable) |
+| Unmapped (unsupported-language) | <N> (no adapter for that language yet) |
+| Unmapped by language | <e.g. go: 12, rust: 4> |
+| Tests linkage | <linked> linked / <unlinked> unlinked (of <total>) |
+| Docs linkage | <linked> linked / <unlinked> unlinked (of <total>) |
+
+> Coverage is **3-way per source file**: mapped / unowned-supported /
+> unsupported-language. There is **no "partial" file tier** — partial extraction
+> is a separate signal (`extraction_failures`), reported on its own. Tests are
+> excluded from the source denominator and tracked in their own bucket.
+
+### Token economics
 
 Aggregate reduction: **<NN>%** of source-equivalent tokens.
+
+> Be honest about framing: the whole-map `bounds list` figure is the
+> *cheap-orientation* bound (rarely what an agent actually does). The repeatable
+> win is **targeted retrieval** (`describe`/`impact`) vs reading the source. Cite
+> the **range** (typically ~84–99% on this repo), not one flat %.
 
 ## 2. Retrieval scaling observation
 

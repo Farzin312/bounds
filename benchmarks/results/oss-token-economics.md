@@ -1,9 +1,13 @@
 # OSS token-economics + capability head-to-head
 
-> **Superseded (2026-06-01).** This is the original two-repo run using the `~4 chars/token`
-> *estimate*. It is kept for history. The current, larger run — **16 repos across Python/TS/JS with
-> exact `tiktoken cl100k_base` counts, full-command coverage, and the bugs it surfaced** — is
-> [`oss-cross-language.md`](oss-cross-language.md). Cite that one.
+> **ARCHIVED / SUPERSEDED (2026-06-01).** This is the original two-repo run using the `~4
+> chars/token` *estimate*, produced by `benchmarks/oss_run.py` — a harness that **no longer exists**
+> (it was fully subsumed by `benchmarks/oss_bench.py` + `benchmarks/oss_features.py`, orchestrated
+> by `benchmarks/oss_report.py` / `make oss-bench`). The numbers below are kept **for history
+> only**; do not cite them. The current, larger run — **16 repos across Python/TS/JS with exact
+> `tiktoken cl100k_base` counts, full-command coverage, and the bugs it surfaced** — is
+> [`oss-cross-language.md`](oss-cross-language.md). To regenerate fresh OSS numbers, clone a repo
+> and run `make oss-bench REPO=<clone>`.
 
 Cross-repo run of the deterministic harness (`benchmarks/oss_run.py`) on real, third-party
 open-source projects — so the headline numbers aren't measured only on Bounds itself — plus a
@@ -15,8 +19,10 @@ and at what token cost, with Bounds vs without).
   cl100k numbers.
 - **Bounds version:** the `agent-plugins-aliases-benchmark` branch (post dotted-filename +
   tsconfig-alias resolver fixes).
-- **Reproduce:** `python benchmarks/oss_run.py` (clones each cited repo, runs `bounds discover`,
-  measures). Numbers below are from the cited commits.
+- **Reproduce (current tooling):** the `oss_run.py` harness that produced this is gone. Re-clone a
+  cited repo and run `make oss-bench REPO=<clone>` (or `python benchmarks/oss_report.py --repo
+  <clone>`) for the equivalent — now with mapping coverage included. Numbers below are from the
+  cited commits, under the old estimate tokenizer.
 
 ## 1. Token economics (deterministic)
 
