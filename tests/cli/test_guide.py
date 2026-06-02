@@ -154,3 +154,24 @@ def test_guide_sdd_empty_phase_list_is_respected(tmp_path):
     payload = guide.run_guide(tmp_path)
     assert payload["sdd"]["phases"] == []
     assert payload["sdd"]["steps"] == []
+
+
+def test_guide_sdd_null_phases_defaults_to_all_phases(tmp_path):
+    """A blank YAML phases value normalizes to the default phase list instead of crashing."""
+    cfg = tmp_path / ".bounds"
+    cfg.mkdir()
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: sdd\nsdd:\n  enabled: true\n  phases:\n',
+        encoding="utf-8",
+    )
+
+    payload = guide.run_guide(tmp_path)
+    assert payload["sdd"]["phases"] == [
+        "specify",
+        "clarify",
+        "plan",
+        "tasks",
+        "analyze",
+        "implement",
+        "verify",
+    ]

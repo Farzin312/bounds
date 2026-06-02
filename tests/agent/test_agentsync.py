@@ -100,6 +100,22 @@ def test_sync_adds_sdd_phase_contract_when_enabled(tmp_path):
     assert check["configured"] == ["codex"]
 
 
+def test_sync_defaults_null_sdd_phases(tmp_path):
+    """A blank YAML phases value should use the canonical phase list, not crash during sync/check."""
+    root = _mk_root(tmp_path)
+    (root / ".bounds" / "root.yaml").write_text(
+        'version: "1"\nproject: x\nsdd:\n'
+        "  enabled: true\n  agent: codex\n  phases:\n",
+        encoding="utf-8",
+    )
+
+    agentsync.run_agent(root, mode="sync", only={"codex"})
+    body = (root / "AGENTS.md").read_text(encoding="utf-8")
+    assert "**specify**" in body and "**verify**" in body
+    check = agentsync.run_agent(root, mode="check", only={"codex"})
+    assert check["ok"] is True
+
+
 def test_every_generated_block_is_marked_and_stamped(tmp_path):
     """Every synced file carries BOUNDS markers + a version/hash stamp (not the literal version
     — we assert structure, since the version string is volatile)."""

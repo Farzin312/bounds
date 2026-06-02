@@ -223,6 +223,20 @@ def _schema_version() -> int:
         return 0
 
 
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    """Create or migrate the SQLite cache table to the current writable schema.
+
+    ``CREATE TABLE IF NOT EXISTS`` deliberately preserves existing caches, so a user upgrading
+    from v3 has a valid SQLite table without the v4 ``generated`` column. We must add that column
+    before save_state inserts v4 rows; otherwise the cache becomes permanently cold because writes
+    target a column the preserved table lacks.
+    """
+    conn.executescript(_SCHEMA)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(cache)").fetchall()}
+    if "generated" not in columns:
+        conn.execute("ALTER TABLE cache ADD COLUMN generated INTEGER NOT NULL DEFAULT 0")
+
+
 def _load_sqlite(db_path: Path) -> State:
     try:
         conn = sqlite3.connect(db_path)
@@ -287,7 +301,7 @@ def save_state(project_root: Path, state: State) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
-        conn.executescript(_SCHEMA)
+        _ensure_schema(conn)
         conn.execute(f"PRAGMA user_version = {_schema_version()}")
         with conn:  # transaction: commit on success, rollback on error
             conn.execute("DELETE FROM cache")

@@ -320,7 +320,9 @@ def _sdd_config(root: Path | None) -> dict:
     agent = str(raw.get("agent") or "generic")
     if agent not in config.SDD_AGENTS:
         agent = "generic"
-    requested = raw.get("phases", config.SDD_PHASES)
+    requested = raw.get("phases")
+    if requested is None:
+        requested = config.SDD_PHASES
     phases = [p for p in config.SDD_PHASES if p in set(requested)]
     return {"enabled": enabled, "agent": agent, "phases": phases}
 

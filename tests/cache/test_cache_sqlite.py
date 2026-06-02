@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 from bounds import config
 from bounds.cache import store
@@ -71,6 +72,41 @@ def test_roundtrip_preserves_generated_flag(tmp_path):
 
     partial = store.load_subsystem_records(tmp_path, "auth")
     assert [r.generated for r in partial] == [True]
+
+
+def test_save_state_migrates_v3_sqlite_schema_before_generated_insert(tmp_path):
+    """A v3 cache.db without the generated column must be ALTERed before v4 inserts, or upgrades leave the cache unwritable."""
+    _init_bounds(tmp_path)
+    db = tmp_path / config.BOUNDS_DIR / config.CACHE_FILE
+    conn = sqlite3.connect(db)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE cache (
+                path TEXT PRIMARY KEY,
+                subsystem TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL,
+                structure_hash TEXT NOT NULL,
+                language TEXT NOT NULL,
+                symbols TEXT,
+                imports TEXT,
+                updated_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX idx_cache_subsystem ON cache(subsystem);
+            PRAGMA user_version = 3;
+            """
+        )
+    finally:
+        conn.close()
+
+    state = store.State()
+    state.put(_result("src/auth/generated.py", generated=True), subsystem="auth")
+    store.save_state(tmp_path, state)
+
+    loaded = store.load_state(tmp_path)
+    rec = loaded.get("src/auth/generated.py")
+    assert rec is not None
+    assert rec.generated is True
 
 
 def test_partial_read_by_subsystem(tmp_path):
