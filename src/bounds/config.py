@@ -47,6 +47,12 @@ GITIGNORE_APPEND_HEADER = "# Added by Bounds — regenerable cache artifacts"
 # above this baseline, so a PR is never blocked by pre-existing rot it didn't introduce.
 DRIFT_BASELINE_FILE = "drift-baseline.json"
 
+# Committed snapshot of each subsystem's UNSUPPORTED-language source (per-file content hash), written
+# by `calibrate --dump-baseline`. `validate` compares the live files against it and emits
+# E_UNSUPPORTED_SURFACE_STALE when one changed since the hand-authored exposes were confirmed.
+# Committed (unlike the gitignored cache.db) so the signal survives a fresh clone and works in CI.
+SURFACE_BASELINE_FILE = "surface-baseline.json"
+
 # A subsystem name is a single path segment used to build `<MANIFESTS_DIR>/<name>.yaml`. Only
 # letters, digits, '-' and '_' are allowed so a name can never traverse out of the manifests dir
 # (e.g. `../../tmp/x`) or carry a path separator. The single source both cli.init and the loader
@@ -117,6 +123,7 @@ __all__ = [
     "STATE_VERSION",
     "SUBSYS_DIR",
     "SUBSYS_FILE",
+    "SURFACE_BASELINE_FILE",
     "UPGRADE_INSTALL_CMD",
     "VALID_CRITICALITY",
     "VALID_ENFORCE",

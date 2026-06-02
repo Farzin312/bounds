@@ -11,7 +11,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .. import config, errors, gitutil
+from .. import config, errors, gitutil, surface
 from ..cache import store as cache_store
 from ..extract import content_hash, get_adapter, supported_extensions, scan
 from ..ignore import IgnoreMatcher, has_generated_marker, load_matcher
@@ -300,6 +300,24 @@ def run(
         if scan.coverage_has_gap(mapping):
             issues.append(_coverage_gap_issue(mapping, project_root, subsystems))
 
+        # Unsupported-language surface staleness (off --quick): a hand-authored expose for a file
+        # Bounds can't parse has no extraction to verify against, so the deterministic signal that it
+        # may be outdated is "the file changed since it was confirmed". Compare the live unsupported
+        # surface to the COMMITTED baseline (.bounds/surface-baseline.json, written by
+        # `calibrate --dump-baseline`); absent baseline ⇒ no signal (opt-in, like the drift baseline).
+        baseline = surface.load_baseline(project_root)
+        if baseline and subsystems:
+            # The baseline is always dumped gitignore-filtered (calibrate's default); validate passes
+            # its own flag. A `--include-gitignored` run makes `current_surface` a SUPERSET of the
+            # baseline, never a subset — and `stale_subsystems` ignores additions (only changed/removed
+            # baseline files are stale), so the asymmetry can't produce a spurious signal. Don't
+            # "fix" it by forcing the flag here.
+            current_surface = scan.unsupported_surface_files(
+                project_root, subsystems, matcher, repo=repo, include_gitignored=include_gitignored
+            )
+            for name, changed in surface.stale_subsystems(baseline, current_surface).items():
+                issues.append(_surface_stale_issue(name, changed))
+
     status = _status(issues)
     unowned_blocks = any(i.severity == "error" for i in unowned)
     blocking = _is_blocking(issues, mode, final_enforce) or unowned_blocks
@@ -337,6 +355,30 @@ def run(
 # ===========================================================================
 # Helpers
 # ===========================================================================
+_SURFACE_SAMPLE_CAP = 5  # token-lean: name at most this many changed files, then "+N more"
+
+
+def _surface_stale_issue(subsystem: str, changed: list[str]) -> Issue:
+    """Advisory warning: a subsystem's UNSUPPORTED-language source changed since its hand-authored
+    ``exposes`` were confirmed, so the surface may be outdated (Bounds has no adapter to verify it).
+    Names a capped sample of the changed/removed files and tells the agent to re-verify, then
+    re-confirm — the deterministic "re-run" trigger, no LLM."""
+    n = len(changed)
+    sample = ", ".join(changed[:_SURFACE_SAMPLE_CAP])
+    if n > _SURFACE_SAMPLE_CAP:
+        sample += f", +{n - _SURFACE_SAMPLE_CAP} more"
+    return Issue(
+        errors.E_UNSUPPORTED_SURFACE_STALE,
+        "warning",
+        f"subsystem '{subsystem}': {n} unsupported-language file(s) changed since its exposes "
+        f"were confirmed ({sample})",
+        subsystem=subsystem,
+        count=n,
+        fix=f"re-verify {subsystem}.exposes against the changed file(s), then "
+        "`bounds calibrate --dump-baseline` to re-confirm",
+    )
+
+
 def _sample_manifest_path(project_root: Path, subsystems: dict) -> str | None:
     """A concrete existing manifest an agent can copy as a template (alphabetically first), or None."""
     for name in sorted(subsystems or {}):

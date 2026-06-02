@@ -842,6 +842,7 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_USAGE` | fatal | invalid command invocation (bad/mutually-exclusive flags, nothing to do, invalid subsystem name) |
 | `E_INTERNAL` | fatal | an unexpected (non-`BoundsError`) exception escaped a command body; the top-level guard converts it to a generic `{"error":{code,message,fix}}` (no traceback leaked) instead of crashing |
 | `E_UNSUPPORTED_LANGUAGE` | warning | file extension has no adapter (skipped) |
+| `E_UNSUPPORTED_SURFACE_STALE` | warning | a subsystem's unsupported-language source file changed since its hand-authored `exposes` were confirmed in `.bounds/surface-baseline.json` (`calibrate --dump-baseline`); the deterministic "re-verify your exposes" signal. Off the `--quick` path; opt-in (no baseline ⇒ no signal) |
 | `E_EXTRACTION_FAILED` | warning | could not extract a file — tree-sitter parse error, unreadable, or over `MAX_FILE_BYTES`. An OWNED file is never silently dropped; it always emits this. |
 | `E_ADAPTER_CONTRACT` | warning | adapter output violated its declared self-consistency contract — a Prisma relation field leaked as a column, or an all-unparsable SQL migration with a revision header that masked the failure. Advisory only (never blocks). |
 

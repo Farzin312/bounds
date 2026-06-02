@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 from .. import config, errors
 from ..ignore import IgnoreMatcher, has_generated_marker
 from ..models import ExtractResult, Issue, SubsystemCompact
-from . import get_adapter, supported_extensions
+from . import content_hash, get_adapter, supported_extensions
 
 __all__ = [
     "extract_file",
@@ -262,7 +262,7 @@ def path_specificity(rel: str, paths, files=None) -> int:
 def resolve_owners(
     project_root: Path,
     subsystems: dict[str, SubsystemCompact],
-    exts: set[str],
+    exts: set[str] | None,
     matcher: IgnoreMatcher | None = None,
     repo: Path | None = None,
     include_gitignored: bool = False,
@@ -274,6 +274,10 @@ def resolve_owners(
     sub-package keeps its own code instead of the alphabetically-first parent swallowing it (which
     used to starve the child and report false structural drift). Ties in specificity break to the
     sorted-first subsystem name for determinism.
+
+    ``exts`` is the extension allow-set (e.g. :func:`supported_extensions`); pass ``None`` to include
+    **every** extension (the :func:`iter_subsystem_files` convention) — used by coverage's declared/
+    dark split and :func:`unsupported_surface_files`, which must see unsupported-language files too.
 
     Optionally **ignore-aware**: pass ``matcher`` (``.boundsignore``) and/or ``repo`` (the git root,
     for ``.gitignore``) to drop files the validation engine would skip, so a caller like ``describe``
@@ -622,6 +626,40 @@ def subsystems_with_unsupported_source(
             out.add(name)
             break  # one unsupported-source file is enough to mark the subsystem
     return out
+
+
+def unsupported_surface_files(
+    project_root: Path,
+    subsystems: dict[str, "SubsystemCompact"],
+    matcher: IgnoreMatcher | None = None,
+    repo: Path | None = None,
+    include_gitignored: bool = False,
+) -> dict[str, dict[str, str]]:
+    """``{subsystem: {rel-posix: content_hash}}`` for each owned UNSUPPORTED-language source file.
+
+    The basis for staleness detection of hand-authored ``exposes`` (:data:`errors.E_UNSUPPORTED_SURFACE_STALE`):
+    Bounds has no adapter for these files, so the only deterministic evidence that a declared surface
+    may be outdated is "the file changed". Reuses :func:`resolve_owners` (most-specific owner wins,
+    ignore/gitignore-aware) so ownership matches validate/calibrate, then hashes each owned file whose
+    extension is a known source language with no adapter. Unlike
+    :func:`subsystems_with_unsupported_source` this **reads file bytes** (to hash), so it is off the
+    ``--quick`` budget — callers gate it. Oversized/unreadable files are skipped; test files excluded.
+    Deterministic: per-subsystem maps are sorted by path.
+    """
+    supported = supported_extensions()
+    owners = resolve_owners(project_root, subsystems, None, matcher, repo, include_gitignored)
+    out: dict[str, dict[str, str]] = {}
+    for rel, (owner, abs_path) in owners.items():
+        ext = abs_path.suffix
+        if ext in supported or ext not in config.KNOWN_SOURCE_EXTS:
+            continue  # supported (verifiable elsewhere) or not source code at all
+        if is_test_file(rel):
+            continue  # a test in an unsupported language is not the public surface exposes describes
+        source, _ = read_source_bytes(abs_path)
+        if source is None:
+            continue  # oversized/unreadable — nothing to hash
+        out.setdefault(owner, {})[rel] = content_hash(source)
+    return {name: dict(sorted(files.items())) for name, files in sorted(out.items())}
 
 
 _COVERAGE_SAMPLE_CAP = 10  # token-lean: coverage buckets preview at most this many sorted paths

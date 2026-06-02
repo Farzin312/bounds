@@ -31,9 +31,9 @@ from pathlib import Path
 
 import yaml
 
-from . import config, errors
+from . import config, errors, gitutil, surface
 from . import tsconfig
-from .extract.scan import extract_project, subsystems_with_unsupported_source
+from .extract.scan import extract_project, subsystems_with_unsupported_source, unsupported_surface_files
 from .ignore import load_matcher
 from .manifest import loader as manifest_loader
 from .validate.checks import index_extracts, resolve_import
@@ -282,12 +282,29 @@ def dump_baseline(project_root: Path, *, subsystem: str | None = None) -> dict:
         json.dumps({"version": 1, "drift": keys}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    return {
+    result = {
         "mode": "calibrate-baseline",
         "baseline": path.relative_to(project_root).as_posix(),
         "drift_count": len(keys),
         "note": f"wrote drift baseline with {len(keys)} existing item(s) — commit it so CI compares against this",
     }
+    # Also snapshot each subsystem's UNSUPPORTED-language surface (per-file content hash) so `validate`
+    # can later flag E_UNSUPPORTED_SURFACE_STALE when a hand-authored expose's file changes. Whole-repo
+    # (the surface baseline is holistic) and gitignore-aware to match validate; written only when there
+    # IS unsupported source, so pure-supported repos get no extra committed file.
+    _, subs, _ = manifest_loader.load_all(project_root)
+    repo = gitutil.repo_root(project_root) or project_root
+    surfaces = unsupported_surface_files(project_root, subs, load_matcher(project_root), repo=repo)
+    if surfaces:
+        spath = surface.write_baseline(project_root, surfaces)
+        n_files = sum(len(f) for f in surfaces.values())
+        result["surface_baseline"] = spath.relative_to(project_root).as_posix()
+        result["surface_files"] = n_files
+        result["note"] += (
+            f"; recorded {n_files} unsupported-language file hash(es) across "
+            f"{len(surfaces)} subsystem(s) for staleness detection"
+        )
+    return result
 
 
 def check_drift(project_root: Path, *, subsystem: str | None = None) -> dict:

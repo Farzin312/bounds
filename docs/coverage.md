@@ -76,6 +76,28 @@ a declared expose is gone, so it treats such exposes as **unverifiable, never st
 unsupported-language manifest. A **pure supported-language** subsystem is unaffected: a genuinely
 stale expose there is still proposed for removal and still flags drift.
 
+### Keeping a hand-authored surface honest as the repo grows
+
+"Never auto-stripped" cuts both ways: if the unsupported file later changes (a renamed/removed shell
+function), nothing *extracted* exists to prove the hand-authored `exposes` is now wrong. Bounds closes
+that lifecycle hole **deterministically, no LLM** — by content hash, not by parsing:
+
+1. **Confirm** the surface once with `bounds calibrate --dump-baseline`. Alongside the drift baseline
+   it writes a committed `.bounds/surface-baseline.json` — a per-file content hash of every
+   unsupported-language file your manifests own. (Committed, unlike the gitignored `cache.db`, so the
+   signal works in CI and on a fresh clone. Pure-supported repos get no such file.)
+2. **Edit** happens over time — someone changes `deploy.sh`.
+3. **`bounds validate`** (full / `preflight`, off the `--quick` path) compares the live files to that
+   baseline and emits a non-blocking **`E_UNSUPPORTED_SURFACE_STALE`** warning naming the changed
+   subsystem + file: *"re-verify `scripts.exposes` against the changed file(s)."* This is the precise
+   moment an agent (or human) should re-read the file and patch the `exposes`.
+4. **Re-confirm** with `bounds calibrate --dump-baseline` once the exposes match again; the warning
+   clears. New unsupported files that appear are a *coverage* concern (`dark`), not staleness, so
+   additions never trigger it — only a changed or removed confirmed file does.
+
+So as a repo using Bounds grows, the hand-authored part of the map can't silently rot: Bounds tells
+you exactly when to re-run the AI (or edit by hand) to patch it.
+
 ### Compiled languages (Go, Rust, Java, …)
 
 Compiled-language repos are first-class for **mapping**, even without an adapter:
