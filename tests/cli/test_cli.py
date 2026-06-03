@@ -325,6 +325,34 @@ def test_overview_health_clean_when_no_drift(py_project, monkeypatch):
     assert health["ok"] is True
     assert health["validation"]["ok"] is True
     assert "bounds list" in health["validation"]["next_steps"][0]
+    # A well-formed project (fixture now carries descriptions) reports full description coverage
+    # and does NOT raise the concept-discovery nudge.
+    described = health["validation"]["described"]
+    assert described == {"with_description": 2, "total": 2, "pct": 100.0}
+    assert not any("Add subsystem descriptions" in s for s in health["validation"]["next_steps"])
+
+
+def test_overview_flags_empty_descriptions(tmp_path, monkeypatch):
+    """Empty descriptions silently break concept discovery — overview must measure + nudge to fill them."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: blank\nlanguages: [python]\nsubsystems: [app]\n',
+        encoding="utf-8",
+    )
+    (cfg / "manifests" / "app.yaml").write_text(  # no description: line
+        "name: app\nrole: library\ncriticality: core\npaths: [app]\n"
+        "exposes:\n  - { name: run, kind: function }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["overview"])
+    assert result.exit_code == 0
+    v = _json(result)["health"]["validation"]
+    assert v["described"] == {"with_description": 0, "total": 1, "pct": 0.0}
+    assert any("Add subsystem descriptions" in s for s in v["next_steps"])
 
 
 def test_overview_guides_partial_mapping_to_coverage_fix(tmp_path, monkeypatch):

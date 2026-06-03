@@ -82,6 +82,13 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 5. On an `E_COVERAGE_GAP`, follow the issue `fix`: add supported files to a manifest's `paths:` (deterministic); for an unsupported language (no adapter yet), author a manifest with a hand-written `exposes:` — durable, calibrate/validate keep it (never stripped or flagged as drift).
 6. `bounds validate --quick` after edits; fix drift before broadening context.
 
+### When a lookup misses (don't fall back to grep)
+A `bounds where <symbol>` that returns `count: 0` is NOT "bounds has nothing" — it usually means the name is a *sub-symbol* (a field, route, or key inside a larger exported object) or internal. The 0-result payload carries a `suggestions` block; follow it instead of grepping:
+- `suggestions.did_you_mean` — symbols whose name contains your query; run the `try` command.
+- `suggestions.subsystems` — subsystems whose name or description mentions your query; run `bounds describe <name>` to read the surface and find the concept in context (this is how you locate a route/field that lives inside one umbrella export).
+- `suggestions.broaden` — retry with `--prefix` for a wider match.
+A `bounds impact` miss likewise returns a `fix` with "did you mean" subsystems and a `bounds where <name>` hint when you passed a symbol where a subsystem was expected. The lookup chain is **symbol → owning-subsystem surface → file**, not "symbol or bust".
+
 ### Enforcement (CI is the hard gate, not agent goodwill)
 - After manifests exist, wire the gate once: `bounds ci --install --github` (or `--gitlab`) generates the CI config that runs `bounds preflight --ci` on every PR. This — not agent compliance — is the hard enforcement of the contract.
 - An **intentional** surface change is not drift to fight: update the manifest, then re-baseline with `bounds calibrate --dump-baseline` and commit `.bounds/drift-baseline.json`. `bounds calibrate --check` then fails only on NEW drift above that baseline.

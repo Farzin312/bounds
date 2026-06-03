@@ -36,7 +36,11 @@ def run_impact(project_root: Path, name: str, verify: bool = False, include_raw:
             if include_raw:
                 _attach_heuristic_consumers(project_root, subs, name, table_payload)
             return table_payload
-        raise errors.BoundsError(errors.E_SUBSYSTEM_NOT_FOUND, f"subsystem or interface '{name}' not found", fix=f"known subsystems: {sorted(subs)}")
+        raise errors.BoundsError(
+            errors.E_SUBSYSTEM_NOT_FOUND,
+            f"subsystem or interface '{name}' not found",
+            fix=_impact_not_found_fix(subs, name),
+        )
     direct = propagation.build_consumer_index(subs).get(name, [])
     transitive = propagation.transitive_consumers(name, subs)
     consumers = [
@@ -66,6 +70,27 @@ def run_impact(project_root: Path, name: str, verify: bool = False, include_raw:
     if include_raw:
         _attach_heuristic_consumers(project_root, subs, name, payload)
     return payload
+
+
+def _impact_not_found_fix(subs: dict, name: str) -> str:
+    """Build the ``E_SUBSYSTEM_NOT_FOUND`` fix: a fuzzy "did you mean" + a cross-command hint.
+
+    The old fix blindly dumped every subsystem name. Instead: if any subsystem name *contains* the
+    query, lead with those candidates; otherwise list them all. Then always point at the most common
+    cause of this miss — passing a *symbol* where a *subsystem* is expected — by suggesting
+    ``bounds where <name>`` to find the owning subsystem first. Manifest-only (no extraction), so the
+    miss path stays cheap. Returns a single string (the ``fix`` contract is a plain string).
+    """
+    q = name.lower()
+    near = [s for s in sorted(subs) if q in s.lower()]
+    lead = (
+        f"did you mean: {', '.join(near[:6])}?" if near
+        else f"known subsystems: {', '.join(sorted(subs))}"
+    )
+    return (
+        f"{lead}  ·  if '{name}' is a symbol (not a subsystem), run `bounds where {name}` to find "
+        "its owning subsystem, then `bounds impact <owner>`  ·  `bounds list` shows all subsystems"
+    )
 
 
 def _attach_heuristic_consumers(project_root: Path, subs: dict, table: str, payload: dict) -> None:
@@ -175,12 +200,84 @@ def run_where(project_root: Path, query: str, prefix: bool = False) -> dict:
                     "exposed": sym.name in declared,
                 })
     results.sort(key=lambda r: (r["file"], r["symbol"], r["line"], r["kind"]))
-    return {
+    payload = {
         "symbol": query,
         "match": "prefix" if prefix else "exact",
         "count": len(results),
         "results": results,
     }
+    # Miss recovery: a 0-result lookup is the moment an agent bails to grep. Instead of
+    # dead-ending, attach the next bounds step(s) right in the payload — substring "did you
+    # mean" symbols, subsystems whose name/description mentions the query (the sub-symbol case:
+    # `where profile` misses but `packages-lib`'s description names it), and the --prefix broaden.
+    if not results:
+        payload["suggestions"] = _suggest_for_missing_symbol(
+            query, subs, file_owner, extracts, declared_by, prefix
+        )
+    return payload
+
+
+def _suggest_for_missing_symbol(query, subs, file_owner, extracts, declared_by, prefix) -> dict:
+    """Build actionable next-step suggestions when ``where <query>`` matched nothing.
+
+    Three deterministic, runnable hints, ranked cheapest-signal-first:
+    ``did_you_mean`` (symbols whose name *contains* the query — typo / sub-name), ``subsystems``
+    (subsystems whose name or description mentions the query — the "it's a field inside an exported
+    object, describe the owner" case), and ``broaden`` (the ``--prefix`` retry). Every entry carries
+    a ready-to-run ``try`` command so a miss points at the next bounds call, never at grep. All lists
+    sorted; capped to stay token-lean. Reuses already-loaded state — no extra walk or extraction.
+    """
+    q = query.lower()
+    seen: set[tuple[str, str]] = set()
+    near: list[dict] = []
+    for rel in extracts:
+        owner = file_owner.get(rel, "")
+        for sym in extracts[rel].symbols:
+            if q in sym.name.lower():
+                key = (sym.name, owner)
+                if key in seen:
+                    continue
+                seen.add(key)
+                near.append({
+                    "symbol": sym.name,
+                    "kind": sym.kind,
+                    "owning_subsystem": owner,
+                    "exposed": sym.name in declared_by.get(owner, set()),
+                    "try": f"bounds where {sym.name}",
+                })
+    near.sort(key=lambda r: (r["symbol"], r["owning_subsystem"]))
+
+    sub_hits: list[dict] = []
+    for name in sorted(subs):
+        in_name = q in name.lower()
+        in_desc = q in (subs[name].description or "").lower()
+        if in_name or in_desc:
+            sub_hits.append({
+                "subsystem": name,
+                "matched_on": "name" if in_name else "description",
+                "try": f"bounds describe {name}",
+            })
+
+    suggestions: dict = {
+        "note": (
+            f"No symbol matches '{query}'. It may be a sub-symbol (a field, route, or key inside a "
+            "larger exported object), an internal (non-exported) name, or in a language Bounds does "
+            "not parse. Try a suggestion below before falling back to grep."
+        )
+    }
+    if near:
+        suggestions["did_you_mean"] = near[:8]
+    if sub_hits:
+        suggestions["subsystems"] = sub_hits[:6]
+    if not prefix:
+        suggestions["broaden"] = f"bounds where {query} --prefix"
+    if not near and not sub_hits:
+        suggestions["fallback"] = (
+            "Nothing in the mapped surface contains this name. Run `bounds describe <subsystem>` on "
+            "the likely owner (`bounds list` shows them), or `bounds overview` to check source-mapping "
+            "coverage — the name may live in unmapped or unsupported-language source."
+        )
+    return suggestions
 
 
 def _path_query(project_root: Path, query: str, extracts: dict) -> str | None:

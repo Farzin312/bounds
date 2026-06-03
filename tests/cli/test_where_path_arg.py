@@ -52,6 +52,63 @@ def test_where_nonexistent_symbol_stays_a_symbol_query(py_project):
     assert result["count"] == 0
 
 
+def test_where_miss_attaches_did_you_mean_substring(py_project):
+    """A 0-result symbol lookup carries `suggestions.did_you_mean` for substring matches (miss recovery)."""
+    result = locate.run_where(py_project, "hing")  # substring of the real symbol "Thing"
+    assert result["count"] == 0
+    sugg = result["suggestions"]
+    names = {s["symbol"] for s in sugg.get("did_you_mean", [])}
+    assert "Thing" in names
+    hit = next(s for s in sugg["did_you_mean"] if s["symbol"] == "Thing")
+    assert hit["owning_subsystem"] == "models"
+    assert hit["try"] == "bounds where Thing"
+
+
+def test_where_miss_suggests_subsystem_by_name(py_project):
+    """A miss whose query matches a subsystem name surfaces a `bounds describe <name>` next step."""
+    result = locate.run_where(py_project, "model")  # matches subsystem "models" by name
+    assert result["count"] == 0
+    subs = {s["subsystem"]: s for s in result["suggestions"].get("subsystems", [])}
+    assert "models" in subs
+    assert subs["models"]["try"] == "bounds describe models"
+
+
+def test_where_total_miss_still_gives_a_next_step(py_project):
+    """Even a name in nothing gets `note` + `broaden` + `fallback` — never a bare dead-end."""
+    sugg = locate.run_where(py_project, "Zzzznotreal")["suggestions"]
+    assert sugg["broaden"] == "bounds where Zzzznotreal --prefix"
+    assert "did_you_mean" not in sugg and "subsystems" not in sugg
+    assert "fallback" in sugg and sugg["note"]
+
+
+def test_where_prefix_miss_omits_broaden(py_project):
+    """In --prefix mode a miss has nothing wider to offer, so no `broaden` hint is emitted."""
+    sugg = locate.run_where(py_project, "Zzzznotreal", prefix=True)["suggestions"]
+    assert "broaden" not in sugg
+
+
+def test_where_miss_human_render_includes_suggestions(py_project):
+    """Parity: the --human view of a miss re-renders the suggestion block, not just '(no matches)'."""
+    from bounds import output
+
+    result = locate.run_where(py_project, "hing")
+    rendered = output._render_where_human(result)
+    assert "did you mean" in rendered
+    assert "bounds where Thing" in rendered
+
+
+def test_impact_miss_fix_has_where_hint(py_project):
+    """An unknown `impact` target raises with a fix that points at `bounds where` (symbol→owner chain)."""
+    import pytest
+
+    from bounds import errors
+
+    with pytest.raises(errors.BoundsError) as exc:
+        locate.run_impact(py_project, "Zzzznotreal")  # neither a subsystem nor an interface
+    assert exc.value.code == errors.E_SUBSYSTEM_NOT_FOUND
+    assert "bounds where Zzzznotreal" in (exc.value.fix or "")
+
+
 def test_where_path_human_render_is_distinct_from_symbol(py_project):
     """BOUNDS-007 JSON-first: the file-query payload renders cleanly in --human (file → owner + syms)."""
     from bounds import output

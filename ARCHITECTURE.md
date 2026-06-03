@@ -920,7 +920,11 @@ bounds overview                    → {project, subsystems, roles:{...}, critic
                                        # are no cycles/schema errors — overview folds validate_engine.run(full,
                                        # persist=False) so it can't read "healthy" while validate would block.
                                        # health.validation: {ok, errors, warnings, structural_drift,
-                                       #   boundary_violations, contract_gaps, stale_interfaces, mapped_pct}.
+                                       #   boundary_violations, contract_gaps, stale_interfaces, mapped_pct,
+                                       #   described:{with_description,total,pct}, trust_note, next_steps}.
+                                       # `described` measures DESCRIPTION coverage — subsystems carrying prose;
+                                       # empty descriptions silently break concept discovery (only exact symbol
+                                       # names match), so when <50% are described a next_step nudges filling them.
 bounds impact <name> [--verify]    → {subsystem, criticality, direct_consumers, transitive_consumers,
                                        blast_radius:int, basis:"declared-consumes",
                                        blast_radius_is_lower_bound:true, note, consumers:[{name,via,interfaces}]}
@@ -930,12 +934,19 @@ bounds impact <name> [--verify]    → {subsystem, criticality, direct_consumers
                                        # blast_radius counts ONLY declared `consumes` edges (a lower bound).
                                        # --verify adds undeclared_consumer_edges:[{consumer, files:[...]}] — real
                                        # importers of <name> with no declared consume (resolved import graph; off
-                                       # the quick path). (E_SUBSYSTEM_NOT_FOUND if unknown)
+                                       # the quick path). (E_SUBSYSTEM_NOT_FOUND if unknown — its `fix` carries
+                                       # fuzzy "did you mean" subsystem names + a `bounds where <name>` hint for
+                                       # the symbol-passed-as-subsystem case, not a blind subsystem dump.)
 bounds where <symbol|path> [--prefix] → {symbol, match:"exact"|"prefix", count,
                                        results:[{symbol, kind, file, line, owning_subsystem, exposed}]}
                                        # locate a symbol's definition(s) + owning subsystem; all
                                        # collisions returned, sorted by (file,name,line,kind); fresh extraction
                                        # (never a stale cache); Python + TS. exposed = declared in owner.exposes
+                                   # MISS RECOVERY: a 0-result lookup adds suggestions:{note, did_you_mean:
+                                   #  [{symbol,kind,owning_subsystem,exposed,try}] (substring hits, ≤8),
+                                   #  subsystems:[{subsystem,matched_on:"name"|"description",try}] (≤6),
+                                   #  broaden:"…--prefix" (omitted in prefix mode), fallback} — each `try` is a
+                                   #  runnable next command so a miss points at bounds, not grep. All lists sorted.
                                    # A PATH-SHAPED arg (contains '/', or matches an existing repo-relative
                                    # source file by posix compare) is a FILE lookup instead →
                                    # {file, query_kind:"file", owning_subsystem, count,
