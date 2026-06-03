@@ -44,6 +44,10 @@ GEMINI.md
 .github/prompts/bounds.prompt.md
 .cursor/commands/bounds.md
 .windsurf/workflows/bounds.md
+# Claude Code invocation hook (`bounds agent --invocation nudge|strict` output). Same policy: a
+# regenerable, Bounds-owned block merged into .claude/settings.json. (In a downstream USER repo this
+# file is normally committed so the hook ships to teammates — here, like the rest, it's regenerated.)
+.claude/settings.json
 
 # Private design-vault stray docs accidentally dropped at the repo root. Internal idea-vault
 # notes use `s-<N>-*.md` filenames and reference internal IDs (gen labels, premortems); they

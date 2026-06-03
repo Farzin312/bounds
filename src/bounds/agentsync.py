@@ -40,7 +40,7 @@ import hashlib
 import re
 from pathlib import Path
 
-from . import config, errors
+from . import agenthook, config, errors
 from .manifest import loader as manifest_loader
 
 __all__ = ["run_agent"]
@@ -309,18 +309,26 @@ def _resolve_selection(only: set[str] | None) -> list[str]:
 # ---------------------------------------------------------------------------
 # Expected-body resolution (one home: both sync and check ask "what should this file hold?")
 # ---------------------------------------------------------------------------
-def _expected_body(agent: "_Agent", sdd_cfg: dict | None = None) -> str:
+def _expected_body(
+    agent: "_Agent", sdd_cfg: dict | None = None, level: str | None = None
+) -> str:
     """The inner in-marker body (no markers, no stamp) this agent's file should currently hold.
 
     Single source for both the writer (``_sync``) and the verifier (``_check``) so the two can
-    never disagree about what "up to date" means.
+    never disagree about what "up to date" means. ``level`` is the resolved invocation level; at
+    nudge/strict the imperative directive is folded in (so the body — and thus its stamp hash —
+    reflects the level, and a level change correctly reads as an ``updated`` file).
     """
     sdd_cfg = sdd_cfg or _sdd_config(None)
+    level = level or config.DEFAULT_INVOCATION
     if agent.canonical or agent.path == CANONICAL_NAME:
-        return _append_sdd_body(CANONICAL_BODY.rstrip("\n"), "canonical", sdd_cfg)
+        base = _append_invocation_directive(CANONICAL_BODY.rstrip("\n"), level, _MARKDOWN)
+        return _append_sdd_body(base, "canonical", sdd_cfg)
     if agent.dedicated:
-        return _append_sdd_body(_dedicated_body(agent).rstrip("\n"), agent.key, sdd_cfg)
-    return _append_sdd_body(_pointer_block_body(agent.fmt).rstrip("\n"), agent.key, sdd_cfg)
+        base = _append_invocation_directive(_dedicated_body(agent).rstrip("\n"), level, agent.fmt)
+        return _append_sdd_body(base, agent.key, sdd_cfg)
+    base = _append_invocation_directive(_pointer_block_body(agent.fmt).rstrip("\n"), level, agent.fmt)
+    return _append_sdd_body(base, agent.key, sdd_cfg)
 
 
 def _sdd_config(root: Path | None) -> dict:
@@ -346,11 +354,61 @@ def _sdd_config(root: Path | None) -> dict:
     return {"enabled": enabled, "agent": agent, "phases": phases}
 
 
+def _invocation_level(root: Path | None) -> str:
+    """Resolve the configured agent-invocation level (off|nudge|strict), fail-soft to the default.
+
+    Mirrors :func:`_sdd_config`'s fail-soft contract: a missing/broken root manifest must never
+    break agent sync, so any failure resolves to ``config.DEFAULT_INVOCATION`` (the same default the
+    runtime hook assumes), keeping the writer and the runtime in agreement about what "unset" means.
+    """
+    if root is None:
+        return config.DEFAULT_INVOCATION
+    try:
+        found = manifest_loader.find_root(root)
+        if found is not None:
+            return manifest_loader.load_root(found).invocation_level()
+    except Exception:  # noqa: BLE001 - agent sync must still work with a broken root manifest
+        pass
+    return config.DEFAULT_INVOCATION
+
+
 def _append_sdd_body(body: str, agent_key: str, sdd_cfg: dict) -> str:
     """Append the active SDD contract to generated agent text only when opted in."""
     if not sdd_cfg.get("enabled"):
         return body
     return body.rstrip("\n") + "\n\n" + _sdd_body(agent_key, sdd_cfg).rstrip("\n")
+
+
+# The imperative "use Bounds first" directive added to every always-read file at invocation level
+# >= nudge. Claude *also* gets a real harness hook (see agenthook), but every other harness — codex
+# and opencode (AGENTS.md), gemini (GEMINI.md), copilot (instructions), aider (.aider.conf.yml),
+# cursor/windsurf (always-on rules) — has no hook mechanism, so this strengthened wording in the
+# file they always load is their strongest available lever. It is non-regression-safe: it explicitly
+# tells the agent to fall back to source search when a lookup misses or the area is unmapped, so the
+# stronger push never turns a Bounds gap into a dead end.
+_INVOCATION_DIRECTIVE = (
+    "**Invocation policy:** before grepping or opening files to answer an architecture question "
+    "(what/where something is, what depends on it, what breaks if it changes), FIRST run the "
+    "relevant Bounds command — `bounds list`, `bounds describe <area>`, `bounds where <symbol>`, "
+    "`bounds impact <subsystem>`. Fall back to source search only when a lookup misses (a "
+    "`count: 0` carries `suggestions` — try those first) or the area is unmapped / an unsupported "
+    "language — then searching directly is expected."
+)
+
+
+def _append_invocation_directive(body: str, level: str, fmt: str = _MARKDOWN) -> str:
+    """Append the imperative invocation directive to ``body`` when ``level`` is nudge/strict.
+
+    Off-level files keep their advisory tone (the pre-feature behavior). For a ``_YAML`` block
+    (aider's comment-style pointer) the directive is emitted as ``#`` comment lines so the block
+    stays valid; markdown files get it verbatim.
+    """
+    if level not in ("nudge", "strict"):
+        return body
+    text = _INVOCATION_DIRECTIVE
+    if fmt == _YAML:
+        text = "\n".join("# " + line for line in text.split("\n"))
+    return body.rstrip("\n") + "\n\n" + text
 
 
 def _sdd_body(agent_key: str, sdd_cfg: dict) -> str:
@@ -677,6 +735,7 @@ def _sync(root: Path, selected: list[str]) -> dict:
     """
     buckets = _Buckets()
     sdd_cfg = _sdd_config(root)
+    invocation = _invocation_level(root)
 
     # 1. Canonical AGENTS.md — always written, as a marked block so any other AGENTS.md
     #    content the project keeps is preserved.
@@ -685,7 +744,7 @@ def _sync(root: Path, selected: list[str]) -> dict:
     outcome = _upsert_block(
         canonical_path,
         _MARKDOWN,
-        _expected_body(_AGENTS["codex"], sdd_cfg),
+        _expected_body(_AGENTS["codex"], sdd_cfg, invocation),
     )
     buckets.record(outcome, rel_canonical)
 
@@ -699,7 +758,7 @@ def _sync(root: Path, selected: list[str]) -> dict:
         outcome = _upsert_block(
             root / Path(agent.path),
             agent.fmt,
-            _expected_body(agent, sdd_cfg),
+            _expected_body(agent, sdd_cfg, invocation),
             prefix=_front_matter(agent),
             dedicated=agent.dedicated,
         )
@@ -717,9 +776,27 @@ def _sync(root: Path, selected: list[str]) -> dict:
         outcome = _upsert_block(
             root / Path(mem),
             _MARKDOWN,
-            _append_sdd_body(_AGENT_POINTER_BODY.rstrip("\n"), key, sdd_cfg),
+            _append_sdd_body(
+                _append_invocation_directive(_AGENT_POINTER_BODY.rstrip("\n"), invocation, _MARKDOWN),
+                key, sdd_cfg,
+            ),
         )
         buckets.record(outcome, Path(mem).as_posix())
+
+    # 2c. Claude Code invocation hook (.claude/settings.json). The advisory files above are
+    #     pull-based and a model may ignore them; this harness-run hook is what actually nudges
+    #     (UserPromptSubmit) or gates (PreToolUse, strict) per `agentsync.invocation`. Written only
+    #     when claude is selected — no other harness has a comparable hook today (see agenthook).
+    #     `sync_claude_hooks` self-manages create/update/remove (level "off" strips any prior Bounds
+    #     hook) and preserves the user's own hooks/keys; malformed settings are reported, never
+    #     clobbered. Fail-soft: a hook-wiring error must not abort the whole agent sync.
+    if "claude" in selected:
+        rel_settings = agenthook.settings_path(root).relative_to(root).as_posix()
+        try:
+            outcome = agenthook.sync_claude_hooks(root, invocation)
+        except Exception:  # noqa: BLE001 - never let settings I/O break the contract files above
+            outcome = "skipped_malformed"
+        buckets.record(outcome, rel_settings)
 
     # 3. Targeted, invokable command/skill files (native to each agent). Each is bounds-owned
     #    (dedicated), so it is marker-managed + idempotent like the rest. Agents with no
@@ -768,6 +845,7 @@ def _sync(root: Path, selected: list[str]) -> dict:
         "skipped_custom": sorted(buckets.skipped),
         "skip_reasons": {k: buckets.reasons[k] for k in sorted(buckets.reasons)},
         "canonical": rel_canonical,
+        "invocation": invocation,
     }
 
 
@@ -802,6 +880,9 @@ class _Buckets:
         elif outcome == "skipped_hand_edited":
             self.skipped.add(rel)
             self.reasons[rel] = "hand-edited"
+        elif outcome == "skipped_malformed":
+            self.skipped.add(rel)
+            self.reasons[rel] = "malformed-settings"
 
 
 def _upsert_block(
@@ -1012,7 +1093,7 @@ def _detect(root: Path) -> dict:
     Returns ``{"detected": [sorted agent keys]}``.
     """
     detected = [k for k in AGENT_KEYS if _footprint_present(root, k)]
-    return {"detected": sorted(detected)}
+    return {"detected": sorted(detected), "invocation": _invocation_level(root)}
 
 
 def _footprint_present(root: Path, key: str) -> bool:
@@ -1055,12 +1136,13 @@ def _check(root: Path, selected: list[str]) -> dict:
     detected = set(_detect(root)["detected"])
     targets = [k for k in selected if k in detected]
     sdd_cfg = _sdd_config(root)
+    level = _invocation_level(root)
 
     configured: list[str] = []
     missing: list[str] = []
     stale: list[str] = []
     for key in targets:
-        status = _config_status(root, _AGENTS[key], sdd_cfg)
+        status = _config_status(root, _AGENTS[key], sdd_cfg, level)
         if status == "missing":
             missing.append(key)
         elif status == "stale":
@@ -1073,13 +1155,18 @@ def _check(root: Path, selected: list[str]) -> dict:
         "missing": sorted(missing),
         "stale": sorted(stale),
         "configured": sorted(configured),
+        # Surface the level the check validated against, mirroring the detect/sync payloads so a
+        # caller can see which invocation contract "up to date" was measured against.
+        "invocation": level,
     }
     if missing or stale:
         result["fix"] = "bounds agent --sync"
     return result
 
 
-def _config_status(root: Path, agent: "_Agent", sdd_cfg: dict | None = None) -> str:
+def _config_status(
+    root: Path, agent: "_Agent", sdd_cfg: dict | None = None, level: str | None = None
+) -> str:
     """Classify ``agent`` as ``missing`` / ``stale`` / ``configured`` across ALL its files.
 
     The primary signal is the pointer/canonical file (``missing`` ⇒ never synced; ``stale`` ⇒
@@ -1091,7 +1178,8 @@ def _config_status(root: Path, agent: "_Agent", sdd_cfg: dict | None = None) -> 
     so requiring their optional artifact would falsely flag them after a single-agent sync.
     """
     sdd_cfg = sdd_cfg or _sdd_config(root)
-    pointer = _target_status(root, agent.path, agent.fmt, _expected_body(agent, sdd_cfg),
+    level = level or _invocation_level(root)
+    pointer = _target_status(root, agent.path, agent.fmt, _expected_body(agent, sdd_cfg, level),
                              agent.dedicated, _front_matter(agent))
     if pointer != "configured":
         return pointer  # missing (never synced) or stale (outdated) — primary signal wins
@@ -1105,7 +1193,10 @@ def _config_status(root: Path, agent: "_Agent", sdd_cfg: dict | None = None) -> 
     # idempotent --sync creates it non-destructively), mirroring the optional-artifact rule above.
     mem = _MEMORY_FILES.get(agent.key)
     if mem is not None and (root / Path(mem)).exists():
-        mem_body = _append_sdd_body(_AGENT_POINTER_BODY.rstrip("\n"), agent.key, sdd_cfg)
+        mem_body = _append_sdd_body(
+            _append_invocation_directive(_AGENT_POINTER_BODY.rstrip("\n"), level, _MARKDOWN),
+            agent.key, sdd_cfg,
+        )
         if _target_status(root, mem, _MARKDOWN, mem_body, False, "") != "configured":
             return "stale"
     return "configured"

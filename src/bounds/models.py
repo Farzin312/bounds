@@ -154,6 +154,9 @@ class RootManifest:
     roles: dict = field(default_factory=dict)
     criticality: dict = field(default_factory=dict)
     sdd: dict = field(default_factory=dict)
+    # Optional agent-wiring config. Raw YAML mapping; the only field Bounds acts on today is
+    # ``invocation`` (off|nudge|strict), resolved lazily via invocation_level(). Empty -> default.
+    agentsync: dict = field(default_factory=dict)
     source_path: str = ""
 
     def to_dict(self) -> dict:
@@ -171,6 +174,8 @@ class RootManifest:
             d["criticality"] = self.criticality
         if self.sdd:
             d["sdd"] = self.sdd
+        if self.agentsync:
+            d["agentsync"] = self.agentsync
         return d
 
     @classmethod
@@ -185,6 +190,7 @@ class RootManifest:
             roles=dict(data.get("roles") or {}),
             criticality=dict(data.get("criticality") or {}),
             sdd=dict(data.get("sdd") or {}),
+            agentsync=dict(data.get("agentsync") or {}),
             source_path=source_path,
         )
 
@@ -230,6 +236,18 @@ class RootManifest:
                     depth = 0
             registry[str(name)] = depth
         return registry
+
+    def invocation_level(self) -> str:
+        """Resolve the agent-invocation level (off|nudge|strict).
+
+        An absent ``agentsync:`` block, an absent/blank ``invocation`` key, or any value
+        outside the enum all resolve to ``config.DEFAULT_INVOCATION`` (nudge) — so a project
+        that never configured this still gets the gentle reminder, and a typo never crashes
+        the hook-writing or hook-runtime path (schema validation surfaces the typo separately).
+        """
+        return config.normalize_invocation(
+            (self.agentsync or {}).get("invocation")
+        ) or config.DEFAULT_INVOCATION
 
 
 # ===========================================================================

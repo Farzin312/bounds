@@ -374,8 +374,11 @@ def test_only_filters_to_single_agent_but_canonical_always_written(tmp_path):
     assert not (root / ".cursor/rules/bounds.mdc").exists()
     assert not (root / ".gemini/commands/bounds.toml").exists()  # other agents untouched
     assert not (root / "GEMINI.md").exists()
+    # At the default invocation level (nudge), wiring claude also writes the UserPromptSubmit
+    # reminder hook into .claude/settings.json — part of claude's wiring now.
     assert set(report["created"]) == {
         "AGENTS.md", "CLAUDE.md", ".claude/commands/bounds.md", ".claude/skills/bounds/SKILL.md",
+        ".claude/settings.json",
     }
 
 
@@ -454,7 +457,7 @@ def test_looks_bounds_authored_matches_inline_code_name():
 def test_detect_empty_root(tmp_path):
     """Detect on a root with no agent footprints must return an empty list (exact JSON shape), not invent agents — the baseline for the detect contract."""
     root = _mk_root(tmp_path)
-    assert agentsync.run_agent(root, mode="detect") == {"detected": []}
+    assert agentsync.run_agent(root, mode="detect") == {"detected": [], "invocation": "nudge"}
 
 
 def test_detect_finds_footprints(tmp_path):
@@ -487,9 +490,10 @@ def test_bare_github_dir_does_not_detect_copilot(tmp_path):
 def test_check_shape_when_nothing_detected(tmp_path):
     """With no agents detected, --check returns ok:True with empty missing/stale/configured and NO `fix` key — the JSON gate result omits fix when there's nothing to fix."""
     root = _mk_root(tmp_path)
-    # No fix key when there's nothing to fix.
+    # No fix key when there's nothing to fix; the resolved invocation level is reported (default
+    # nudge) so the gate result shows which contract "up to date" was measured against.
     assert agentsync.run_agent(root, mode="check") == {
-        "ok": True, "missing": [], "stale": [], "configured": [],
+        "ok": True, "missing": [], "stale": [], "configured": [], "invocation": "nudge",
     }
 
 

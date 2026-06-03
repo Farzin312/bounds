@@ -1,5 +1,5 @@
 <!-- BOUNDS:START -->
-<!-- BOUNDS:GENERATED v=2026.6.24 h=2b4badbc -->
+<!-- BOUNDS:GENERATED v=2026.6.24 h=a5bcee9e -->
 > Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agentsync.py`) instead.
 
 ## Bounds — architecture contract for agents
@@ -50,4 +50,6 @@ A `bounds impact` miss likewise returns a `fix` with "did you mean" subsystems a
 - If this repo enables `sdd:` in Bounds root config, treat Bounds as the verified architecture layer across specify → clarify → plan → tasks → analyze → implement → verify.
 - Bounds does not run the prose workflow and never calls an LLM; it supplies deterministic facts (`overview`, `list`, `describe`, `where`, `impact`) and gates (`validate --quick`, `preflight --ci`, `calibrate --check`).
 - Intentional contract changes belong in the spec: update the manifest, then re-baseline with `bounds calibrate --dump-baseline`.
+
+**Invocation policy:** before grepping or opening files to answer an architecture question (what/where something is, what depends on it, what breaks if it changes), FIRST run the relevant Bounds command — `bounds list`, `bounds describe <area>`, `bounds where <symbol>`, `bounds impact <subsystem>`. Fall back to source search only when a lookup misses (a `count: 0` carries `suggestions` — try those first) or the area is unmapped / an unsupported language — then searching directly is expected.
 <!-- BOUNDS:END -->
