@@ -106,6 +106,7 @@ __all__ = [
     "BUILTIN_ROLES",
     "CACHE_FILE",
     "DEFAULT_IGNORES",
+    "DEFAULT_INVOCATION",
     "DOC_EXTS",
     "DRIFT_BASELINE_FILE",
     "EXIT_BLOCKED",
@@ -129,6 +130,7 @@ __all__ = [
     "UPGRADE_INSTALL_CMD",
     "VALID_CRITICALITY",
     "VALID_ENFORCE",
+    "VALID_INVOCATION",
     "VALID_MODES",
     "VALID_ROLES",
     "config_dir",
@@ -149,6 +151,38 @@ VALID_MODES = {"quick", "full", "preflight", "hotfix", "audit"}
 # "warn" reports every issue (so CI surfaces drift) but never blocks the pipeline — the
 # middle ground that lets a team see structural signal before committing to a hard gate.
 VALID_ENFORCE = {"on", "off", "warn"}
+
+# Agent-invocation enforcement (root.yaml `agentsync.invocation`): how hard the generated agent
+# wiring pushes a coding agent to query Bounds *before* grepping. Distinct from `enforce`, which
+# gates *validation* — this gates *invocation*.
+#   "off"    -- advisory files only (the pre-feature behavior): AGENTS.md/skills/rules, no hook.
+#   "nudge"  -- also write a harness hook (Claude `UserPromptSubmit`) that injects a one-line
+#               reminder on architecture-shaped prompts. Never blocks a tool.
+#   "strict" -- a `PreToolUse` hook that pauses (asks, never denies) before a broad source search
+#               that Bounds could answer; fails open the instant Bounds can't answer.
+# Default is "nudge": a project that never configured this still gets the gentle reminder rather
+# than silently failing to adopt Bounds (the off-switch is surfaced in every reminder). The hook
+# fails open at every layer, so even "strict" can never trap an agent into a dead end.
+VALID_INVOCATION = {"off", "nudge", "strict"}
+DEFAULT_INVOCATION = "nudge"
+
+
+def normalize_invocation(value) -> str | None:
+    """Map a raw root.yaml ``agentsync.invocation`` value to a valid level, or None if unrecognized.
+
+    Hardens against YAML's unquoted-reserved-word trap: a user who writes ``invocation: off`` (no
+    quotes) has it parsed as the boolean ``False``, not the string ``"off"`` — without this, the
+    level would silently fall back to the default and the user would never know why "off" didn't
+    take. ``False`` → ``"off"`` (their clear intent); ``True`` (``on``) is not a level → None. The
+    single seam both the resolver (models.RootManifest.invocation_level) and the schema validator
+    use, so they can never disagree about what a raw value means.
+    """
+    if value is False:
+        return "off"
+    if value is True:
+        return None
+    s = str(value or "").strip().lower()
+    return s if s in VALID_INVOCATION else None
 
 # Behavior each base role encodes (what the structural checks key off, never the label):
 #   orphan_exposes -- True if exposes may legitimately have zero consumers (entrypoints).

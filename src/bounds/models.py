@@ -17,6 +17,17 @@ from dataclasses import dataclass, field
 
 from . import config
 
+
+def _as_mapping(value) -> dict:
+    """Coerce an optional manifest block to a dict; a non-mapping degrades to ``{}``.
+
+    Keeps a malformed optional block (e.g. ``agentsync: strict`` parsed as a bare string) from
+    raising inside ``from_dict`` — the manifest must load so schema validation can report the
+    actionable ``E_SCHEMA_INVALID`` rather than the loader crashing with a generic internal error.
+    """
+    return dict(value) if isinstance(value, dict) else {}
+
+
 __all__ = [
     "ExtractResult",
     "ImportRef",
@@ -154,6 +165,9 @@ class RootManifest:
     roles: dict = field(default_factory=dict)
     criticality: dict = field(default_factory=dict)
     sdd: dict = field(default_factory=dict)
+    # Optional agent-wiring config. Raw YAML mapping; the only field Bounds acts on today is
+    # ``invocation`` (off|nudge|strict), resolved lazily via invocation_level(). Empty -> default.
+    agentsync: dict = field(default_factory=dict)
     source_path: str = ""
 
     def to_dict(self) -> dict:
@@ -171,6 +185,8 @@ class RootManifest:
             d["criticality"] = self.criticality
         if self.sdd:
             d["sdd"] = self.sdd
+        if self.agentsync:
+            d["agentsync"] = self.agentsync
         return d
 
     @classmethod
@@ -182,9 +198,14 @@ class RootManifest:
             enforce=str(data.get("enforce", "off")),
             subsystems=[str(s) for s in (data.get("subsystems") or [])],
             entry_points=[str(g) for g in (data.get("entry_points") or [])],
-            roles=dict(data.get("roles") or {}),
-            criticality=dict(data.get("criticality") or {}),
-            sdd=dict(data.get("sdd") or {}),
+            # Optional blocks are coerced to a mapping defensively: a malformed value (e.g. a bare
+            # `agentsync: strict` string) must NOT crash the loader with dict("strict") — it has to
+            # survive load so schema.validate_root can report the actionable E_SCHEMA_INVALID instead
+            # of a generic E_INTERNAL. _as_mapping drops a non-mapping to {}; the validator flags it.
+            roles=_as_mapping(data.get("roles")),
+            criticality=_as_mapping(data.get("criticality")),
+            sdd=_as_mapping(data.get("sdd")),
+            agentsync=_as_mapping(data.get("agentsync")),
             source_path=source_path,
         )
 
@@ -230,6 +251,18 @@ class RootManifest:
                     depth = 0
             registry[str(name)] = depth
         return registry
+
+    def invocation_level(self) -> str:
+        """Resolve the agent-invocation level (off|nudge|strict).
+
+        An absent ``agentsync:`` block, an absent/blank ``invocation`` key, or any value
+        outside the enum all resolve to ``config.DEFAULT_INVOCATION`` (nudge) — so a project
+        that never configured this still gets the gentle reminder, and a typo never crashes
+        the hook-writing or hook-runtime path (schema validation surfaces the typo separately).
+        """
+        return config.normalize_invocation(
+            (self.agentsync or {}).get("invocation")
+        ) or config.DEFAULT_INVOCATION
 
 
 # ===========================================================================

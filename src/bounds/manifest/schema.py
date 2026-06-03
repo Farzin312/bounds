@@ -90,6 +90,44 @@ def validate_root(data: dict) -> list[Issue]:
     issues.extend(_validate_role_defs(data.get("roles")))
     issues.extend(_validate_criticality_defs(data.get("criticality")))
     issues.extend(_validate_sdd(data.get("sdd")))
+    issues.extend(_validate_agentsync(data.get("agentsync")))
+    return issues
+
+
+def _validate_agentsync(agentsync) -> list[Issue]:
+    """Validate the optional root ``agentsync:`` block.
+
+    Opt-in and small, like ``sdd:``. Unknown extra keys are allowed (a project may keep its own
+    agent conventions alongside Bounds'), but the one field Bounds acts on must be predictable:
+    ``invocation`` is one of ``config.VALID_INVOCATION`` (off|nudge|strict).
+    """
+    if agentsync is None:
+        return []
+    if not isinstance(agentsync, dict):
+        return [
+            Issue(
+                code=errors.E_SCHEMA_INVALID,
+                severity="error",
+                message="root manifest 'agentsync' must be a mapping",
+                fix="define it as `agentsync: { invocation: nudge }` or remove the block",
+            )
+        ]
+
+    issues: list[Issue] = []
+    invocation = agentsync.get("invocation")
+    if invocation is not None and config.normalize_invocation(invocation) is None:
+        issues.append(
+            Issue(
+                code=errors.E_SCHEMA_INVALID,
+                severity="error",
+                message=(
+                    "root manifest 'agentsync.invocation' must be one of "
+                    f"{sorted(config.VALID_INVOCATION)}, got {invocation!r}"
+                ),
+                fix='set `agentsync.invocation` to "off" (advisory files only), '
+                '"nudge" (gentle reminder hook), or "strict" (pause before a broad search)',
+            )
+        )
     return issues
 
 

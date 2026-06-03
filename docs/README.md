@@ -23,7 +23,7 @@ command reference, and the deep dives on how Bounds works and why it pays off.
 
 - [cli-reference.md](cli-reference.md) — every command, every flag, and the JSON/exit-code contract.
 - [coverage.md](coverage.md) — the mapping-coverage signal, what "aiming for 100%" means, and the human-or-AI workflow for closing a gap.
-- [ai-agents.md](ai-agents.md) — `bounds agent --sync`, the canonical `AGENTS.md` contract, and why agent compliance is advisory (CI is the only hard enforcement).
+- [ai-agents.md](ai-agents.md) — `bounds agent --sync`, the canonical `AGENTS.md` contract, the opt-in invocation levels (`off`/`nudge`/`strict`) that nudge or gate agents toward Bounds, and why CI stays the hard enforcement.
 - [sdd.md](sdd.md) — the opt-in `root.yaml` SDD block, `bounds guide --sdd`, per-agent wiring, and freshness contract.
 - [languages-and-platforms.md](languages-and-platforms.md) — the language support matrix (Python + TS/JS + SQL + Prisma today) and cross-platform notes.
 - [install.md](install.md) — all install channels and their current status.

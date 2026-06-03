@@ -671,10 +671,16 @@ def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
     #                 artifacts (below). When root.yaml has sdd.enabled=true, generated bodies
     #                 also carry the Bounds-at-each-SDD-phase contract. All marker-managed +
     #                 idempotent.
-    #                 → {created, updated, unchanged, skipped_custom, skip_reasons, canonical}
+    #                 → {created, updated, unchanged, skipped_custom, skip_reasons, canonical,
+    #                    invocation}
     #                   (artifact paths also appear in created/updated/unchanged);
     #                   skip_reasons maps path → "authored" (human-written file already mentions
     #                   bounds) | "hand-edited" (our managed block's body changed since we stamped it)
+    #                   | "malformed-settings" (.claude/settings.json wasn't valid JSON — left as-is)
+    # Invocation (root.yaml agentsync.invocation = off|nudge|strict, default nudge): at nudge/strict
+    #   every always-read file gets an imperative "use Bounds first" directive folded in, AND (claude
+    #   only) a harness hook is written to .claude/settings.json via agenthook.sync_claude_hooks.
+    #   `invocation` is reported by sync + detect. See agenthook.py.
     # Native artifacts per agent (in addition to the AGENTS.md pointer):
     #   claude   → .claude/skills/bounds/SKILL.md (auto-trigger) + .claude/commands/bounds.md
     #   codex    → .agents/skills/bounds/SKILL.md (auto-trigger; shared open Agent Skills spec)
@@ -688,6 +694,28 @@ def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
     # mode "check"  → {ok, missing, stale, configured} over detected-and-selected agents
     #                 (+ fix when missing/stale)
     # Raises E_USAGE for an unknown mode or agent key.
+```
+
+### `agenthook.py` — agent-invocation hook (runtime + .claude/settings.json wiring)
+```python
+def run_hook(payload: dict, start: Path | None = None) -> dict
+    # Body of the hidden `bounds agent-hook` command. Reads one Claude Code hook event
+    # (hook_event_name, session_id, cwd, tool_name, tool_input, prompt) and returns the
+    # hook-protocol response ({} = print nothing = allow/no-op). NEVER raises — every path is
+    # wrapped; any error/uncertainty fails open. UserPromptSubmit → inject a one-line reminder into
+    # an architecture-shaped prompt, once per session (additionalContext). PreToolUse (strict only)
+    # → coverage-gated `permissionDecision: "ask"` before a Grep/Task search Bounds can answer;
+    # allow ({}) when no .bounds, target unmapped/unsupported, bounds already consulted this session,
+    # or the level isn't strict. NON-REGRESSION INVARIANT: a Bounds miss is a green light, never a
+    # wall. Coverage check is MANIFEST-ONLY (no tree-sitter walk) so it stays in the perf budget.
+def sync_claude_hooks(root: Path, level: str) -> str  # create|updated|unchanged|skipped_malformed
+    # Merge/refresh/remove Bounds-owned hook entries (command == "bounds agent-hook") in
+    # .claude/settings.json for `level`; preserves the user's own hooks/keys; never clobbers a
+    # malformed file. Called from agentsync._sync when claude is selected.
+def merge_settings_hooks(settings: dict, level: str) -> tuple[dict, bool]  # pure, testable
+HOOK_COMMAND = "bounds agent-hook"   # written into settings.json; also the ownership signature
+# Session markers (once-per-session nudge + "already consulted" breadcrumb) live in a transient temp
+# dir (BOUNDS_HOOK_STATE_DIR override), session-keyed — no wall-clock, never committed.
 ```
 
 ### `tsconfig.py` — TypeScript path-alias resolution
@@ -763,6 +791,15 @@ sdd:
   enabled: true
   agent: codex                               # claude|codex|gemini|opencode|copilot|cursor|windsurf|aider|generic
   phases: [specify, clarify, plan, tasks, analyze, implement, verify]
+
+# Optional agent-invocation enforcement. Absent = the default `nudge`. Controls how hard the
+# generated agent wiring pushes agents to query Bounds before grepping (distinct from `enforce`,
+# which gates validation). off = advisory files only; nudge = + a one-line reminder hook
+# (Claude UserPromptSubmit) and an imperative directive in every always-read file; strict = + a
+# Claude PreToolUse gate that pauses (asks) before a broad search Bounds can answer. Fail-open:
+# a Bounds miss never blocks the agent. Set via `bounds agent --invocation <level>`. See agenthook.py.
+agentsync:
+  invocation: nudge                          # off | nudge | strict
 ```
 
 **`.bounds/manifests/extract.yaml`**

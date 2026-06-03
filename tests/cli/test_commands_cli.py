@@ -314,7 +314,8 @@ def test_agent_bare_defaults_to_detect(monkeypatch, py_project):
     res = _invoke(monkeypatch, py_project, ["agent"])
     assert res.exit_code == 0
     data = json.loads(res.output)
-    assert "detected" in data and set(data.keys()) == {"detected"}
+    # detect reports the agents present plus the resolved invocation level (default nudge).
+    assert "detected" in data and set(data.keys()) == {"detected", "invocation"}
 
 
 def test_agent_rejects_multiple_modes(monkeypatch, py_project):

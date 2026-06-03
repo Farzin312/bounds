@@ -484,20 +484,40 @@ def _render_agent_human(payload: dict) -> str:
     return _render_agent_sync_human(payload)  # --sync
 
 
+def _invocation_note(level: str) -> str:
+    """One-line gloss of the agent-invocation level for the human view (with the opt-out)."""
+    notes = {
+        "off": "advisory files only (no hook)",
+        "nudge": "Claude reminder hook on architecture prompts",
+        "strict": "Claude pauses before a broad search Bounds can answer",
+    }
+    note = notes.get(level)
+    if note is None:
+        return ""
+    suffix = "" if level == "off" else " · disable: bounds agent --invocation off"
+    return f"  invocation: {level} — {note}{suffix}"
+
+
 def _render_agent_detect_human(payload: dict) -> str:
     """`bounds agent --detect`: which agents are present + the obvious next step."""
     det = payload.get("detected", []) or []
+    inv = _invocation_note(payload.get("invocation", ""))
     if not det:
-        return ("agents detected: (none)\n"
+        body = ("agents detected: (none)\n"
                 "  next: 'bounds agent --sync' to wire agents into this repo")
-    return ("agents detected: " + ", ".join(det) + "\n"
-            "  next: 'bounds agent --check' to verify wiring · "
-            "'bounds agent --sync' to (re)wire")
+    else:
+        body = ("agents detected: " + ", ".join(det) + "\n"
+                "  next: 'bounds agent --check' to verify wiring · "
+                "'bounds agent --sync' to (re)wire")
+    return body + ("\n" + inv if inv else "")
 
 
 def _render_agent_check_human(payload: dict) -> str:
     """`bounds agent --check`: wiring status, with the fix hint when something needs a sync."""
     lines = [f"agent wiring: {'up to date' if payload.get('ok') else 'needs sync'}"]
+    inv = _invocation_note(payload.get("invocation", ""))
+    if inv:
+        lines.append(inv)
     for label in ("configured", "missing", "stale"):
         if payload.get(label):
             lines.append(f"  {label}: {', '.join(payload[label])}")
@@ -518,6 +538,9 @@ def _render_agent_sync_human(payload: dict) -> str:
     if not wrote and not skipped and unchanged:
         head += " — everything already current"
     lines = [head]
+    inv = _invocation_note(payload.get("invocation", ""))
+    if inv:
+        lines.append(inv)
     if created:
         lines.append(f"  created: {', '.join(created)}")
     if updated:

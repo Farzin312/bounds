@@ -73,4 +73,7 @@ exposes:
   kind: const
 - name: SDD_PHASES
   kind: const
-consumes: []
+- name: DEFAULT_INVOCATION
+  kind: const
+- name: VALID_INVOCATION
+  kind: const

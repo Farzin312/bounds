@@ -48,6 +48,12 @@ subsystem you need to edit. The CI gate is
 the one **hard** enforcement point, and it runs in your pipeline, not in the agent. For the enforced
 loop (pre-commit hooks + CI), see [./team-workflow.md](./team-workflow.md).
 
+Between pure advice and the CI hard gate there is now a middle layer you can opt into: a harness hook
+that actively *nudges* (or, at `strict`, *pauses*) the agent toward Bounds at search time — see
+[Configuring agent invocation](#configuring-agent-invocation-off--nudge--strict). It is fail-open by
+construction (a Bounds miss never blocks the agent), so it raises adoption without ever trapping a
+legitimate search.
+
 Once manifests exist, an agent can wire that gate itself in one command: `bounds ci --install --github`
 (or `--gitlab`) generates the CI config that runs `bounds preflight --ci` on every PR — the hard
 enforcement of the contract, where agent compliance is only advisory. When the agent makes an
@@ -65,6 +71,79 @@ For partial maps, use `bounds overview` first. Its `health.validation.trust_note
 tell you whether the map is fully covered, which gaps remain, and whether to regenerate, resolve
 duplicate ownership, or inspect source outside the mapped area. Do not present an unmapped area as
 verified architecture.
+
+---
+
+## Configuring agent invocation: `off` → `nudge` → `strict`
+
+The instruction files above are *pull-based* — a cooperating agent reads them, but nothing makes it.
+In practice agents often default to grep/search out of habit even when Bounds is wired, which is both
+slower and far more token-expensive. To close that gap, `bounds agent --sync` can additionally write a
+**harness hook** that actively reminds (or, at the strongest level, pauses) the agent at the moment it
+reaches for a broad search. This is controlled by one knob in `root.yaml`:
+
+```yaml
+agentsync:
+  invocation: nudge        # off | nudge | strict   (default: nudge)
+```
+
+Set it without hand-editing YAML — this writes `root.yaml` **and** re-syncs (installing, refreshing,
+or removing the hook) in one step:
+
+```bash
+bounds agent --invocation off       # advisory files only (the pre-hook behavior)
+bounds agent --invocation nudge      # gentle reminder hook (default)
+bounds agent --invocation strict     # pause before a broad search Bounds can answer
+bounds agent                          # bare detect also prints the current level
+```
+
+| Level | What it does |
+|-------|--------------|
+| **`off`** | Advisory files only — `AGENTS.md`, skills, rules. No hook is written; any previously-written Bounds hook is removed. This is exactly the pre-feature behavior. |
+| **`nudge`** *(default)* | Everything in `off`, **plus** a one-line reminder injected into an architecture-shaped prompt — *"this repo uses Bounds; run `bounds describe`/`where`/`impact` instead of grepping."* Fires **once per session** and **never blocks** a tool. |
+| **`strict`** | Everything in `nudge`, **plus** a pre-search gate: before a broad `Grep`/search-agent dispatch that Bounds can actually answer, it **pauses and asks** (you can still approve the search). It never hard-blocks (`deny`), and it only ever intercepts a search Bounds can answer. |
+
+Every reminder ends with `disable: bounds agent --invocation off`, so the off-switch is always one
+copy-paste away.
+
+### Per-harness capability (graceful degradation)
+
+Only **Claude Code** has a hook mechanism rich enough to enforce invocation today, so the levels
+translate to the *strongest lever each harness actually supports* — you set one global level and
+Bounds picks the mechanism per tool:
+
+| Harness | `nudge` / `strict` mechanism |
+|---------|------------------------------|
+| **Claude Code** | Real harness hook in `.claude/settings.json` — `UserPromptSubmit` (nudge) and a `PreToolUse` gate on `Grep`/`Task` (strict). |
+| **Cursor**, **Windsurf** | Always-on rule (`.cursor/rules`, `.windsurf/rules`) wording strengthened to an imperative "run Bounds first" directive. |
+| **Codex**, **OpenCode**, **Gemini**, **Copilot**, **Aider** | The imperative directive folded into the always-read file (`AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.aider.conf.yml`). No hook mechanism exists for these yet, so this is their strongest lever; **CI remains the universal hard gate**. |
+
+### Non-regression guarantee (a miss is a green light, never a wall)
+
+The hook is built so that **enforcement can only ever redirect the agent to an answer Bounds actually
+has.** The moment Bounds can't answer, it *fails open* — it allows the tool and, where useful, hands
+the agent Bounds' own recovery hints — so the stronger push can never turn a Bounds gap into a dead
+end. Concretely, the `strict` gate stays silent (allows the search) when:
+
+- there is **no `.bounds/`** in the project, or `bounds` isn't on `PATH`, or it errors/times out;
+- the searched symbol/area is **not in Bounds' declared surface** (so it can't answer — searching is
+  correct), an **unmapped area**, or an **unsupported language**;
+- the agent **already ran a `bounds` command this session** (its follow-up search is legitimate);
+- anything unexpected happens — any error degrades to "allow / no-op."
+
+The gate's coverage check is **manifest-only** (it never runs a tree-sitter walk), so it stays well
+inside the performance budget even though it fires on every search. The nudge reminder explicitly
+tells the agent to grep directly when a lookup misses or an area is unmapped.
+
+### What gets written, and is it committed?
+
+`strict`/`nudge` add a small Bounds-owned block to **`.claude/settings.json`** (the project,
+team-shared settings file), merged non-destructively: your own hooks and keys are preserved, and only
+entries whose command is `bounds agent-hook` are managed by Bounds. A malformed `settings.json` is
+reported and **left untouched**, never clobbered. Committing `.claude/settings.json` is what lets the
+hook ship with the repo so teammates get it too. The once-per-session and "already consulted" state
+the hook uses lives in a **transient temp file** (never committed; relocatable via
+`BOUNDS_HOOK_STATE_DIR`).
 
 > **No auto-loading — wiring is one explicit command.** There is **no** plugin that auto-detects a
 > project's `.bounds/` directory; nothing auto-loads it (by design — see the binary-cache note below).
@@ -134,7 +213,11 @@ bounds agent --sync            # wire the detected agents (prompts in a terminal
 bounds agent --sync --claude   # scope --sync/--check to one agent (--codex, --cursor, …)
 bounds agent --sync --all      # wire every supported agent, no prompt
 bounds agent --check           # verify each detected agent has an up-to-date Bounds config
+bounds agent --invocation X    # set off|nudge|strict (how hard to push agents to Bounds), then re-sync
 ```
+
+See [Configuring agent invocation](#configuring-agent-invocation-off--nudge--strict) for what the
+`--invocation` levels do and how they translate per harness.
 
 Bare `bounds agent` is the read-only first step — it runs `--detect`, never errors, and writes
 nothing. The three modes (`--detect`, `--sync`, `--check`) are mutually exclusive; passing two at

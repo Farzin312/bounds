@@ -19,6 +19,7 @@ import click
 
 from . import (
     __version__,
+    agenthook,
     agentsync,
     calibrate as calibrate_mod,
     ciconfig,
@@ -843,6 +844,65 @@ def _agent_selectors(fn):
     return fn
 
 
+def _set_invocation_level(project_root: Path, level: str) -> None:
+    """Persist ``agentsync.invocation`` in root.yaml (preserving other keys) for `agent --invocation`.
+
+    A targeted config write so a user can change how hard agents are pushed toward Bounds without
+    hand-editing YAML. Round-trips through PyYAML like ``discover --apply`` does (comments are not
+    preserved — consistent with that existing path). Requires an initialized project.
+    """
+    import yaml
+
+    root_file = config.config_dir(project_root) / config.ROOT_FILE
+    # Defense-in-depth: the `agent --invocation` caller already verified `find_root` is non-None, so
+    # this guard is effectively unreachable from there — but it's kept for any standalone/direct
+    # caller (and guards the file, not just the dir). Don't delete it as dead code.
+    if not root_file.is_file():
+        raise errors.BoundsError(
+            errors.E_MANIFEST_NOT_FOUND,
+            "no .bounds/root.yaml to configure",
+            fix="run 'bounds init --root' first, then set the invocation level",
+        )
+    try:
+        raw = yaml.safe_load(root_file.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise errors.BoundsError(
+            errors.E_MANIFEST_PARSE_ERROR,
+            f"could not parse .bounds/root.yaml: {exc}",
+            fix="fix the YAML syntax in .bounds/root.yaml, then retry",
+        ) from exc
+    if not isinstance(raw, dict):
+        raw = {}
+    agentsync_cfg = dict(raw.get("agentsync") or {})
+    agentsync_cfg["invocation"] = level
+    raw["agentsync"] = agentsync_cfg
+    root_file.write_text(
+        yaml.safe_dump(raw, sort_keys=False, default_flow_style=False), encoding="utf-8"
+    )
+
+
+def _apply_invocation_level(invocation: str, do_detect: bool, do_check: bool) -> None:
+    """Validate and persist `agent --invocation`: a write action that implies (and forces) `--sync`.
+
+    Raises ``E_USAGE`` if combined with a read-only mode, or ``E_MANIFEST_NOT_FOUND`` when the
+    project isn't initialized. On success it writes the level to root.yaml; the caller then syncs.
+    """
+    if do_detect or do_check:
+        raise errors.BoundsError(
+            errors.E_USAGE,
+            "--invocation sets the level and re-syncs; it can't combine with --detect/--check",
+            fix="run 'bounds agent --invocation <level>' on its own",
+        )
+    inv_root = manifest_loader.find_root(Path.cwd())
+    if inv_root is None:
+        raise errors.BoundsError(
+            errors.E_MANIFEST_NOT_FOUND,
+            "no .bounds/ directory found in this or any parent directory",
+            fix="run 'bounds init --root' first, then set the invocation level",
+        )
+    _set_invocation_level(inv_root, invocation)
+
+
 @main.command("agent", short_help="Wire coding agents to query Bounds first")
 @click.option("--sync", "do_sync", is_flag=True, default=False,
               help="Write the AGENTS.md contract + per-agent config files.")
@@ -850,21 +910,27 @@ def _agent_selectors(fn):
               help="List which coding agents are present in this project (the default).")
 @click.option("--check", "do_check", is_flag=True, default=False,
               help="Verify detected agents have an up-to-date Bounds config.")
+@click.option("--invocation", "invocation", type=click.Choice(["off", "nudge", "strict"]),
+              default=None,
+              help="Set how hard agents are pushed to query Bounds first, then sync: off (advisory "
+                   "files only), nudge (gentle reminder hook), strict (pause before a broad search). "
+                   "Writes root.yaml + re-syncs.")
 @click.option("--all", "want_all", is_flag=True, default=False,
               help="Wire every supported agent without prompting (skips the interactive picker).")
 @_agent_selectors
 @_human
-def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, want_all: bool,
-              human: bool, **selectors: bool) -> None:
+def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, invocation: str | None,
+              want_all: bool, human: bool, **selectors: bool) -> None:
     """Teach coding agents (Claude, Codex, Gemini, Cursor, …) to query Bounds first.
 
     Pick at most one mode. Bare 'bounds agent' runs the read-only --detect, so it is always
     safe to type to see what's present:
 
     \b
-      bounds agent            list which agents this repo has (read-only; the default)
-      bounds agent --sync     write AGENTS.md + each selected agent's config
-      bounds agent --check    verify wiring is current (CI-friendly; JSON by default)
+      bounds agent                 list which agents this repo has (read-only; the default)
+      bounds agent --sync          write AGENTS.md + each selected agent's config
+      bounds agent --check         verify wiring is current (CI-friendly; JSON by default)
+      bounds agent --invocation X  set off|nudge|strict (how hard to push agents to Bounds), re-sync
 
     '--sync' in a terminal asks which tools to wire (pre-checked = detected); '--all' or an
     explicit '--claude'/'--codex'/… selector skips the prompt. AGENTS.md is always written.
@@ -874,6 +940,13 @@ def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, want_all: bool,
     human = human if do_check else _interactive_human(human)
 
     def go() -> None:
+        nonlocal do_sync
+        # --invocation sets the level in root.yaml, then re-syncs to apply it (write/refresh/remove
+        # the harness hook). It is a write action that implies --sync.
+        if invocation is not None:
+            _apply_invocation_level(invocation, do_detect, do_check)
+            do_sync = True
+
         modes = [m for m, on in (("sync", do_sync), ("detect", do_detect), ("check", do_check)) if on]
         if len(modes) > 1:
             raise errors.BoundsError(
@@ -925,6 +998,31 @@ def _prompt_agent_selection(available: list[str], detected: set[str]) -> set[str
         elif tok in available:
             chosen.add(tok)
     return chosen or None  # bad input → fall back to all rather than writing nothing
+
+
+@main.command("agent-hook", hidden=True, short_help="(internal) harness hook entry point")
+def agent_hook_cmd() -> None:
+    """Internal: the entry point wired into a harness hook by ``bounds agent --invocation``.
+
+    Reads one harness hook event (JSON on stdin) and writes the hook-protocol response (JSON on
+    stdout, or nothing for a no-op). It deliberately does NOT use the normal ``_run`` wrapper or the
+    JSON-first error contract: a hook must NEVER break the agent's turn, so this always exits 0 and
+    emits hook-protocol JSON only — any error degrades to an empty (allow / no-op) response.
+    """
+    import json
+
+    try:
+        raw = sys.stdin.read()
+        payload = json.loads(raw) if raw.strip() else {}
+    except (ValueError, OSError):
+        payload = {}
+    try:
+        result = agenthook.run_hook(payload if isinstance(payload, dict) else {})
+    except Exception:  # noqa: BLE001 - defense in depth; run_hook already fails open.
+        result = {}
+    if result:
+        sys.stdout.write(json.dumps(result))
+    sys.exit(config.EXIT_OK)
 
 
 # ===========================================================================
