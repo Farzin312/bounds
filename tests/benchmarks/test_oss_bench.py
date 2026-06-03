@@ -14,8 +14,8 @@ def _load_oss_bench():
     return module
 
 
-def test_oss_bench_records_without_bounds_recovery_and_fresh_health(monkeypatch, tmp_path):
-    """The OSS harness must measure both sides: no-Bounds recovery UX and fresh-Bounds health."""
+def test_oss_bench_records_presetup_recovery_and_fresh_health(monkeypatch, tmp_path):
+    """The OSS harness must measure both sides: pre-setup (before init) recovery UX and fresh-Bounds health."""
     oss_bench = _load_oss_bench()
     (tmp_path / "app.py").write_text("def run():\n    return True\n", encoding="utf-8")
     state = {"initialized": False}
@@ -92,9 +92,9 @@ def test_oss_bench_records_without_bounds_recovery_and_fresh_health(monkeypatch,
 
     result = oss_bench.measure(tmp_path, "demo", "python", lambda text: len(text.split()))
 
-    assert result["without_bounds_list_rc"] == 2
-    assert result["without_bounds_error_code"] == "E_MANIFEST_NOT_FOUND"
-    assert result["without_bounds_error_fix"] == "run 'bounds init --root'"
+    assert result["presetup_list_rc"] == 2
+    assert result["presetup_error_code"] == "E_MANIFEST_NOT_FOUND"
+    assert result["presetup_error_fix"] == "run 'bounds init --root'"
     assert result["init_rc"] == 0
     assert result["overview_validation_errors"] == 1
     assert result["overview_boundary_violations"] == 4

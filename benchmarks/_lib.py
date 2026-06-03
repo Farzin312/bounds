@@ -2,7 +2,7 @@
 """Shared benchmark helpers — the ONE home for token counting, the `bounds` runner,
 manifest-source resolution, subsystem selection, and the authoritative coverage read.
 
-Every benchmark harness (``run.py``, ``oss_bench.py``, ``oss_features.py``) imports from
+Every benchmark harness (``dogfood.py``, ``oss_bench.py``, ``oss_features.py``) imports from
 here so the three never disagree on how a token is counted, how `bounds` is invoked, or what
 "coverage" means. There is no third-party dependency: tiktoken is an OPTIONAL import (exact
 cl100k_base when present, a clearly-labeled ~1-token/4-chars estimate otherwise).
@@ -188,10 +188,10 @@ def read_coverage(root: Path) -> dict:
     """The authoritative mapping-coverage block for ``root``, read from `bounds validate` JSON.
 
     Returns the dict produced by ``src/bounds/extract/scan.py::mapping_coverage`` exactly as the CLI
-    surfaces it at ``stats.coverage.mapping`` — ``mapped_pct``, ``files_source_total``,
-    ``files_mapped``, ``files_unmapped``, ``unmapped_unowned_supported``,
-    ``unmapped_unsupported_language``, ``unmapped_by_language``, ``unsupported_languages``, plus the
-    ``tests`` and ``docs`` linkage buckets. Falls back to `bounds overview`'s
+    surfaces it at ``stats.coverage.mapping`` — ``mapped_pct`` (top level), the nested
+    ``supported:{total,mapped,unowned,unowned_sample}`` and
+    ``unsupported:{total,declared,dark,dark_sample,by_language}`` blocks, plus the ``tests`` and
+    ``docs`` linkage buckets ``{total,linked,unlinked,unlinked_sample}``. Falls back to `bounds overview`'s
     ``health.validation.mapped_pct`` (+ tests/docs) if validate yields no coverage block. Returns
     ``{}`` if neither is available (e.g. an unsupported-language repo with no manifests) — a benign
     "no coverage measured" rather than a crash.
@@ -225,23 +225,31 @@ def read_coverage(root: Path) -> dict:
 
 
 def coverage_summary_lines(cov: dict) -> list[str]:
-    """Render a coverage dict into human markdown lines (shared by run.py / oss table footer)."""
+    """Render a coverage dict into human markdown lines (shared by dogfood.py / oss table footer).
+
+    Reads the ACTUAL nested shape the CLI emits at ``stats.coverage.mapping`` —
+    ``supported:{total,mapped,unowned}`` and ``unsupported:{dark,declared,by_language}`` — not the
+    flat ``files_mapped``/``files_source_total`` keys an earlier version of this function assumed
+    (those never existed in the emitted JSON, so file counts rendered as ``?``). ``mapped_pct`` and
+    the ``tests``/``docs`` buckets are top-level and unchanged.
+    """
     if not cov:
         return ["_No coverage measured (no .bounds manifests, or unsupported-language repo)._"]
+    sup = cov.get("supported") or {}
+    unsup = cov.get("unsupported") or {}
     lines = [
         f"- Mapped source: **{_fmt_pct(cov.get('mapped_pct'))}** "
-        f"({cov.get('files_mapped', '?')} / {cov.get('files_source_total', '?')} "
-        f"non-test source files)",
+        f"({sup.get('mapped', '?')} / {sup.get('total', '?')} supported non-test source files)",
     ]
-    unmapped = cov.get("files_unmapped")
-    if unmapped is not None:
-        unowned = cov.get("unmapped_unowned_supported", 0)
-        unsupported = cov.get("unmapped_unsupported_language", 0)
+    unowned = sup.get("unowned", 0)
+    dark = unsup.get("dark", 0)
+    declared = unsup.get("declared", 0)
+    if unowned or dark or declared:
         lines.append(
-            f"- Unmapped: {unmapped} "
-            f"({unowned} unowned-but-supported, {unsupported} unsupported-language)"
+            f"- Unmapped: {unowned} unowned-but-supported"
+            f"  ·  unsupported-language: {dark} dark, {declared} hand-declared"
         )
-    by_lang = cov.get("unmapped_by_language") or {}
+    by_lang = unsup.get("by_language") or {}
     if by_lang:
         breakdown = ", ".join(f"{lang}: {n}" for lang, n in sorted(by_lang.items()))
         lines.append(f"- Unmapped by language: {breakdown}")

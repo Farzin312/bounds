@@ -101,7 +101,7 @@ A content-only edit (comment or function body) changes a file's `content_hash` b
 
 Bounds is fast enough to run on every commit: the validation logic itself completes in roughly **130–200ms**, with another **~150ms** of Python interpreter startup on top. On a warm cache, `--quick` re-extracts zero files when nothing has changed — pure reference propagation and exit.
 
-Latency is machine-relative, so Bounds pins no single number and no hardware spec here. The reproducible, regenerated-on-demand measurements — and the methodology that deliberately keeps latency out of the headline metrics — live in [../benchmarks/results/claude-baseline.md](../benchmarks/results/claude-baseline.md), the single source of truth for performance figures.
+Latency is machine-relative, so Bounds pins no single number and no hardware spec here. The reproducible, regenerated-on-demand measurements — and the methodology that deliberately keeps latency out of the headline metrics — live in [../benchmarks/results/dogfood-claude.md](../benchmarks/results/dogfood-claude.md), the single source of truth for performance figures.
 
 ---
 

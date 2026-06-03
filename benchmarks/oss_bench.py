@@ -75,15 +75,15 @@ def _source_tokens(root: Path, name: str, count) -> int:
 def measure(root: Path, name: str, lang: str, count) -> dict:
     result: dict = {"name": name, "lang": lang, "root": str(root), "errors": [], "notes": []}
 
-    # --- without Bounds: the command should fail loud and tell users how to recover ---
+    # --- pre-setup (before init): the command should fail loud and tell users how to recover ---
     pre_out, pre_err, pre_rc, pre_t = _run(["list"], root)
-    result["without_bounds_list_rc"] = pre_rc
-    result["without_bounds_list_sec"] = round(pre_t, 3)
+    result["presetup_list_rc"] = pre_rc
+    result["presetup_list_sec"] = round(pre_t, 3)
     pre_error = _error_payload(pre_out)
     if pre_error:
-        result["without_bounds_error_code"] = pre_error.get("code")
-        result["without_bounds_error_message"] = pre_error.get("message")
-        result["without_bounds_error_fix"] = pre_error.get("fix")
+        result["presetup_error_code"] = pre_error.get("code")
+        result["presetup_error_message"] = pre_error.get("message")
+        result["presetup_error_fix"] = pre_error.get("fix")
     elif pre_rc == 0:
         result["notes"].append("preflight list succeeded before init; repo already had .bounds")
     else:

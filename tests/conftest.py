@@ -50,11 +50,13 @@ def py_project(tmp_path: Path) -> Path:
     )
     (root / ".bounds" / "manifests" / "models.yaml").write_text(
         "name: models\nrole: library\ncriticality: core\npaths: [src/models]\n"
+        "description: Core domain models.\n"
         "exposes:\n  - { name: Thing, kind: class }\nconsumes: []\n",
         encoding="utf-8",
     )
     (root / ".bounds" / "manifests" / "svc.yaml").write_text(
-        "name: svc\nrole: service\ncriticality: leaf\npaths: [src/svc]\nexposes: []\n"
+        "name: svc\nrole: service\ncriticality: leaf\npaths: [src/svc]\n"
+        "description: Service layer over the models.\nexposes: []\n"
         "consumes:\n  - { subsystem: models, via: models, interfaces: [Thing] }\n",
         encoding="utf-8",
     )

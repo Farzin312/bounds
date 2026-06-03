@@ -380,6 +380,10 @@ def test_orphans_not_flagged_without_interface_level_consumption():
     }
     assert check_orphans(_ctx(subs)) == []
     # But once a consumer declares the interfaces it uses, a genuinely-unused export is still flagged.
+    # Orphans roll up to ONE issue per subsystem (a library's externally-consumed surface would
+    # otherwise flood one row per export); the message names the unused exports in its sample.
     subs["user"] = Sub(name="user", consumes=[Consumes("lib", interfaces=["a"])])
     flagged = check_orphans(_ctx(subs))
-    assert any("'b'" in i.message for i in flagged) and not any("'a'" in i.message for i in flagged)
+    assert len(flagged) == 1 and flagged[0].count == 1
+    orphan_sample = flagged[0].message.split(":", 1)[1]
+    assert "b" in orphan_sample and "a" not in orphan_sample

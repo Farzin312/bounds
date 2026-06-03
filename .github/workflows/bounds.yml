@@ -15,7 +15,14 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .bounds/cache.db
-          key: bounds-${{ hashFiles('.bounds/root.yaml', '.bounds/manifests/**') }}
+          # The cache stores SOURCE extraction, so its key must include `src/**` — not just the
+          # manifests. Keying on manifests alone restores a stale extraction whenever source changes
+          # without a manifest change, which makes every touched provider look "dirty" vs that stale
+          # baseline and fires a false `E_STALE_INTERFACE` on its consumers (and would keep `main` red
+          # post-merge, since a cache HIT is never re-saved). Including src invalidates the cache on a
+          # real source change → a clean cold extraction; the hard checks (drift/boundary/contract/
+          # cycles/orphans) all still run, and cross-impact stays the incremental `--quick` signal.
+          key: bounds-${{ hashFiles('src/**', '.bounds/root.yaml', '.bounds/manifests/**') }}
       # External repos install Bounds from git until `bounds-cli` is published on PyPI.
       # The Bounds repo itself installs the checked-out PR, not the default branch.
       - name: Install Bounds

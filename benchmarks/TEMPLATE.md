@@ -1,94 +1,75 @@
-# Bounds benchmark result — <agent> / <model>
+# Bounds benchmark — <kind>: <discriminator>
 
-> Copy this file to `benchmarks/results/<agent>-<model>.md`
-> (e.g. `codex-gpt5.md`, `gemini-2.5-pro.md`), fill it in, and open a PR adding
-> that single file to `benchmarks/results/`. Don't edit other submissions; add
-> your own. Run `make benchmark` from the repo root to generate the token table.
+<!--
+HOW TO CONTRIBUTE A RESULT (read first)
+
+1. Pick your benchmark KIND and run its command (table below).
+2. Name your file  benchmarks/results/<kind>-<discriminator>.md  per the naming rule.
+3. Fill the five standard sections (keep their order + headings). STATE YOUR TOKENIZER.
+4. Open a PR that adds ONLY your one file. Never edit someone else's result file.
+
+⭐ MOST VALUABLE CONTRIBUTION: an `oss` cross-repo result on a project we haven't
+covered yet. It proves the numbers aren't self-selected. See "Repos we'd love
+covered" in benchmarks/README.md — one `make oss-bench REPO=<clone>` produces a
+finished block you can paste straight into the `## Results` section below.
+-->
+
+## Which benchmark am I submitting?
+
+| Kind | Command | File name | Measures |
+|------|---------|-----------|----------|
+| `dogfood` | `make benchmark` | `dogfood-<model>.md` | coverage + token economics on **this** repo |
+| `oss` | `make oss-bench REPO=<clone> [NAME=… LANG_LABEL=…]` | `oss-<repo-or-topic>.md` | coverage + tokens + command health on a **third-party** repo |
+| `agentab` | `make agent-ab REPO=<repo> [REPS=3 MODEL=…]` | `agentab-<repo>-<model>.md` | **measured agent A/B** — with vs without Bounds (tokens, cost, time, quality) |
+
+**Naming rule:** every result file is `<kind>-<discriminator>.md`, where `kind` is one of
+`dogfood` / `oss` / `agentab` (machine-run kinds) or `submission` (a per-collaborator writeup).
+Pair any raw data with its report by stem (e.g. `agentab-foo-sonnet.raw.jsonl`). Delete nothing;
+add your own file.
 
 ## Environment
 
 | Field | Value |
 |-------|-------|
-| Agent | <e.g. Claude Code, Codex CLI, Gemini CLI> |
-| Model | <e.g. Claude Opus, GPT-5, Gemini 2.5 Pro> |
-| Tokenizer | <e.g. tiktoken cl100k_base (exact), or char/4 estimate — REQUIRED> |
-| Bounds version | <output of `bounds --version`> |
-| Date | <YYYY-MM-DD> |
+| Kind | `<dogfood \| oss \| agentab \| submission>` |
+| Repo(s) | `<this repo, or the third-party repo + commit>` |
+| Agent | `<Claude Code, Codex CLI, Gemini CLI, …>` |
+| Model | `<Claude Sonnet, GPT-5, Gemini 2.5 Pro, …>` |
+| Tokenizer | `<tiktoken cl100k_base (exact) \| char/4 estimate \| real provider usage>` — **REQUIRED** |
+| Bounds version | `<output of bounds --version>` |
+| Date | `<YYYY-MM-DD>` |
+| Command | `<the exact command you ran>` |
 
-> Token counts are tokenizer-specific. State the tokenizer. No hardware specs —
-> hardware is not a variable for token / retrieval / correctness metrics.
+> Token counts are tokenizer-specific — state the tokenizer. No hardware specs: hardware is not a
+> variable for token / retrieval / correctness metrics (latency, if reported, is machine-relative
+> and de-emphasized).
 
-## 1. Mapping coverage + token economics (headline)
+## Headline
 
-`make benchmark` (`python benchmarks/run.py`) emits **both** sections below in
-one block. Paste the whole thing here, including the tokenizer line:
+One honest paragraph: the single takeaway a reader should leave with. For `agentab`, lead with the
+measured delta (e.g. "−60% tokens, 18/18 vs 8/18 correct") **and** the scaling caveat (trivial
+lookups are a wash; value scales with structural difficulty). Cite **ranges**, never one flat number.
+
+## Results
+
+Paste the generated block (the harness prints a finished markdown block for every kind), or the
+metric table for a `submission`. Keep the tokenizer line that the harness emits.
 
 ```
-<paste the full markdown output here — the `## Mapping coverage` section AND the
-`## Token economics` table, including the tokenizer line>
+<paste the harness output here>
 ```
 
-### Mapping coverage
+## Caveats & honesty
 
-How much of the repo's library source Bounds actually mapped — the authoritative
-`bounds validate` metric (`stats.coverage.mapping`). Fill in from the block above:
+- Tokenizer stated above; ratios are stable across tokenizers, absolute counts are not.
+- The whole-map `bounds list` reduction is a cheap-orientation upper bound (no agent reads a whole
+  repo) — the repeatable win is targeted `describe`/`impact`. Cite the range.
+- Note anything that surprised you, any command that failed, any auto-`discover` partition you'd curate.
 
-| Field | Value |
-|-------|-------|
-| Mapped source (`mapped_pct`) | **<NN.N>%** (`<files_mapped>` / `<files_source_total>` non-test source files) |
-| Unmapped (unowned-supported) | <N> (Bounds has an adapter, just not in a manifest — fixable) |
-| Unmapped (unsupported-language) | <N> (no adapter for that language yet) |
-| Unmapped by language | <e.g. go: 12, rust: 4> |
-| Tests linkage | <linked> linked / <unlinked> unlinked (of <total>) |
-| Docs linkage | <linked> linked / <unlinked> unlinked (of <total>) |
+## Reproduce
 
-> Coverage is **3-way per source file**: mapped / unowned-supported /
-> unsupported-language. There is **no "partial" file tier** — partial extraction
-> is a separate signal (`extraction_failures`), reported on its own. Tests are
-> excluded from the source denominator and tracked in their own bucket.
+The exact command(s) so anyone can regenerate this result:
 
-### Token economics
-
-Aggregate reduction: **<NN>%** of source-equivalent tokens.
-
-> Be honest about framing: the whole-map `bounds list` figure is the
-> *cheap-orientation* bound (rarely what an agent actually does). The repeatable
-> win is **targeted retrieval** (`describe`/`impact`) vs reading the source. Cite
-> the **range** (typically ~84–99% on this repo), not one flat %.
-
-## 2. Retrieval scaling observation
-
-One or two sentences: `bounds describe` is ~O(public API) and stays roughly
-flat as the implementation grows, while reading source is ~O(files). Note any
-observation about context-rot / lost-in-the-middle in your own runs — did
-keeping context small visibly help the model stay on task?
-
-## 3. Latency (optional, de-emphasized)
-
-Machine-relative; report only as "fast enough / not fast enough for a pre-commit
-hook (sub-200ms quick-mode target)". NO hardware spec.
-
-| Command | Median wall-clock |
-|---------|-------------------|
-| `bounds validate --quick` | <ms> |
-| `bounds list` | <ms> |
-
-## 4. Determinism & correctness
-
-Confirm (or correct) for your run: structural drift detection caught every
-export add/remove/rename; ~0 false positives on whitespace/comment-only edits.
-These are zero-LLM and should be model-independent.
-
-- Drift recall: <observed>
-- False positives on reformatting: <observed>
-
-## 5. Agent task outcomes (the part that varies by model/agent)
-
-Structured, honest notes on a real task you gave the agent, with vs without
-Bounds. Be specific. Examples:
-
-- "Asked it to add a field to `models`; with Bounds it ran `bounds impact
-  models` and updated all <N> consumers in 1 pass. Without, it missed <X>."
-- "`bounds preflight` caught a boundary break (importing a private symbol)
-  before commit."
-- "Found the right subsystem in 1 `bounds describe` call vs <N> file reads."
+```
+<e.g. make oss-bench REPO=/tmp/clone NAME=flask LANG_LABEL=python>
+```

@@ -44,7 +44,7 @@ surfaces the same trust boundary through `health.validation.mapped_pct`, `trust_
 
 ## Dogfood repo: Bounds
 
-`python benchmarks/run.py` on the Bounds repo:
+`python benchmarks/dogfood.py` on the Bounds repo:
 
 | Command | Bounds tokens | Source-equivalent tokens | Reduction |
 |---------|--------------:|-------------------------:|----------:|

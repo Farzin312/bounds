@@ -69,7 +69,7 @@
 - **Schema flexibility** — `root.yaml` now accepts extensible roles and criticality values rather than a fixed enum.
 - **Per-export `internal` flag** — exposes can be marked `internal: true` to exempt them from calibration add/remove and signal a deliberately-private symbol.
 - **Install artifacts** — `install.sh` (pipx-preferred, installs from the git ref by default since the PyPI name is pending; `BOUNDS_REF` pins a tag/branch), a Homebrew `Formula/bounds.rb`, and a `Makefile` (`make install/dev/test/validate/benchmark`).
-- **Cross-repo OSS benchmark harness** (`benchmarks/oss_run.py`) — clones real third-party projects (click, axios) at a cited commit, runs `bounds discover`, and measures Bounds-vs-source token economics, so the headline numbers aren't measured only on Bounds itself. Recorded results + a same-model capability head-to-head live in `benchmarks/results/oss-token-economics.md`.
+- **Cross-repo OSS benchmark harness** (`benchmarks/oss_run.py`) — clones real third-party projects (click, axios) at a cited commit, runs `bounds discover`, and measures Bounds-vs-source token economics, so the headline numbers aren't measured only on Bounds itself. Recorded results + a same-model capability head-to-head live in `benchmarks/results/oss-token-economics-archived.md`.
 
 ### Changed
 

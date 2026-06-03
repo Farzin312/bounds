@@ -486,7 +486,28 @@ def overview_cmd(human: bool) -> None:
             "stale_interfaces": counts.get(errors.E_STALE_INTERFACE, 0),
             "mapped_pct": mapping.get("mapped_pct", 0.0),
         }
+        # Description coverage: how many subsystems carry prose. Empty descriptions silently break
+        # *concept* discovery — an agent can map a concept ("auth", "billing", "profile") to a
+        # subsystem only via `describe`/`where` description matches, which need prose to match. A repo
+        # that ran `discover` and never filled descriptions looks healthy while concept lookups all
+        # miss. Pure manifest data (no extraction); surfaced so the gap is measurable, not silent.
+        described_n = sum(1 for s in subs.values() if (s.description or "").strip())
+        total_subs = len(subs)
+        validation["described"] = {
+            "with_description": described_n,
+            "total": total_subs,
+            "pct": round(100.0 * described_n / total_subs, 1) if total_subs else 100.0,
+        }
         next_steps: list[str] = []
+        # Nudge only when the gap materially hurts discovery: nothing described, or under half.
+        if total_subs and described_n * 2 < total_subs:
+            missing = total_subs - described_n
+            next_steps.append(
+                f"Add subsystem descriptions ({missing} of {total_subs} are empty). Without prose, "
+                "concept lookups (`bounds where <concept>`, `bounds describe`) can't map a concept to "
+                "a subsystem — only exact symbol names match. Fill each manifest's `description:` so "
+                "agents discover by concept instead of falling back to grep."
+            )
         if coverage_has_gap(mapping):
             # Name WHAT is unmapped and the right move per gap kind — so an agent reading overview is
             # told loudly which files are dark and that unsupported-language manifests are durable

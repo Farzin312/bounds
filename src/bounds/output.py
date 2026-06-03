@@ -18,6 +18,8 @@ __all__ = ["emit"]
 # Severity groups, in the order they render and rank.
 _SEVERITY_ORDER = ("error", "warning", "info")
 _BULLETS = {"error": "✗", "warning": "⚠", "info": "ℹ"}
+# Suffix tag for a symbol a subsystem declares in `exposes` (shared by the where renderers).
+_EXPOSED_TAG = " [exposed]"
 
 
 def emit(payload: dict, human: bool, stream=None, ci: bool = False) -> None:
@@ -118,15 +120,38 @@ def _render_where_human(payload: dict) -> str:
     results = payload.get("results", []) or []
     head = f"where {sym}  ({match} match · {len(results)} result{'s' if len(results) != 1 else ''})"
     if not results:
-        return head + "\n\n(no matches)"
+        return head + "\n\n(no matches)" + _render_where_suggestions(payload.get("suggestions"))
     lines = [head, ""]
     for r in results:
-        tag = " [exposed]" if r.get("exposed") else ""
+        tag = _EXPOSED_TAG if r.get("exposed") else ""
         lines.append(
             f"  {r.get('symbol')} ({r.get('kind')})  {r.get('file')}:{r.get('line')}"
             f"  → {r.get('owning_subsystem')}{tag}"
         )
     return "\n".join(lines)
+
+
+def _render_where_suggestions(suggestions: dict | None) -> str:
+    """Render the miss-recovery block a 0-result ``where`` carries (parity with the JSON).
+
+    Re-renders the SAME fields ``locate._suggest_for_missing_symbol`` emits — the note, the
+    "did you mean" symbols, the candidate subsystems, the --prefix broaden, and the fallback —
+    each as a copy-pasteable next command so the human view never drops a hint the JSON has.
+    """
+    if not suggestions:
+        return ""
+    lines = ["", suggestions["note"]]
+    for s in suggestions.get("did_you_mean", []) or []:
+        tag = _EXPOSED_TAG if s.get("exposed") else ""
+        lines.append(f"  did you mean: {s['symbol']} ({s['kind']}) → {s['owning_subsystem']}{tag}"
+                     f"   ·   {s['try']}")
+    for s in suggestions.get("subsystems", []) or []:
+        lines.append(f"  subsystem (matched {s['matched_on']}): {s['try']}")
+    if suggestions.get("broaden"):
+        lines.append(f"  broaden: {suggestions['broaden']}")
+    if suggestions.get("fallback"):
+        lines.append(f"  {suggestions['fallback']}")
+    return "\n" + "\n".join(lines)
 
 
 def _render_where_file_human(payload: dict) -> str:
@@ -139,7 +164,7 @@ def _render_where_file_human(payload: dict) -> str:
         return head + "\n\n(no symbols)"
     lines = [head, ""]
     for r in results:
-        tag = " [exposed]" if r.get("exposed") else ""
+        tag = _EXPOSED_TAG if r.get("exposed") else ""
         lines.append(f"  {r.get('symbol')} ({r.get('kind')})  :{r.get('line')}{tag}")
     return "\n".join(lines)
 
@@ -267,6 +292,25 @@ def _render_list_human(payload: dict) -> str:
     return "\n".join(lines)
 
 
+def _overview_coverage_lines(v: dict) -> list[str]:
+    """Description coverage + tests/docs linkage lines for the overview (re-renders the same JSON).
+
+    Description coverage is the concept-discovery health signal; tests/docs linkage is informational
+    (tracked, never a gap). Kept out of ``_render_overview_human`` so that renderer stays simple.
+    """
+    out: list[str] = []
+    described = v.get("described") or {}
+    if described:
+        out.append(f"  described: {described.get('with_description', 0)}/"
+                   f"{described.get('total', 0)} subsystems ({described.get('pct', 0.0)}%)")
+    for label in ("tests", "docs"):
+        bucket = v.get(label) or {}
+        if bucket:
+            out.append(f"  {label}: {bucket.get('linked', 0)} linked / "
+                       f"{bucket.get('unlinked', 0)} unlinked")
+    return out
+
+
 def _render_overview_human(payload: dict) -> str:
     """Render `bounds overview`: a health line + counts; the full edge list stays in the JSON."""
     h = payload.get("health", {}) or {}
@@ -285,12 +329,7 @@ def _render_overview_human(payload: dict) -> str:
         f"overlaps: {v.get('ownership_overlaps', 0)})"
         f"   source mapped: {v.get('mapped_pct', 0.0)}%",
     ]
-    # Informational doc/test linkage (tracked, never a gap) — one short line each, only when present.
-    for label in ("tests", "docs"):
-        bucket = v.get(label) or {}
-        if bucket:
-            lines.append(f"  {label}: {bucket.get('linked', 0)} linked / "
-                         f"{bucket.get('unlinked', 0)} unlinked")
+    lines.extend(_overview_coverage_lines(v))
     if v.get("trust_note"):
         lines.append(f"  trust: {v['trust_note']}")
     for step in v.get("next_steps", []) or []:

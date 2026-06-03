@@ -102,8 +102,8 @@ def render(bench: dict, feats: dict) -> str:
     out.append("")
     out.append("| Signal | Value |")
     out.append("|--------|------:|")
-    out.append(f"| Without `.bounds`: `bounds list` rc | {bench.get('without_bounds_list_rc', '?')} "
-               f"({bench.get('without_bounds_error_code', 'n/a')}) |")
+    out.append(f"| Pre-setup (no `.bounds/`): `bounds list` rc | {bench.get('presetup_list_rc', '?')} "
+               f"({bench.get('presetup_error_code', 'n/a')}) |")
     out.append(f"| Fresh `discover --apply` rc | {bench.get('discover_rc', '?')} |")
     out.append(f"| `validate` issues on fresh discover | {bench.get('validate_issue_count', '?')} "
                f"(errors {bench.get('validate_error_count', '?')}, "

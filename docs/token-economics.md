@@ -10,7 +10,7 @@ An AI agent's only real cost is **tokens into context**, so that is the only uni
 
 ## Token cost comparison
 
-> **Estimate basis (read this first).** Token figures are estimates derived from byte size at **~4 chars/token** — a standard rough rule for JSON/source, **not** exact tokenizer counts. They come from **one codebase (this repo): a single data point, not a cross-repo corpus study.** The byte numbers are real and reproducible via `benchmarks/run.py`; treat the *ratio* as illustrative, not a guaranteed average.
+> **Estimate basis (read this first).** Token figures are estimates derived from byte size at **~4 chars/token** — a standard rough rule for JSON/source, **not** exact tokenizer counts. They come from **one codebase (this repo): a single data point, not a cross-repo corpus study.** The byte numbers are real and reproducible via `benchmarks/dogfood.py`; treat the *ratio* as illustrative, not a guaranteed average.
 
 ### Measured on this repo
 
@@ -35,7 +35,7 @@ For the whole-system map across all 8 subsystems:
 |----------|----------------|-------------|---------------|
 | Understand one subsystem | Read 1–15 source files (thousands of tokens) | `bounds describe <name>` (a few hundred tokens for a small subsystem; scales with its exposed API) | ~85–99% for well-factored subsystems |
 | Map all subsystems | Grep `class\|def\|export` across the tree | `bounds list` (~660 tokens) | Near-total |
-| Dependency blast radius | Trace imports by hand | `bounds impact <name>` (transitive consumers + relied-on interfaces) | ~99% |
+| Dependency blast radius | Trace imports by hand | `bounds impact <name>` (transitive consumers + relied-on interfaces) | ~85–99% (tracks consumer-set size) |
 | Detect architecture drift | Manual code review | `bounds validate` (structured report, 0 LLM) | Subjective → deterministic |
 | CI gate for boundary violations | No automated option | `bounds preflight --ci` | Previously impossible |
 
@@ -43,7 +43,7 @@ These percentages follow from the single-repo measurements above; the same cavea
 
 ### Verified across real OSS repos (not just this repo)
 
-To answer the obvious "but you measured your own repo" objection, the harness was run on **16 real third-party repos** across Python/TS/JS, cloned at cited commits, with **exact `tiktoken cl100k_base`** counts. Full corpus, per-repo numbers, full-command coverage, and the bugs it surfaced: **[`benchmarks/results/oss-cross-language.md`](../benchmarks/results/oss-cross-language.md)** (the older two-repo `~4 chars/token` run lives in [`oss-token-economics.md`](../benchmarks/results/oss-token-economics.md) and is superseded).
+To answer the obvious "but you measured your own repo" objection, the harness was run on **16 real third-party repos** across Python/TS/JS, cloned at cited commits, with **exact `tiktoken cl100k_base`** counts. Full corpus, per-repo numbers, full-command coverage, and the bugs it surfaced: **[`benchmarks/results/oss-cross-language.md`](../benchmarks/results/oss-cross-language.md)** (the older two-repo `~4 chars/token` run lives in [`oss-token-economics-archived.md`](../benchmarks/results/oss-token-economics-archived.md) and is superseded).
 
 | Repo | Commit | `bounds list` | All source | Map reduction | `bounds describe` | Subsystem source | Surface reduction |
 |------|--------|-------------:|-----------:|--------------:|------------------:|-----------------:|--------------:|

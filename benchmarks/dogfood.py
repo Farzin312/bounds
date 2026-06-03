@@ -19,7 +19,7 @@ Design constraints (see benchmarks/README.md):
     be pasted straight into a results/ submission.
 
 Usage:
-    python benchmarks/run.py          # or: make benchmark
+    python benchmarks/dogfood.py          # or: make benchmark
 
 Exits 0 on success.
 """
