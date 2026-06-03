@@ -299,6 +299,17 @@ def resolve_import(
 # Check 1 — structural drift
 # ===========================================================================
 _DRIFT_SAMPLE_CAP = 5  # token-lean: a rolled-up drift issue names at most this many symbols, then "+N more"
+_ORPHAN_SAMPLE_CAP = 5  # same, for the rolled-up per-subsystem orphan-export issue
+
+
+def _capped_sample(items: list[str], cap: int) -> str:
+    """Render a rolled-up issue's sample: the first ``cap`` names, then ``+N more`` (token-lean).
+
+    Shared by the drift and orphan rollups so both format their sample identically.
+    """
+    sample = ", ".join(items[:cap])
+    extra = len(items) - cap
+    return sample + (f", +{extra} more" if extra > 0 else "")
 
 
 def check_structural_drift(ctx: CheckContext) -> list[Issue]:
@@ -384,9 +395,7 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
             # error-severity, gate-relevant, and usually few.
             if extras:
                 n = len(extras)
-                sample = ", ".join(extras[:_DRIFT_SAMPLE_CAP])
-                if n > _DRIFT_SAMPLE_CAP:
-                    sample += f", +{n - _DRIFT_SAMPLE_CAP} more"
+                sample = _capped_sample(extras, _DRIFT_SAMPLE_CAP)
                 issues.append(
                     _issue(
                         errors.E_STRUCTURAL_DRIFT,
@@ -605,17 +614,29 @@ def check_orphans(ctx: CheckContext) -> list[Issue]:
             continue
         if name not in iface_tracked:  # no interface-level consumption to judge against — skip
             continue
-        for iface in sorted(sub.expose_names()):
-            if (name, iface) not in consumed:
-                issues.append(
-                    _issue(
-                        errors.E_ORPHAN_EXPORT,
-                        f"interface '{iface}' exposed by '{name}' is consumed by no subsystem",
-                        subsystem=name,
-                        fix=f"remove '{iface}' from {name}.exposes if unused, "
-                        f"or mark '{name}' as a service entrypoint",
-                    )
-                )
+        orphans = [i for i in sorted(sub.expose_names()) if (name, i) not in consumed]
+        if not orphans:
+            continue
+        # Roll up per subsystem (same pattern as the drift rollup above): a library public surface
+        # consumed only externally would otherwise emit ONE issue per export — calibrate enriching
+        # discover's bare consumes edges to interface level (intended) flips this check on, and a
+        # 100-export module then floods `validate` with 100 rows after every calibrate. One issue
+        # carrying the true magnitude in `count` + a capped sample keeps the signal (and overview's
+        # tally) intact while killing the per-symbol flood. The fix still points at the resolution.
+        n = len(orphans)
+        sample = _capped_sample(orphans, _ORPHAN_SAMPLE_CAP)
+        plural = "s" if n != 1 else ""
+        issues.append(
+            _issue(
+                errors.E_ORPHAN_EXPORT,
+                f"{n} interface{plural} exposed by '{name}' {'are' if n != 1 else 'is'} "
+                f"consumed by no subsystem: {sample}",
+                subsystem=name,
+                count=n,
+                fix=f"trim unused exports from {name}.exposes, "
+                f"or mark '{name}' as a service entrypoint if its API is consumed externally",
+            )
+        )
     return issues
 
 
