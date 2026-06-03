@@ -101,6 +101,19 @@ def test_agentsync_must_be_a_mapping():
     assert any(i.code == "E_SCHEMA_INVALID" and "must be a mapping" in i.message for i in issues)
 
 
+def test_malformed_agentsync_does_not_crash_the_loader():
+    """A bare `agentsync: strict` string must NOT raise in from_dict (dict('strict') would) — the
+    manifest has to load so validate_root can report the actionable E_SCHEMA_INVALID instead of a
+    generic E_INTERNAL. The same defensive coercion guards sdd/roles/criticality."""
+    for block in ("agentsync", "sdd", "roles", "criticality"):
+        m = RootManifest.from_dict({"version": "1", "project": "x", block: "garbage"})  # must not raise
+        assert getattr(m, block) == {}
+    # ...and the resolver still works on the degraded value.
+    assert RootManifest.from_dict(
+        {"version": "1", "project": "x", "agentsync": "strict"}
+    ).invocation_level() == "nudge"
+
+
 # ===========================================================================
 # merge_settings_hooks — pure, non-destructive, idempotent
 # ===========================================================================
@@ -329,6 +342,44 @@ def test_sync_directive_lands_in_every_harness_always_read_file(tmp_path):
     aider = (proj / ".aider.conf.yml").read_text(encoding="utf-8")
     assert "# **Invocation policy" in aider
     assert yaml.safe_load(aider)["model"] == "gpt-4"
+
+
+def test_check_flags_a_missing_claude_hook_at_strict(tmp_path):
+    """`--check` must catch a deleted/never-written hook at nudge/strict — the hook is part of
+    Claude's wiring there, so its absence is real drift CI should fail on (not silently 'configured')."""
+    proj = _mk_project(tmp_path, "strict")
+    agentsync.run_agent(proj, mode="sync", only={"claude"})  # writes pointer files + the hook
+    assert (proj / ".claude/settings.json").exists()
+    # delete the hook — the pointer/skill/command files are still intact
+    (proj / ".claude/settings.json").unlink()
+    report = agentsync.run_agent(proj, mode="check", only={"claude"})
+    assert "claude" in report["stale"] and not report["ok"]
+
+
+def test_check_passes_when_claude_hook_is_current(tmp_path):
+    """A freshly-synced strict project is 'configured' (the hook check doesn't false-flag a current hook)."""
+    proj = _mk_project(tmp_path, "strict")
+    agentsync.run_agent(proj, mode="sync", only={"claude"})
+    report = agentsync.run_agent(proj, mode="check", only={"claude"})
+    assert report["ok"] and "claude" in report["configured"]
+
+
+def test_check_corrupt_settings_json_flags_stale(tmp_path):
+    """A corrupted settings.json can't be confirmed → the gate surfaces it as stale, never silently ok."""
+    proj = _mk_project(tmp_path, "nudge")
+    agentsync.run_agent(proj, mode="sync", only={"claude"})
+    (proj / ".claude/settings.json").write_text("{ corrupt", encoding="utf-8")
+    report = agentsync.run_agent(proj, mode="check", only={"claude"})
+    assert "claude" in report["stale"]
+
+
+def test_check_off_level_does_not_require_a_hook(tmp_path):
+    """At off, no hook is owed — a project with no settings.json is 'configured', not stale."""
+    proj = _mk_project(tmp_path, "off")
+    agentsync.run_agent(proj, mode="sync", only={"claude"})
+    assert not (proj / ".claude/settings.json").exists()
+    report = agentsync.run_agent(proj, mode="check", only={"claude"})
+    assert report["ok"] and "claude" in report["configured"]
 
 
 def test_sync_off_removes_a_previously_written_hook_but_keeps_foreign(tmp_path):

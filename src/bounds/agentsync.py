@@ -1199,6 +1199,11 @@ def _config_status(
         )
         if _target_status(root, mem, _MARKDOWN, mem_body, False, "") != "configured":
             return "stale"
+    # Claude's invocation hook (.claude/settings.json) is part of its wiring at nudge/strict — a
+    # deleted, never-written, stale, or corrupted hook is real drift the gate must catch, so a
+    # not-current hook downgrades claude to stale. At "off" no hook is owed, so this stays current.
+    if agent.key == "claude" and not agenthook.claude_hooks_current(root, level):
+        return "stale"
     return "configured"
 
 

@@ -17,6 +17,17 @@ from dataclasses import dataclass, field
 
 from . import config
 
+
+def _as_mapping(value) -> dict:
+    """Coerce an optional manifest block to a dict; a non-mapping degrades to ``{}``.
+
+    Keeps a malformed optional block (e.g. ``agentsync: strict`` parsed as a bare string) from
+    raising inside ``from_dict`` — the manifest must load so schema validation can report the
+    actionable ``E_SCHEMA_INVALID`` rather than the loader crashing with a generic internal error.
+    """
+    return dict(value) if isinstance(value, dict) else {}
+
+
 __all__ = [
     "ExtractResult",
     "ImportRef",
@@ -187,10 +198,14 @@ class RootManifest:
             enforce=str(data.get("enforce", "off")),
             subsystems=[str(s) for s in (data.get("subsystems") or [])],
             entry_points=[str(g) for g in (data.get("entry_points") or [])],
-            roles=dict(data.get("roles") or {}),
-            criticality=dict(data.get("criticality") or {}),
-            sdd=dict(data.get("sdd") or {}),
-            agentsync=dict(data.get("agentsync") or {}),
+            # Optional blocks are coerced to a mapping defensively: a malformed value (e.g. a bare
+            # `agentsync: strict` string) must NOT crash the loader with dict("strict") — it has to
+            # survive load so schema.validate_root can report the actionable E_SCHEMA_INVALID instead
+            # of a generic E_INTERNAL. _as_mapping drops a non-mapping to {}; the validator flags it.
+            roles=_as_mapping(data.get("roles")),
+            criticality=_as_mapping(data.get("criticality")),
+            sdd=_as_mapping(data.get("sdd")),
+            agentsync=_as_mapping(data.get("agentsync")),
             source_path=source_path,
         )
 

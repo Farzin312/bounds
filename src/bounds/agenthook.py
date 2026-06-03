@@ -390,3 +390,27 @@ def _write_json(path: Path, data: dict) -> None:
     """Write pretty JSON (2-space, trailing newline), preserving key order, creating parents."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def claude_hooks_current(root: Path, level: str) -> bool:
+    """True when ``.claude/settings.json`` already holds exactly the Bounds hooks ``level`` wants.
+
+    The verification counterpart of :func:`sync_claude_hooks`, so ``bounds agent --check`` (and CI)
+    can catch a hook that was deleted, never written, or left stale after a level change — at
+    nudge/strict the hook is part of Claude's wiring, so its absence is real drift. Defined as "a
+    sync would be a no-op": current iff merging the desired state produces no change. A malformed
+    settings.json reads as not-current (the gate must surface it, not silently pass). At ``off`` with
+    no Bounds hook present this is trivially true (nothing is owed).
+    """
+    path = settings_path(root)
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False  # malformed → can't confirm the hook; surface it as drift.
+        if not isinstance(data, dict):
+            return False
+    else:
+        data = {}
+    _new, changed = merge_settings_hooks(data, level)
+    return not changed
