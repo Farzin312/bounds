@@ -149,11 +149,18 @@ is ~35k. *Honest caveat:* "vs all source" is a generous baseline — nobody read
 read 99% as "orientation is near-free," and the **54–100% `describe`** range as the number that
 matters for real work.
 
-A same-model **capability head-to-head** on click (answer "what's the public API and what depends on
-it?") cost ~7.2k tokens (`describe` + `impact`) and was tree-sitter-verified *with* Bounds, versus
-~93k tokens of source the model must read and infer the public surface from *without* it — **~13×
-cheaper** and more reliable. (Bounds is a navigation layer, not a comprehension layer — you still
-read source to understand *behavior*.)
+A **measured real-agent A/B** puts numbers on this: same model (Claude Sonnet), same repo
+(supermemory), 6 architecture tasks × 3 reps, the *only* variable being whether the agent could use
+Bounds. With Bounds the agent spent **−60% tokens, −71% cost, −81% wall-clock** and answered
+**18/18 correct vs 8/18 without** — the gap concentrated in dependency, blast-radius, and
+whole-repo-structure questions a grep-only agent can't answer reliably (on one it burned ~364k tokens
+and still failed). A trivial single-symbol lookup was a *wash*, so the win **scales with structural
+difficulty** — cite the range, not one flat number. Full data + method:
+[benchmarks/results/agent-bounds-ab.md](benchmarks/results/agent-bounds-ab.md). A single same-model
+head-to-head on click shows the per-task shape: one "what's the public API and what depends on it?"
+task cost ~7.2k tokens (`describe` + `impact`, tree-sitter-verified) *with* Bounds vs ~93k tokens of
+source read *without* it — **~13× on that one task**. (Bounds is a navigation layer, not a
+comprehension layer — you still read source to understand *behavior*.)
 
 > **Honest scope.** Those numbers are extraction + retrieval economics, which generalize. The
 > auto-`discover` contracts are a **starting draft to curate** — but a fresh `discover → validate`

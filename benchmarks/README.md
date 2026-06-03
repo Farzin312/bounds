@@ -52,7 +52,7 @@ prefers it automatically.
   and the token-economics table for the Bounds repo. Byte-stable; paste straight
   into a results file. (`make benchmark` == `python benchmarks/run.py`.)
 - **One third-party repo:** clone it to a throwaway dir, then
-  `make oss-bench REPO=/path/to/clone [NAME=flask LANG=python]`. This bootstraps
+  `make oss-bench REPO=/path/to/clone [NAME=flask LANG_LABEL=python]`. This bootstraps
   a fresh `.bounds/` in that clone (`init` + `discover`), runs the full command
   surface, and prints a finished combined markdown report — coverage, token
   economics, and command-surface health in one block. **It writes into the
@@ -267,5 +267,6 @@ tokenizer. To submit numbers on a third-party repo instead, run
 | [`claude-baseline.md`](results/claude-baseline.md) | Claude Code | Claude (Opus) | tiktoken cl100k_base |
 | [`agent-bounds-ab.md`](results/agent-bounds-ab.md) | Claude Code (`claude -p` A/B) | Claude (Sonnet) | real Anthropic usage |
 | [`oss-cross-language.md`](results/oss-cross-language.md) | CLI harness | Claude (Opus 4.8) | tiktoken cl100k_base |
+| [`oss-cross-language-rerun-2026-06.md`](results/oss-cross-language-rerun-2026-06.md) | CLI harness (fixed build) | N/A (zero-LLM) | tiktoken cl100k_base |
 | [`oss-fresh-discover-trust.md`](results/oss-fresh-discover-trust.md) | CLI harness | N/A | tiktoken cl100k_base |
 | [`oss-token-economics.md`](results/oss-token-economics.md) | (ARCHIVED — superseded) | Claude (Opus 4.8) | char/4 estimate |

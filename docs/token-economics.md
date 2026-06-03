@@ -35,7 +35,7 @@ For the whole-system map across all 8 subsystems:
 |----------|----------------|-------------|---------------|
 | Understand one subsystem | Read 1–15 source files (thousands of tokens) | `bounds describe <name>` (a few hundred tokens for a small subsystem; scales with its exposed API) | ~85–99% for well-factored subsystems |
 | Map all subsystems | Grep `class\|def\|export` across the tree | `bounds list` (~660 tokens) | Near-total |
-| Dependency blast radius | Trace imports by hand | `bounds impact <name>` (transitive consumers + relied-on interfaces) | ~99% |
+| Dependency blast radius | Trace imports by hand | `bounds impact <name>` (transitive consumers + relied-on interfaces) | ~85–99% (tracks consumer-set size) |
 | Detect architecture drift | Manual code review | `bounds validate` (structured report, 0 LLM) | Subjective → deterministic |
 | CI gate for boundary violations | No automated option | `bounds preflight --ci` | Previously impossible |
 

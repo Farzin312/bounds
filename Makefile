@@ -69,14 +69,15 @@ benchmark: ## Coverage + token-economics report on this repo (dogfood)
 # and prints a finished markdown block (closes the hand-assembled-tables hole).
 # It WRITES a fresh .bounds/ into the target repo (init + discover); point it at
 # a throwaway clone, never your working tree. Usage:
-#   make oss-bench REPO=/path/to/clone [NAME=flask LANG=python]
+#   make oss-bench REPO=/path/to/clone [NAME=flask LANG_LABEL=python]
+# (the label knob is LANG_LABEL, not LANG, so it can't collide with the shell's $LANG locale.)
 oss-bench: ## Combined coverage + token + command-health report on a cloned repo (REPO=DIR)
 	@if [ -z "$(REPO)" ]; then \
-		echo "usage: make oss-bench REPO=/path/to/cloned/repo [NAME=flask LANG=python]"; \
+		echo "usage: make oss-bench REPO=/path/to/cloned/repo [NAME=flask LANG_LABEL=python]"; \
 		exit 2; \
 	fi
 	$(PY) benchmarks/oss_report.py --repo "$(REPO)" \
-		$(if $(NAME),--name "$(NAME)",) $(if $(LANG),--lang "$(LANG)",)
+		$(if $(NAME),--name "$(NAME)",) $(if $(LANG_LABEL),--lang "$(LANG_LABEL)",)
 
 # agent-ab: REAL-agent A/B benchmark. Drives the Claude Code CLI (`claude -p`) on a set of
 # architecture tasks WITH vs WITHOUT Bounds and measures actual tokens/cost/time/turns + blind-
