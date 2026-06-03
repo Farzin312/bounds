@@ -32,8 +32,11 @@ benchmarks/
   oss_features.py    # full-command smoke matrix + discover→calibrate→validate convergence (JSON)
   oss_report.py      # runs oss_bench + oss_features on one cloned repo, prints a COMBINED
                      #   markdown report (coverage + tokens + command health) — `make oss-bench`
+  agent_ab.py        # REAL-agent A/B: drives `claude -p` with vs without Bounds and measures
+                     #   actual tokens/cost/time/turns + blind-judged answer quality (Metric 5)
   results/
     claude-baseline.md          # living proof: `make benchmark` output on this repo (coverage + tokens)
+    agent-bounds-ab.md          # real-agent A/B (supermemory): with vs without Bounds, measured
     oss-cross-language.md       # 16-repo sweep: economics, correctness, full-command coverage
     oss-fresh-discover-trust.md # first-run OSS trust/recovery benchmark
     oss-token-economics.md      # ARCHIVED — original 2-repo estimate run (superseded; do not cite)
@@ -210,14 +213,40 @@ deterministic and identical across models:
 
 These do not vary by model or tokenizer; they are a property of the engine.
 
-### 5. Agent task outcomes (contributor-submitted, per model/agent)
+### 5. Agent task outcomes — measured A/B (`agent_ab.py`)
 
-The part that genuinely varies by model/agent and where contributors add value
-over time: did the agent make an architecture-safe change *using* Bounds versus
-without it? Structured, honest notes — e.g. "found the right subsystem in 1
-`bounds describe` call instead of 6 file reads", or "`bounds preflight` caught a
-boundary break before commit". Qualitative is fine; be specific about the task
-and the model.
+Metrics 1–2 measure a **static proxy**: Bounds output tokens vs reading a subsystem's
+*whole* source. That is an **upper bound** on the saving — no real agent reads all the
+source; it greps selectively — so it answers "how much smaller is the contract" not "how
+much does an agent actually save." `agent_ab.py` closes that gap by measuring the **real
+thing**: it drives the actual Claude Code CLI (`claude -p`) on a set of architecture tasks,
+twice, holding model/tasks/repo constant and changing **only** whether the agent can use
+Bounds.
+
+- WITHOUT: tools = Read, Grep, Glob (native search; no Bounds).
+- WITH: tools = Read, Grep, Glob, Bash(bounds:*) + a note to prefer Bounds.
+
+It records **real Anthropic usage** (tokens, USD, wall-clock, turns, tool calls — from the
+CLI's own JSON result, not an estimate) and scores **answer quality 0–100** with a blind LLM
+judge against a verified ground-truth fact per task. N reps per cell; mean + median + spread.
+
+```
+make agent-ab REPO=/path/to/repo                       # or:
+python benchmarks/agent_ab.py --repo <repo> --reps 3   # full matrix
+python benchmarks/agent_ab.py --repo <repo> --smoke    # 1 task, both arms (quick check)
+python benchmarks/agent_ab.py --repo <repo> --render-only results/agent_ab_raw.jsonl  # re-render
+```
+
+First run (`supermemory`, Sonnet, 6 tasks × 3 reps — see
+[`results/agent-bounds-ab.md`](results/agent-bounds-ab.md)): **−60% tokens, −71% cost, −81%
+wall-clock, +43.5 quality points**, and **18/18 vs 8/18 correct** — the correctness gap
+concentrated in dependency / blast-radius / whole-repo-structure questions a grep-only agent
+cannot answer reliably. A trivial single-symbol lookup is a wash, so cite the **range across
+task difficulty**, not one flat number. (Each agent run costs real money — budget ~$0.05–0.50
+per run; the headline matrix is ~36 runs + 36 cheap judge calls.)
+
+Contributors can still add qualitative notes (e.g. "`bounds preflight` caught a boundary break
+before commit"); be specific about the task and model.
 
 ## How to contribute a result
 
@@ -236,6 +265,7 @@ tokenizer. To submit numbers on a third-party repo instead, run
 | Submission | Agent | Model | Tokenizer |
 |------------|-------|-------|-----------|
 | [`claude-baseline.md`](results/claude-baseline.md) | Claude Code | Claude (Opus) | tiktoken cl100k_base |
+| [`agent-bounds-ab.md`](results/agent-bounds-ab.md) | Claude Code (`claude -p` A/B) | Claude (Sonnet) | real Anthropic usage |
 | [`oss-cross-language.md`](results/oss-cross-language.md) | CLI harness | Claude (Opus 4.8) | tiktoken cl100k_base |
 | [`oss-fresh-discover-trust.md`](results/oss-fresh-discover-trust.md) | CLI harness | N/A | tiktoken cl100k_base |
 | [`oss-token-economics.md`](results/oss-token-economics.md) | (ARCHIVED — superseded) | Claude (Opus 4.8) | char/4 estimate |

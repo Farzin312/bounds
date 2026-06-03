@@ -16,7 +16,7 @@ BOUNDS := $(if $(wildcard $(VENV)/bin/bounds),$(VENV)/bin/bounds,bounds)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev test lint validate benchmark oss-bench clean
+.PHONY: help install dev test lint validate benchmark oss-bench agent-ab clean
 
 help: ## List available targets
 	@echo "Bounds — make targets:"
@@ -27,6 +27,7 @@ help: ## List available targets
 	@echo "  make validate           Dogfood: bounds validate --human"
 	@echo "  make benchmark          Coverage + token-economics report on THIS repo (dogfood)"
 	@echo "  make oss-bench REPO=DIR Combined coverage + token + command-health report on a cloned repo"
+	@echo "  make agent-ab REPO=DIR  Real-agent A/B (with vs without Bounds); needs claude CLI, costs \$$"
 	@echo "  make clean              Remove build/cache artifacts and .bounds/cache.db"
 	@echo ""
 	@echo "Using PY=$(PY)  BOUNDS=$(BOUNDS)"
@@ -76,6 +77,21 @@ oss-bench: ## Combined coverage + token + command-health report on a cloned repo
 	fi
 	$(PY) benchmarks/oss_report.py --repo "$(REPO)" \
 		$(if $(NAME),--name "$(NAME)",) $(if $(LANG),--lang "$(LANG)",)
+
+# agent-ab: REAL-agent A/B benchmark. Drives the Claude Code CLI (`claude -p`) on a set of
+# architecture tasks WITH vs WITHOUT Bounds and measures actual tokens/cost/time/turns + blind-
+# judged answer quality. Unlike `benchmark`/`oss-bench` (a static contract-vs-source proxy), this
+# measures what an agent really spends. COSTS REAL MONEY (~$0.05-0.50 per run; ~36 runs default)
+# and needs the `claude` CLI authenticated. Usage:
+#   make agent-ab REPO=/path/to/repo [REPS=3 MODEL=sonnet]
+agent-ab: ## Real-agent A/B: with vs without Bounds, measured (REPO=DIR; costs real $)
+	@if [ -z "$(REPO)" ]; then \
+		echo "usage: make agent-ab REPO=/path/to/repo [REPS=3 MODEL=sonnet]"; \
+		exit 2; \
+	fi
+	$(PY) benchmarks/agent_ab.py --repo "$(REPO)" \
+		$(if $(REPS),--reps "$(REPS)",) $(if $(MODEL),--model "$(MODEL)",) \
+		--out benchmarks/results/agent-bounds-ab.md
 
 clean: ## Remove build/cache artifacts and the bounds cache db
 	rm -rf build dist .pytest_cache *.egg-info src/*.egg-info
