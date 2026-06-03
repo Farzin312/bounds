@@ -370,4 +370,4 @@ python benchmarks/oss_features.py --repo /path/to/clone
 Each row above is reproducible by shallow-cloning the repo at its cited commit and re-running the two
 harnesses. Token counts are exact under `tiktoken cl100k_base`; install `tiktoken` in the venv or the
 harness falls back to a labeled `~4 chars/token` estimate. The earlier two-repo run
-(`benchmarks/results/oss-token-economics.md`) used that estimate and is superseded by this exact run.
+(`benchmarks/results/oss-token-economics-archived.md`) used that estimate and is superseded by this exact run.

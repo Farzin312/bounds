@@ -2,7 +2,7 @@
 """Shared benchmark helpers — the ONE home for token counting, the `bounds` runner,
 manifest-source resolution, subsystem selection, and the authoritative coverage read.
 
-Every benchmark harness (``run.py``, ``oss_bench.py``, ``oss_features.py``) imports from
+Every benchmark harness (``dogfood.py``, ``oss_bench.py``, ``oss_features.py``) imports from
 here so the three never disagree on how a token is counted, how `bounds` is invoked, or what
 "coverage" means. There is no third-party dependency: tiktoken is an OPTIONAL import (exact
 cl100k_base when present, a clearly-labeled ~1-token/4-chars estimate otherwise).
@@ -225,7 +225,7 @@ def read_coverage(root: Path) -> dict:
 
 
 def coverage_summary_lines(cov: dict) -> list[str]:
-    """Render a coverage dict into human markdown lines (shared by run.py / oss table footer).
+    """Render a coverage dict into human markdown lines (shared by dogfood.py / oss table footer).
 
     Reads the ACTUAL nested shape the CLI emits at ``stats.coverage.mapping`` —
     ``supported:{total,mapped,unowned}`` and ``unsupported:{dark,declared,by_language}`` — not the

@@ -4,7 +4,7 @@ Baseline numbers for the Bounds repo itself, framed in the two headline value
 props — **mapping coverage** and **token economics** — plus retrieval scaling
 and correctness. No hardware specs are reported — see `../README.md` ("Why
 there are no hardware specs"). The token-economics + coverage block below is the
-verbatim output of `make benchmark` (`python benchmarks/run.py`) on this repo.
+verbatim output of `make benchmark` (`python benchmarks/dogfood.py`) on this repo.
 
 ## Environment
 
@@ -23,7 +23,7 @@ verbatim output of `make benchmark` (`python benchmarks/run.py`) on this repo.
 
 ## 1. Mapping coverage + token economics (headline)
 
-Verbatim output of `make benchmark` (`python benchmarks/run.py`) on this repo:
+Verbatim output of `make benchmark` (`python benchmarks/dogfood.py`) on this repo:
 
 ```
 # Bounds benchmark — mapping coverage + token economics
@@ -121,7 +121,7 @@ Baseline qualitative observations from dogfooding with Claude Code:
 
 For a **measured** (not qualitative) agent A/B — same model, with vs without
 Bounds, real token/cost/quality numbers — see
-[`agent-bounds-ab.md`](agent-bounds-ab.md).
+[`agentab-supermemory-sonnet.md`](agentab-supermemory-sonnet.md).
 
 Contributors: add per-model results (Codex, Gemini, etc.) as separate files in
 this directory using `../TEMPLATE.md`.

@@ -264,7 +264,7 @@ def main() -> int:
     ap.add_argument("--max-turns", type=int, default=25)
     ap.add_argument("--concurrency", type=int, default=3)
     ap.add_argument("--smoke", action="store_true", help="1 task x 1 rep, both conditions")
-    ap.add_argument("--raw", default=None, help="path to write raw JSONL (default: results/agent_ab_raw.jsonl)")
+    ap.add_argument("--raw", default=None, help="path to write raw JSONL (default: results/agentab-supermemory-sonnet.raw.jsonl)")
     ap.add_argument("--out", default=None, help="path to write the markdown report")
     ap.add_argument("--render-only", default=None,
                     help="skip running; re-render the markdown report from an existing raw JSONL")
@@ -317,7 +317,7 @@ def main() -> int:
         row["correct"] = v["correct"]
         row["judge_note"] = v["note"]
 
-    raw_path = Path(args.raw) if args.raw else BENCH_DIR / "results" / "agent_ab_raw.jsonl"
+    raw_path = Path(args.raw) if args.raw else BENCH_DIR / "results" / "agentab-supermemory-sonnet.raw.jsonl"
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     with raw_path.open("w", encoding="utf-8") as fh:
         for row in sorted(rows, key=lambda r: (r["task"], r["condition"], r["rep"])):

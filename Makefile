@@ -62,7 +62,7 @@ validate: ## Dogfood Bounds on itself
 # latency is a de-emphasized, separately-labeled note in benchmarks/results/.
 # See benchmarks/README.md for methodology and how to contribute a result.
 benchmark: ## Coverage + token-economics report on this repo (dogfood)
-	$(PY) benchmarks/run.py
+	$(PY) benchmarks/dogfood.py
 
 # oss-bench: combined coverage + token-economics + command-surface health report
 # for ONE already-cloned third-party repo. Runs oss_bench.py + oss_features.py
@@ -92,7 +92,7 @@ agent-ab: ## Real-agent A/B: with vs without Bounds, measured (REPO=DIR; costs r
 	fi
 	$(PY) benchmarks/agent_ab.py --repo "$(REPO)" \
 		$(if $(REPS),--reps "$(REPS)",) $(if $(MODEL),--model "$(MODEL)",) \
-		--out benchmarks/results/agent-bounds-ab.md
+		--out benchmarks/results/agentab-supermemory-sonnet.md
 
 clean: ## Remove build/cache artifacts and the bounds cache db
 	rm -rf build dist .pytest_cache *.egg-info src/*.egg-info

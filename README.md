@@ -156,7 +156,7 @@ Bounds. With Bounds the agent spent **−60% tokens, −71% cost, −81% wall-cl
 whole-repo-structure questions a grep-only agent can't answer reliably (on one it burned ~364k tokens
 and still failed). A trivial single-symbol lookup was a *wash*, so the win **scales with structural
 difficulty** — cite the range, not one flat number. Full data + method:
-[benchmarks/results/agent-bounds-ab.md](benchmarks/results/agent-bounds-ab.md). A single same-model
+[benchmarks/results/agentab-supermemory-sonnet.md](benchmarks/results/agentab-supermemory-sonnet.md). A single same-model
 head-to-head on click shows the per-task shape: one "what's the public API and what depends on it?"
 task cost ~7.2k tokens (`describe` + `impact`, tree-sitter-verified) *with* Bounds vs ~93k tokens of
 source read *without* it — **~13× on that one task**. (Bounds is a navigation layer, not a
@@ -164,13 +164,14 @@ comprehension layer — you still read source to understand *behavior*.)
 
 > **Honest scope.** Those numbers are extraction + retrieval economics, which generalize. The
 > auto-`discover` contracts are a **starting draft to curate** — but a fresh `discover → validate`
-> now converges *close to clean* on well-factored repos (click **3** issues, express **1**, requests
-> **6** — all `ok: true`) and to a small set of genuine, mostly-advisory issues on large or
-> type-heavy ones (flask 19, axios 59, zod 155 — down from 314 / 191 / 3,025 before the noise fixes).
-> What remains is real signal (boundary edges, cross-module re-export kinds), not flood: the
-> orphan-export, test-case, and Next.js framework-callback floods are eliminated (see
-> [docs/known-issues.md](docs/known-issues.md) BOUNDS-012/015/016). Treat the drift gate as something
-> you reach after a light curation pass, not a one-command guarantee on every repo. The
+> now converges near-clean on real repos: **click 1, express 1, requests 1, flask 8, axios 4,
+> zod 4 issues — all `ok: true`** (down from 314 / 191 / 3,025 on the large/type-heavy ones before
+> the noise fixes). What remains is real signal (boundary edges, import cycles, cross-module
+> re-export kinds), not flood: the orphan-export, test-case, and Next.js framework-callback floods
+> are eliminated (see [docs/known-issues.md](docs/known-issues.md) BOUNDS-012/015/016), and
+> `calibrate --apply` now rolls up per-subsystem orphan exports so it converges instead of
+> re-inflating the count. Treat the drift gate as something you reach after a light curation pass,
+> not a one-command guarantee on every repo. The
 > [cross-language report](benchmarks/results/oss-cross-language.md) documents this in full.
 
 **Contributors welcome:** `make benchmark` reports this repo's own coverage + token economics, and

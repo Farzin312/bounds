@@ -10,7 +10,7 @@ An AI agent's only real cost is **tokens into context**, so that is the only uni
 
 ## Token cost comparison
 
-> **Estimate basis (read this first).** Token figures are estimates derived from byte size at **~4 chars/token** — a standard rough rule for JSON/source, **not** exact tokenizer counts. They come from **one codebase (this repo): a single data point, not a cross-repo corpus study.** The byte numbers are real and reproducible via `benchmarks/run.py`; treat the *ratio* as illustrative, not a guaranteed average.
+> **Estimate basis (read this first).** Token figures are estimates derived from byte size at **~4 chars/token** — a standard rough rule for JSON/source, **not** exact tokenizer counts. They come from **one codebase (this repo): a single data point, not a cross-repo corpus study.** The byte numbers are real and reproducible via `benchmarks/dogfood.py`; treat the *ratio* as illustrative, not a guaranteed average.
 
 ### Measured on this repo
 
@@ -43,7 +43,7 @@ These percentages follow from the single-repo measurements above; the same cavea
 
 ### Verified across real OSS repos (not just this repo)
 
-To answer the obvious "but you measured your own repo" objection, the harness was run on **16 real third-party repos** across Python/TS/JS, cloned at cited commits, with **exact `tiktoken cl100k_base`** counts. Full corpus, per-repo numbers, full-command coverage, and the bugs it surfaced: **[`benchmarks/results/oss-cross-language.md`](../benchmarks/results/oss-cross-language.md)** (the older two-repo `~4 chars/token` run lives in [`oss-token-economics.md`](../benchmarks/results/oss-token-economics.md) and is superseded).
+To answer the obvious "but you measured your own repo" objection, the harness was run on **16 real third-party repos** across Python/TS/JS, cloned at cited commits, with **exact `tiktoken cl100k_base`** counts. Full corpus, per-repo numbers, full-command coverage, and the bugs it surfaced: **[`benchmarks/results/oss-cross-language.md`](../benchmarks/results/oss-cross-language.md)** (the older two-repo `~4 chars/token` run lives in [`oss-token-economics-archived.md`](../benchmarks/results/oss-token-economics-archived.md) and is superseded).
 
 | Repo | Commit | `bounds list` | All source | Map reduction | `bounds describe` | Subsystem source | Surface reduction |
 |------|--------|-------------:|-----------:|--------------:|------------------:|-----------------:|--------------:|
