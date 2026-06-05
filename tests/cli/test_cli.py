@@ -38,11 +38,25 @@ def test_validate_clean_is_fresh(sample_project, monkeypatch):
 
 
 def test_validate_quick_mode(git_sample_project, monkeypatch):
-    """--quick (the git-diff fast path) must tag its output mode=quick so callers know it's the sub-200ms budgeted run."""
+    """--quick tags its output and names skipped full checks, so callers know it is not a complete gate."""
     monkeypatch.chdir(git_sample_project)
     result = CliRunner().invoke(main, ["validate", "--quick"])
     assert result.exit_code == 0
-    assert _json(result)["mode"] == "quick"
+    data = _json(result)
+    assert data["mode"] == "quick"
+    assert {"cycles", "coverage"} <= set(data["skipped_checks"])
+
+
+def test_validate_human_non_enforcing_errors_not_ok(py_project, monkeypatch):
+    """Human output must not end with bare OK when enforce=off allows error-severity drift."""
+    (py_project / "src" / "models" / "thing.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(py_project)
+
+    result = CliRunner().invoke(main, ["validate", "--human"])
+    assert result.exit_code == 0
+    assert "✗ errors" in result.output
+    assert "COMPLETED WITH ERRORS (non-enforcing mode: enforce=off)" in result.output
+    assert not result.output.rstrip().endswith("OK")
 
 
 def test_describe_returns_manifest(sample_project, monkeypatch):

@@ -380,7 +380,7 @@ class ValidationReport:
     stats: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "validation_status": self.status,
             "mode": self.mode,
             "ok": self.ok,
@@ -389,6 +389,9 @@ class ValidationReport:
             # order (determinism); values are already sorted by their producers.
             "stats": dict(sorted(self.stats.items())),
         }
+        if self.stats.get("skipped_checks"):
+            payload["skipped_checks"] = list(self.stats["skipped_checks"])
+        return payload
 
     def errors(self) -> list[Issue]:
         return [i for i in self.issues if i.severity == "error"]

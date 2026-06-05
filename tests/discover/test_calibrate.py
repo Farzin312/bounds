@@ -144,9 +144,9 @@ def test_calibrate_single_subsystem_scope(tmp_path):
     assert set(result["subsystems"]) <= {"auth"}
 
 
-def test_calibrate_apply_drops_fully_stale_edge_to_bare(tmp_path):
-    """An edge whose only interface is a ghost collapses to a bare edge (key omitted), never a noisy `interfaces: []`."""
-    # An edge whose ONLY interface is a ghost must not be left as `interfaces: []`.
+def test_calibrate_apply_removes_fully_stale_existing_provider_edge(tmp_path):
+    """A declared provider edge with no current source import is stale and removed, not kept as
+    a bare edge that can still participate in cycles."""
     _build(tmp_path)
     cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
     (tmp_path / "src" / "auth" / "login.py").write_text(
@@ -164,11 +164,88 @@ def test_calibrate_apply_drops_fully_stale_edge_to_bare(tmp_path):
             sort_keys=False,
         )
     )
+    proposal = run_calibrate(tmp_path, subsystem="auth")
+    assert proposal["subsystems"]["auth"]["remove_consume_edges"] == ["db"]
+
     run_calibrate(tmp_path, subsystem="auth", apply=True)
     auth = yaml.safe_load((cfg / "auth.yaml").read_text())
-    db_edge = next(c for c in auth["consumes"] if c["subsystem"] == "db")
-    # Bare edge, not a noisy empty list.
-    assert db_edge.get("interfaces", []) == [] and "interfaces" not in db_edge
+    assert "consumes" not in auth
+
+
+def test_calibrate_prunes_empty_existing_provider_edge_when_import_moved(tmp_path):
+    """Regression for stale cycle cleanup: if an existing subsystem consume edge is present but
+    extraction finds no direct import to that provider anymore, --apply removes the edge."""
+    _build(tmp_path)
+    cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
+    (tmp_path / "src" / "auth" / "login.py").write_text(
+        "def login(u):\n    pass\n",
+        encoding="utf-8",
+    )
+    _set_auth_consumes(tmp_path, [{"subsystem": "db"}])
+
+    run_calibrate(tmp_path, subsystem="auth", apply=True)
+    auth = yaml.safe_load((cfg / "auth.yaml").read_text())
+    assert "consumes" not in auth
+
+
+def test_calibrate_keeps_package_member_import_edges(tmp_path):
+    """`from . import provider` is a real dependency on provider.py, not a stale bare edge."""
+    src = tmp_path / "pkg"
+    src.mkdir()
+    (src / "__init__.py").write_text("", encoding="utf-8")
+    (src / "provider.py").write_text("def query():\n    pass\n", encoding="utf-8")
+    (src / "consumer.py").write_text("from . import provider\n\ndef run():\n    return provider.query()\n", encoding="utf-8")
+
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        yaml.safe_dump({"version": "1", "project": "pkg", "subsystems": ["provider", "consumer"]})
+    )
+    (cfg / config.MANIFESTS_DIR / "provider.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "provider",
+                "role": "library",
+                "criticality": "leaf",
+                "files": ["pkg/provider.py"],
+                "exposes": [{"name": "query", "kind": "function"}],
+                "consumes": [],
+            },
+            sort_keys=False,
+        )
+    )
+    (cfg / config.MANIFESTS_DIR / "consumer.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "consumer",
+                "role": "library",
+                "criticality": "leaf",
+                "files": ["pkg/consumer.py"],
+                "exposes": [{"name": "run", "kind": "function"}],
+                "consumes": [{"subsystem": "provider"}],
+            },
+            sort_keys=False,
+        )
+    )
+
+    result = run_calibrate(tmp_path, subsystem="consumer")
+    assert "consumer" not in result["subsystems"]
+
+
+def test_calibrate_prune_missing_exports_accepts_supported_needs_review(tmp_path):
+    """`--prune-missing-exports` is the safe CLI path for a supported-language expose that source
+    no longer exports but another manifest still consumes."""
+    _build(tmp_path)
+    cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
+
+    default = run_calibrate(tmp_path, subsystem="db")
+    assert default["subsystems"]["db"]["needs_review"] == ["KEEPME"]
+
+    result = run_calibrate(tmp_path, subsystem="db", apply=True, prune_missing_exports=True)
+    assert result["subsystems"]["db"]["needs_review"] == []
+    db = yaml.safe_load((cfg / "db.yaml").read_text())
+    names = {e["name"] for e in db["exposes"]}
+    assert "KEEPME" not in names
 
 
 def test_calibrate_clean_subsystem_absent_from_proposal(tmp_path):
@@ -274,12 +351,11 @@ def test_calibrate_never_removes_unsupported_language_exposes(tmp_path):
     remove_exposes (no data loss on hand-authored unsupported-language manifests)."""
     _build_unsupported(tmp_path)
     result = run_calibrate(tmp_path)
-    # payments has only needs_review entries (no add/remove/consumes), so _has_changes is False and
-    # it drops from proposals entirely — the point: zero remove_exposes for it anywhere.
-    blob = str(result["subsystems"])
+    # payments has only needs_review entries (no add/remove/consumes), so it is visible for human
+    # review but still has zero auto-removal.
     payments = result["subsystems"].get("payments", {})
     assert payments.get("remove_exposes", []) == []      # never auto-removed
-    assert "remove_exposes" not in blob or "Charge" not in str(payments.get("remove_exposes", []))
+    assert payments.get("needs_review") == ["Charge", "Refund"]
     assert result["summary"]["removed"] == 1  # only db's DROPME, not the Go exposes
 
 
@@ -311,6 +387,18 @@ def test_calibrate_unsupported_exposes_surfaced_as_needs_review(tmp_path):
     p = _calibrate_one("payments", subs, fo, ex, gen, kn, sx, {}, None, uns)
     assert p["remove_exposes"] == []
     assert p["needs_review"] == ["Charge", "Refund"]
+
+
+def test_calibrate_prune_missing_exports_preserves_unsupported_needs_review(tmp_path):
+    """The reviewed-removal flag must not strip hand-authored unsupported-language exposes; Bounds
+    has no extractor proof that they disappeared."""
+    _build_unsupported(tmp_path)
+    result = run_calibrate(tmp_path, subsystem="payments", apply=True, prune_missing_exports=True)
+    payments = yaml.safe_load(
+        (tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR / "payments.yaml").read_text()
+    )
+    assert result["subsystems"]["payments"]["needs_review"] == ["Charge", "Refund"]
+    assert {e["name"] for e in payments["exposes"]} == {"Charge", "Refund"}
 
 
 # ---- Drift baseline + check (the freshness gate) ----

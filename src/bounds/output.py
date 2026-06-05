@@ -68,6 +68,7 @@ _HUMAN_RENDERERS = (
     (_has("health", "edges"), lambda p: _render_overview_human(p)),
     (lambda p: "blast_radius" in p, lambda p: _render_impact_human(p)),
     (lambda p: p.get("mode") == "calibrate", lambda p: _render_calibrate_human(p)),
+    (lambda p: p.get("mode") == "edit", lambda p: _render_edit_human(p)),
     (lambda p: "project" in p and isinstance(p.get("subsystems"), list), lambda p: _render_list_human(p)),
     (lambda p: "bounds_dir" in p, lambda p: _render_init_human(p)),
     (_has("created", "targets"), lambda p: _render_ci_human(p)),
@@ -403,6 +404,8 @@ def _render_calibrate_human(payload: dict) -> str:
             bits.append("review: " + ", ".join(p["needs_review"]))
         if p.get("add_consumes"):
             bits.append("consumes+: " + ", ".join(c["subsystem"] for c in p["add_consumes"]))
+        if p.get("remove_consume_edges"):
+            bits.append("consumes-: " + ", ".join(p["remove_consume_edges"]))
         if p.get("unknown_consumes"):
             bits.append("consumes? " + ", ".join(p["unknown_consumes"]))
         lines.append(f"  {name}: " + " | ".join(bits) if bits else f"  {name}")
@@ -410,6 +413,12 @@ def _render_calibrate_human(payload: dict) -> str:
         hint = "pruned" if payload.get("applied") else "rename them, or re-run with --prune-unknown to remove"
         lines.append(f"  (consumes? = consumes a subsystem that doesn't exist — {hint})")
     return "\n".join(lines)
+
+
+def _render_edit_human(payload: dict) -> str:
+    """Render `bounds edit` as a concise metadata update summary."""
+    fields = ", ".join(payload.get("updated", []) or [])
+    return f"edit: updated {payload.get('subsystem')} ({fields})"
 
 
 def _render_init_human(payload: dict) -> str:
@@ -651,7 +660,10 @@ def _render_report_dict_human(payload: dict) -> str:
 
     error_count = len(by_severity["error"])
     lines.append("")
-    if ok:
+    if ok and error_count:
+        mode = stats.get("enforce", "off")
+        lines.append(f"COMPLETED WITH ERRORS (non-enforcing mode: enforce={mode})")
+    elif ok:
         lines.append("OK")
     else:
         lines.append(f"FAILED ({error_count} error{'s' if error_count != 1 else ''})")

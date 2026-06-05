@@ -9,10 +9,6 @@ exposes:
 - name: emit
   kind: function
 consumes:
-- subsystem: models
-  via: models
-  interfaces:
-  - ValidationReport
 - subsystem: errors
   interfaces:
   - BoundsError

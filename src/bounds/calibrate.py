@@ -44,13 +44,18 @@ __all__ = ["run_calibrate"]
 def run_calibrate(
     project_root: Path, *, subsystem: str | None = None, apply: bool = False,
     prune_unknown: bool = False,
+    prune_missing_exports: bool = False,
 ) -> dict:
     """Reconcile manifests against source; return the proposed diff (and apply it if asked).
 
     ``prune_unknown`` (only meaningful with ``apply``) additionally removes ``consumes`` edges
     that point at a subsystem which doesn't exist. Off by default so a genuine forward reference
     survives an apply; on, it clears the stale/typo'd edges that otherwise keep ``validate``
-    reporting ``unresolved`` forever."""
+    reporting ``unresolved`` forever.
+
+    ``prune_missing_exports`` is an explicit review acceptance path: a supported-language expose that
+    source no longer exports is removed even when another manifest still consumes it. Unsupported-
+    language exposes remain protected because Bounds has no extractor evidence that they are gone."""
     _root, subs, _ = manifest_loader.load_all(project_root)
     if subsystem is not None and subsystem not in subs:
         raise errors.BoundsError(
@@ -85,6 +90,8 @@ def run_calibrate(
             name, subs, file_owner, extracts, generated, known_noext, suffix_index,
             consumed_providers_ifaces, aliases, unsupported_owners,
         )
+        if prune_missing_exports:
+            _accept_supported_review_removals(proposal)
         if _has_changes(proposal):
             proposals[name] = proposal
 
@@ -157,17 +164,25 @@ def _calibrate_one(
             needs_review.append(s)
         else:
             remove_exposes.append(s)
+    review_reasons = {
+        s: "unsupported_language" if owns_unsupported else "consumed_contract"
+        for s in needs_review
+    }
 
     # CONSUMES reconciliation. A direct named import from a provider maps to an interface-level
     # consume when the provider exposes that name; namespace/module imports still record only the
     # provider edge. This keeps orphan checks useful after calibration instead of leaving real
     # cross-subsystem APIs looking unconsumed.
     actual_consumes: dict[str, set[str]] = {}
+    declared_provider_names = {c.subsystem for c in sub.consumes}
     for rel in own_files:
         for imp in extracts[rel].imports:
-            target = resolve_import(rel, imp.module, known_noext, suffix_index, aliases)
-            owner = file_owner.get(target) if target else None
-            if owner and owner != name and owner in subs:
+            for target, is_member in _resolve_import_targets(rel, imp, known_noext, suffix_index, aliases):
+                owner = file_owner.get(target) if target else None
+                if not (owner and owner != name and owner in subs):
+                    continue
+                if is_member and owner not in declared_provider_names:
+                    continue
                 provider_exposes = subs[owner].expose_names()
                 actual_consumes.setdefault(owner, set()).update(
                     nm for nm in imp.names if nm in provider_exposes
@@ -184,6 +199,7 @@ def _calibrate_one(
     ]
 
     remove_consumes: list[dict] = []
+    remove_consume_edges: list[str] = []
     unknown_consumes: list[str] = []
     for c in sub.consumes:
         provider = subs.get(c.subsystem)
@@ -195,6 +211,9 @@ def _calibrate_one(
             # E_UNRESOLVED_REFERENCE; this is the calibrate-side fix path for it.
             unknown_consumes.append(c.subsystem)
             continue
+        if c.subsystem not in actual_consumes:
+            remove_consume_edges.append(c.subsystem)
+            continue
         stale = sorted(i for i in c.interfaces if i not in provider.expose_names())
         if stale:
             remove_consumes.append({"subsystem": c.subsystem, "interfaces": stale})
@@ -203,11 +222,47 @@ def _calibrate_one(
         "add_exposes": add_exposes,
         "remove_exposes": remove_exposes,
         "needs_review": needs_review,
+        "review_reasons": review_reasons,
         "add_consumes": add_consumes,
         "add_consume_interfaces": add_consume_interfaces,
         "remove_consumes": remove_consumes,
+        "remove_consume_edges": sorted(set(remove_consume_edges)),
         "unknown_consumes": sorted(set(unknown_consumes)),
     }
+
+
+def _resolve_import_targets(
+    importer_rel: str,
+    imp,
+    known_noext: dict[str, str],
+    suffix_index: dict[str, str],
+    aliases: "tsconfig.TsAliases | None",
+) -> list[tuple[str, bool]]:
+    """Resolve the imported module plus Python package-member imports.
+
+    Python commonly writes ``from . import output`` or ``from .. import gitutil``. The raw module
+    specifier resolves to the package, but the dependency is the imported member module when a
+    sibling file/package exists. Without checking those member targets, stale-edge pruning can delete
+    real dependencies that happen to use package import syntax."""
+    targets: list[tuple[str, bool]] = []
+
+    def add(module: str, *, is_member: bool) -> None:
+        target = resolve_import(importer_rel, module, known_noext, suffix_index, aliases)
+        item = (target, is_member) if target else None
+        if item and item not in targets:
+            targets.append(item)
+
+    add(imp.module, is_member=False)
+    for name in imp.names:
+        if not name:
+            continue
+        if imp.module.endswith("."):
+            add(f"{imp.module}{name}", is_member=True)
+        elif imp.module:
+            add(f"{imp.module}.{name}", is_member=True)
+        else:
+            add(name, is_member=True)
+    return targets
 
 
 def _has_changes(p: dict) -> bool:
@@ -216,9 +271,11 @@ def _has_changes(p: dict) -> bool:
         for k in (
             "add_exposes",
             "remove_exposes",
+            "needs_review",
             "add_consumes",
             "add_consume_interfaces",
             "remove_consumes",
+            "remove_consume_edges",
             "unknown_consumes",  # surfaced so a dangling-consumes-only subsystem still appears
         )
     )
@@ -231,9 +288,34 @@ def _has_applicable_changes(p: dict, prune_unknown: bool) -> bool:
     written, so a proposal carrying only those must not trigger a no-op manifest rewrite (which
     would strip comments for nothing)."""
     if any(p.get(k) for k in
-           ("add_exposes", "remove_exposes", "add_consumes", "add_consume_interfaces", "remove_consumes")):
+           ("add_exposes", "remove_exposes", "add_consumes", "add_consume_interfaces",
+            "remove_consumes", "remove_consume_edges")):
         return True
     return prune_unknown and bool(p.get("unknown_consumes"))
+
+
+def _accept_supported_review_removals(proposal: dict) -> None:
+    """Move supported-language review removals into the applied removal set.
+
+    ``needs_review`` has two meanings: "still consumed elsewhere" and "unverifiable unsupported
+    language." This option is the explicit CLI path for the first case only; removing hand-authored
+    unsupported-language exposes would be data loss, not calibration."""
+    reasons = proposal.get("review_reasons") or {}
+    accepted = [
+        name for name in proposal.get("needs_review", [])
+        if reasons.get(name) != "unsupported_language"
+    ]
+    if not accepted:
+        return
+    proposal["remove_exposes"] = sorted(set(proposal.get("remove_exposes", [])) | set(accepted))
+    proposal["needs_review"] = [
+        name for name in proposal.get("needs_review", [])
+        if name not in set(accepted)
+    ]
+    proposal["review_reasons"] = {
+        name: reason for name, reason in reasons.items()
+        if name in proposal.get("needs_review", [])
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +348,8 @@ def drift_keys(proposals: dict[str, dict]) -> list[str]:
         for rc in p.get("remove_consumes", []):
             for iface in rc.get("interfaces", []):
                 keys.add(_KEY_SEP.join((sub, "remove_consume", f"{rc['subsystem']}:{iface}")))
+        for provider in p.get("remove_consume_edges", []):
+            keys.add(_KEY_SEP.join((sub, "remove_consume_edge", str(provider))))
     return sorted(keys)
 
 
@@ -391,7 +475,10 @@ def _summarize(proposals: dict[str, dict]) -> dict:
             for p in proposals.values()
             for aci in p.get("add_consume_interfaces", [])
         ),
-        "consumes_removed": sum(len(p["remove_consumes"]) for p in proposals.values()),
+        "consumes_removed": (
+            sum(len(p["remove_consumes"]) for p in proposals.values())
+            + sum(len(p.get("remove_consume_edges", [])) for p in proposals.values())
+        ),
         "consumes_unknown": sum(len(p.get("unknown_consumes", [])) for p in proposals.values()),
     }
 
@@ -418,6 +505,12 @@ def _apply_proposal(sub, proposal: dict, prune_unknown: bool = False) -> None:
     raw["exposes"] = exposes
 
     consumes = list(raw.get("consumes") or [])
+    if proposal.get("remove_consume_edges"):
+        stale_edges = set(proposal["remove_consume_edges"])
+        consumes = [
+            e for e in consumes
+            if not (isinstance(e, dict) and e.get("subsystem") in stale_edges)
+        ]
     # Prune dangling edges (consumes a subsystem that doesn't exist) only when asked.
     if prune_unknown and proposal.get("unknown_consumes"):
         unknown = set(proposal["unknown_consumes"])
