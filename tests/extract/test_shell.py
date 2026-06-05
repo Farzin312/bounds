@@ -65,6 +65,7 @@ def test_garbage_input_is_soft_a_result_never_a_raise():
 
 
 def test_registry_registers_shell_for_sh_bash_zsh():
+    """The adapter registry treats .sh, .bash, and .zsh as supported shell source files."""
     assert isinstance(get_adapter("x.sh"), ShellAdapter)
     assert isinstance(get_adapter("x.bash"), ShellAdapter)
     assert isinstance(get_adapter("x.zsh"), ShellAdapter)

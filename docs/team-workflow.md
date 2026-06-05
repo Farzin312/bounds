@@ -34,7 +34,12 @@ This is the rule that keeps the whole thing honest:
 
 > **A PR that changes a subsystem's public surface MUST update that subsystem's manifest — in the same PR.**
 
-You make that rule real with a CI gate, not a wiki page nobody reads. Every PR runs `bounds validate --quick` (git-diff incremental, safe for every commit). When the gate detects drift, the author runs `bounds calibrate` to see the proposed manifest changes, `bounds calibrate --apply` to write them, and includes that manifest update **in the same PR** as the code change. Code and contract move together, always.
+You make that rule real with a CI gate, not a wiki page nobody reads. Every PR runs `bounds validate --quick` (git-diff incremental, safe for every commit). When the gate detects source/manifest drift, the author runs `bounds calibrate` to see the proposed manifest changes, `bounds calibrate --apply` to write them, and includes that manifest update **in the same PR** as the code change. Code and contract move together, always.
+
+Do not overgeneralize calibration. `bounds calibrate --apply` reconciles manifests with extracted
+source: exposes, consumes interfaces, stale consumes edges, and similar drift. It does **not** map
+new files, close `E_COVERAGE_GAP`, or break `E_CYCLE_DETECTED`; those are guided by
+`bounds validate -H` and usually require editing manifests' `paths:` or changing source boundaries.
 
 ```
 edit code ──► bounds validate --quick ──► status fresh? ──► yes ──► open PR
@@ -98,7 +103,9 @@ The loop an agent should follow:
 1. **Before a risky change**, run `bounds impact <name>` to see the transitive blast radius and the exact interfaces each consumer relies on — reason about reach before editing.
 2. Make the change.
 3. **After editing**, run `bounds validate --quick`.
-4. If `validation_status` is not `fresh`, run `bounds calibrate` (`--apply` to write) and **commit the manifest change together with the code change** — never separately.
+4. If `validation_status` is not `fresh`, read the `next_steps` in the payload or run
+   `bounds validate -H`. Use `bounds calibrate` (`--apply` to write) for structural drift, but fix
+   coverage gaps and cycles through the issue-specific guidance.
 
 ### Concrete example sequence
 

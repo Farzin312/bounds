@@ -118,12 +118,14 @@ def test_malformed_agentsync_does_not_crash_the_loader():
 # merge_settings_hooks — pure, non-destructive, idempotent
 # ===========================================================================
 def test_merge_nudge_adds_only_userpromptsubmit():
+    """Nudge mode installs only the UserPromptSubmit reminder hook, not the strict search gate."""
     new, changed = agenthook.merge_settings_hooks({}, "nudge")
     assert changed
     assert set(new["hooks"]) == {"UserPromptSubmit"}
 
 
 def test_merge_strict_adds_both_events_with_tool_matcher():
+    """Strict mode installs both hook events and scopes PreToolUse to the broad-search tools Bounds can redirect."""
     new, _ = agenthook.merge_settings_hooks({}, "strict")
     assert set(new["hooks"]) == {"UserPromptSubmit", "PreToolUse"}
     assert new["hooks"]["PreToolUse"][0]["matcher"] == "Bash|Grep|Task"
@@ -148,12 +150,14 @@ def test_merge_preserves_foreign_hooks_and_keys_and_removes_on_off():
 
 
 def test_merge_is_idempotent():
+    """Merging the same Bounds-owned strict hook twice reports unchanged on the second pass."""
     once, _ = agenthook.merge_settings_hooks({}, "strict")
     _twice, changed = agenthook.merge_settings_hooks(once, "strict")
     assert changed is False
 
 
 def test_merge_off_on_empty_is_noop():
+    """Turning hooks off against an empty settings object is a no-op, not a synthetic file write."""
     new, changed = agenthook.merge_settings_hooks({}, "off")
     assert changed is False and new == {}
 
@@ -162,6 +166,7 @@ def test_merge_off_on_empty_is_noop():
 # sync_claude_hooks — file I/O, malformed-safe
 # ===========================================================================
 def test_sync_hooks_creates_file_at_nudge(tmp_path):
+    """Syncing hooks at nudge creates settings.json with the reminder hook."""
     assert agenthook.sync_claude_hooks(tmp_path, "nudge") == "created"
     data = json.loads(agenthook.settings_path(tmp_path).read_text())
     assert "UserPromptSubmit" in data["hooks"]
@@ -177,6 +182,7 @@ def test_sync_hooks_malformed_json_is_left_untouched(tmp_path):
 
 
 def test_sync_hooks_off_with_no_file_writes_nothing(tmp_path):
+    """At off, sync leaves a missing settings.json missing instead of creating an empty file."""
     assert agenthook.sync_claude_hooks(tmp_path, "off") == "unchanged"
     assert not agenthook.settings_path(tmp_path).exists()
 
@@ -200,11 +206,13 @@ def test_hook_no_bounds_dir_fails_open(tmp_path):
 
 
 def test_hook_garbage_payload_fails_open():
+    """A malformed hook payload returns allow/no-op so a bad event never blocks the agent."""
     assert agenthook.run_hook("not a dict") == {}
     assert agenthook.run_hook({}) == {}
 
 
 def test_hook_nudge_injects_on_architectural_prompt_once_per_session(tmp_path):
+    """Nudge mode injects Bounds context once per session for architecture-shaped prompts."""
     proj = _mk_project(tmp_path, "nudge")
     ev = {"hook_event_name": "UserPromptSubmit", "prompt": "what files do I need to touch for the profile?",
           "session_id": "s1", "cwd": str(proj)}
@@ -217,6 +225,7 @@ def test_hook_nudge_injects_on_architectural_prompt_once_per_session(tmp_path):
 
 
 def test_hook_nudge_silent_on_non_architectural_prompt(tmp_path):
+    """Non-architectural prompts do not get Bounds context, keeping the hook quiet for trivial edits."""
     proj = _mk_project(tmp_path, "nudge")
     assert agenthook.run_hook(
         {"hook_event_name": "UserPromptSubmit", "prompt": "fix this typo", "session_id": "s2", "cwd": str(proj)}
@@ -307,6 +316,7 @@ def test_hook_strict_allows_when_manifests_absent(tmp_path):
 # end-to-end via agentsync.run_agent (sync writes the hook + directive)
 # ===========================================================================
 def test_sync_nudge_writes_userpromptsubmit_hook_and_directive(tmp_path):
+    """Agent sync at nudge writes both the Claude hook and the always-read invocation directive."""
     proj = _mk_project(tmp_path, "nudge")
     report = agentsync.run_agent(proj, mode="sync", only={"claude"})
     assert report["invocation"] == "nudge"
@@ -316,6 +326,7 @@ def test_sync_nudge_writes_userpromptsubmit_hook_and_directive(tmp_path):
 
 
 def test_sync_strict_writes_pretooluse_gate(tmp_path):
+    """Agent sync at strict writes the PreToolUse gate in addition to the reminder hook."""
     proj = _mk_project(tmp_path, "strict")
     agentsync.run_agent(proj, mode="sync", only={"claude"})
     settings = json.loads((proj / ".claude/settings.json").read_text())
@@ -323,6 +334,7 @@ def test_sync_strict_writes_pretooluse_gate(tmp_path):
 
 
 def test_sync_off_writes_no_hook_and_no_directive(tmp_path):
+    """Agent sync at off removes active enforcement artifacts while leaving advisory files usable."""
     proj = _mk_project(tmp_path, "off")
     agentsync.run_agent(proj, mode="sync", only={"claude"})
     assert not (proj / ".claude/settings.json").exists()
@@ -412,6 +424,7 @@ def _invoke(monkeypatch, cwd, args, stdin=None):
 
 
 def test_cli_agent_hook_reads_stdin_emits_json_exit_0(tmp_path, monkeypatch):
+    """The hidden CLI hook reads one JSON event from stdin and emits a JSON decision at exit 0."""
     proj = _mk_project(tmp_path, "nudge")
     monkeypatch.setenv("BOUNDS_HOOK_STATE_DIR", str(tmp_path / "_st"))
     payload = json.dumps({"hook_event_name": "UserPromptSubmit",
@@ -422,6 +435,7 @@ def test_cli_agent_hook_reads_stdin_emits_json_exit_0(tmp_path, monkeypatch):
 
 
 def test_cli_agent_hook_empty_stdin_is_silent_exit_0(tmp_path, monkeypatch):
+    """Empty stdin to the hidden hook is treated as no event: silent success."""
     proj = _mk_project(tmp_path, "nudge")
     res = _invoke(monkeypatch, proj, ["agent-hook"], stdin="")
     assert res.exit_code == 0
@@ -429,6 +443,7 @@ def test_cli_agent_hook_empty_stdin_is_silent_exit_0(tmp_path, monkeypatch):
 
 
 def test_cli_agent_hook_garbage_stdin_never_errors(tmp_path, monkeypatch):
+    """Garbage stdin to the hidden hook fails open with no output and exit 0."""
     proj = _mk_project(tmp_path, "nudge")
     res = _invoke(monkeypatch, proj, ["agent-hook"], stdin="}{not json")
     assert res.exit_code == 0
@@ -436,6 +451,7 @@ def test_cli_agent_hook_garbage_stdin_never_errors(tmp_path, monkeypatch):
 
 
 def test_cli_agent_invocation_sets_root_yaml_and_syncs(tmp_path, monkeypatch):
+    """`agent --invocation strict --claude` persists the root config and syncs the matching hook."""
     proj = _mk_project(tmp_path, None)  # no agentsync block initially
     res = _invoke(monkeypatch, proj, ["agent", "--invocation", "strict", "--claude"])
     assert res.exit_code == 0
@@ -445,6 +461,7 @@ def test_cli_agent_invocation_sets_root_yaml_and_syncs(tmp_path, monkeypatch):
 
 
 def test_cli_agent_invocation_rejects_combo_with_check(tmp_path, monkeypatch):
+    """Changing invocation and checking wiring are mutually exclusive CLI modes."""
     proj = _mk_project(tmp_path, None)
     res = _invoke(monkeypatch, proj, ["agent", "--invocation", "nudge", "--check"])
     assert res.exit_code == config.EXIT_FATAL

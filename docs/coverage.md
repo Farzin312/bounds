@@ -155,8 +155,8 @@ default. `bounds describe <name> --full` shows a subsystem's linked docs/tests (
 Supported-language source aims for **100% mapped** (reachable — `mapped / (mapped + unowned)`), and the
 unsupported side aims for **0 `dark` files**. When either gap remains the report names the **exact
 minimal manifest action** to close it (add the file to a subsystem's `paths:`, or scaffold one with
-`bounds init --subsystem <name>`; for an unsupported language, declare it so it moves `dark →
-declared`). Tests and docs are *tracked* toward full linkage but are never a blocking gap. So "100%"
+`bounds init --subsystem <name> --path <file-or-dir>`; for an unsupported language, declare it so it
+moves `dark → declared`). Tests and docs are *tracked* toward full linkage but are never a blocking gap. So "100%"
 means 100% of what Bounds can parse, with zero unclaimed source — honest and reachable, not an
 all-language denominator that pretends an adapter exists where it doesn't.
 
@@ -165,9 +165,11 @@ all-language denominator that pretends an adapter exists where it doesn't.
 The goal is always **deterministic mapping first**; AI is the fallback for languages Bounds can't yet
 parse. Either way the format is the same and the result is verifiable.
 
-1. **Scaffold a subsystem:** `bounds init --subsystem <name>` writes
-   `.bounds/manifests/<name>.yaml` and tells you to add `<name>` to `root.yaml`'s `subsystems:` list.
-2. **Point it at the files** — edit `paths:` to the directory/files the subsystem owns.
+1. **Scaffold and register a subsystem:** `bounds init --subsystem <name> --path <file-or-dir>`
+   writes `.bounds/manifests/<name>.yaml`, registers `<name>` in `root.yaml`, and points `paths:` at
+   the files it owns.
+2. **For an existing subsystem**, pass the existing name plus `--path <file-or-dir>` to add ownership
+   for the missing file or directory.
 3. **Declare the public surface** in `exposes:` (for an unsupported language Bounds can't extract
    this, so you or an AI list the exported symbols by hand). Minimal valid manifest:
 

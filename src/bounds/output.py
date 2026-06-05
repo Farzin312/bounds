@@ -412,6 +412,12 @@ def _render_calibrate_human(payload: dict) -> str:
     if s.get("consumes_unknown"):
         hint = "pruned" if payload.get("applied") else "rename them, or re-run with --prune-unknown to remove"
         lines.append(f"  (consumes? = consumes a subsystem that doesn't exist — {hint})")
+    next_steps = payload.get("next_steps") or []
+    if next_steps:
+        lines.append("")
+        lines.append("next steps:")
+        for step in next_steps:
+            lines.append(f"  - {step}")
     return "\n".join(lines)
 
 
@@ -425,7 +431,10 @@ def _render_init_human(payload: dict) -> str:
     """Render `bounds init`: what scaffolding was created vs already present."""
     created = payload.get("created", []) or []
     skipped = payload.get("skipped", []) or []
+    updated = payload.get("updated", []) or []
     lines = [f"init: {'created ' + ', '.join(created) if created else 'nothing to create'}"]
+    if updated:
+        lines.append(f"  updated: {', '.join(updated)}")
     if skipped:
         lines.append(f"  already present: {', '.join(skipped)}")
     if payload.get("hint"):
@@ -657,6 +666,13 @@ def _render_report_dict_human(payload: dict) -> str:
     if not rendered_any:
         lines.append("")
         lines.append("no issues.")
+
+    next_steps = payload.get("next_steps") or []
+    if next_steps:
+        lines.append("")
+        lines.append("next steps:")
+        for step in next_steps:
+            lines.append(f"  - {step}")
 
     error_count = len(by_severity["error"])
     lines.append("")

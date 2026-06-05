@@ -45,6 +45,7 @@ def test_validate_quick_mode(git_sample_project, monkeypatch):
     data = _json(result)
     assert data["mode"] == "quick"
     assert {"cycles", "coverage"} <= set(data["skipped_checks"])
+    assert any("--quick` skips boundary" in step for step in data["next_steps"])
 
 
 def test_validate_human_non_enforcing_errors_not_ok(py_project, monkeypatch):
@@ -57,6 +58,46 @@ def test_validate_human_non_enforcing_errors_not_ok(py_project, monkeypatch):
     assert "✗ errors" in result.output
     assert "COMPLETED WITH ERRORS (non-enforcing mode: enforce=off)" in result.output
     assert not result.output.rstrip().endswith("OK")
+
+
+def test_validate_human_next_steps_group_cycle_coverage_and_calibration_scope(tmp_path, monkeypatch):
+    """Human validate output groups mixed cycle/coverage/drift failures into the right repair paths instead of implying calibrate fixes all."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: mixed\nlanguages: [python]\nenforce: "off"\nsubsystems: [a, b]\n',
+        encoding="utf-8",
+    )
+    (cfg / "manifests" / "a.yaml").write_text(
+        "name: a\nrole: library\ncriticality: leaf\npaths: [src/a]\n"
+        "exposes:\n  - {name: A, kind: class}\nconsumes:\n  - {subsystem: b}\n",
+        encoding="utf-8",
+    )
+    (cfg / "manifests" / "b.yaml").write_text(
+        "name: b\nrole: library\ncriticality: leaf\npaths: [src/b]\n"
+        "exposes:\n  - {name: B, kind: class}\nconsumes:\n  - {subsystem: a}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "a").mkdir(parents=True)
+    (tmp_path / "src" / "b").mkdir(parents=True)
+    (tmp_path / "src" / "a" / "a.py").write_text("class A:\n    pass\n", encoding="utf-8")
+    (tmp_path / "src" / "b" / "b.py").write_text("class B:\n    pass\n", encoding="utf-8")
+    (tmp_path / "src" / "orphan.py").write_text("def stray():\n    pass\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["validate", "--human"])
+
+    assert result.exit_code == 0
+    assert "next steps:" in result.output
+    assert "Close E_COVERAGE_GAP first" in result.output
+    assert "Break E_CYCLE_DETECTED in source" in result.output
+    assert "`bounds calibrate` does not map files" in result.output
+
+    json_result = CliRunner().invoke(main, ["validate"])
+    assert json_result.exit_code == 0
+    next_steps = _json(json_result)["next_steps"]
+    assert any("Close E_COVERAGE_GAP first" in step for step in next_steps)
+    assert any("Break E_CYCLE_DETECTED in source" in step for step in next_steps)
 
 
 def test_describe_returns_manifest(sample_project, monkeypatch):
@@ -459,7 +500,7 @@ def test_human_output_is_not_json(sample_project, monkeypatch):
 
 
 def test_init_root_then_subsystem(tmp_path, monkeypatch):
-    """init --root then --subsystem scaffolds the hidden .bounds/ (root.yaml + manifest) so the project becomes discoverable by list."""
+    """init --root then --subsystem scaffolds and registers the manifest so list sees the new subsystem."""
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
@@ -471,10 +512,78 @@ def test_init_root_then_subsystem(tmp_path, monkeypatch):
     r2 = runner.invoke(main, ["init", "--subsystem", "widgets"])
     assert r2.exit_code == 0
     assert (tmp_path / ".bounds" / "manifests" / "widgets.yaml").exists()
+    assert ".bounds/root.yaml" in _json(r2)["updated"]
 
     # the scaffolded project is now discoverable
     r3 = runner.invoke(main, ["list"])
     assert r3.exit_code == 0
+    assert {s["name"] for s in _json(r3)["subsystems"]} == {"widgets"}
+
+
+def test_init_subsystem_registers_without_reformatting_root(tmp_path, monkeypatch):
+    """Registering a subsystem updates only the subsystems block, preserving root.yaml comments and flow-style scalars."""
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--root"])
+
+    result = runner.invoke(main, ["init", "--subsystem", "widgets"])
+
+    assert result.exit_code == 0
+    root_text = (tmp_path / ".bounds" / "root.yaml").read_text(encoding="utf-8")
+    assert 'version: "1"' in root_text
+    assert "languages: [python]" in root_text
+    assert "# Root-level bootstrap files" in root_text
+    assert "  - widgets\n" in root_text
+
+
+def test_init_subsystem_path_closes_single_file_coverage_gap(tmp_path, monkeypatch):
+    """`init --subsystem --path <file>` creates/registers a single-file subsystem that validate counts as mapped."""
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--root"])
+    (tmp_path / "src" / "bounds").mkdir(parents=True)
+    (tmp_path / "src" / "bounds" / "agenthook.py").write_text("def run_hook():\n    pass\n", encoding="utf-8")
+
+    result = runner.invoke(
+        main,
+        ["init", "--subsystem", "agenthook", "--path", "src/bounds/agenthook.py"],
+    )
+
+    assert result.exit_code == 0
+    assert _json(result)["registered"] == "agenthook"
+    validate = runner.invoke(main, ["validate"])
+    assert validate.exit_code == 0
+    mapping = _json(validate)["stats"]["coverage"]["mapping"]
+    assert mapping["mapped_pct"] == 100.0
+    assert not any(i["code"] == "E_COVERAGE_GAP" for i in _json(validate)["issues"])
+
+
+def test_init_subsystem_path_replaces_dead_scaffold_default(tmp_path, monkeypatch):
+    """Adding --path after a scaffold-only init replaces the nonexistent src/<name> placeholder."""
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--root"])
+    runner.invoke(main, ["init", "--subsystem", "agenthook"])
+    (tmp_path / "src" / "bounds").mkdir(parents=True)
+    (tmp_path / "src" / "bounds" / "agenthook.py").write_text("def run_hook():\n    pass\n", encoding="utf-8")
+    manifest = tmp_path / ".bounds" / "manifests" / "agenthook.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "  - src/agenthook\n",
+            "  - src/agenthook\n  - src/bounds/agenthook.py\n",
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        main,
+        ["init", "--subsystem", "agenthook", "--path", "src/bounds/agenthook.py"],
+    )
+
+    assert result.exit_code == 0
+    described = runner.invoke(main, ["describe", "agenthook"])
+    assert described.exit_code == 0
+    assert _json(described)["paths"] == ["src/bounds/agenthook.py"]
 
 
 def test_init_requires_a_flag(tmp_path, monkeypatch):
@@ -512,6 +621,17 @@ def test_init_subsystem_rejects_path_traversal(tmp_path, monkeypatch):
     assert sorted(p.name for p in tmp_path.iterdir()) == before
     manifests = tmp_path / ".bounds" / "manifests"
     assert not manifests.exists() or list(manifests.glob("*.yaml")) == []
+
+
+def test_init_subsystem_rejects_path_traversal_in_path_option(tmp_path, monkeypatch):
+    """A traversal value passed to --path is rejected so coverage-gap scaffolding cannot write unsafe manifests."""
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--root"])
+    result = runner.invoke(main, ["init", "--subsystem", "widgets", "--path", "../outside.py"])
+    assert result.exit_code == 2
+    assert _json(result)["error"]["code"] == "E_USAGE"
+    assert not (tmp_path / ".bounds" / "manifests" / "widgets.yaml").exists()
 
 
 def test_init_subsystem_accepts_legitimate_names(tmp_path, monkeypatch):

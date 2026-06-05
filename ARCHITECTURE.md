@@ -249,6 +249,7 @@ class ValidationReport:
     mode: str                      # quick|full|preflight|hotfix|audit
     ok: bool                       # True if no blocking issues for the mode
     issues: list[Issue] = []
+    next_steps: list[str] = []     # emitted at top level when issue classes imply different fixes
     stats: dict = {}               # {files_total, files_parsed, cache_hits, subsystems, dirty, propagated,
                                    #  enforce, skipped_*, unowned, entry_points, coverage, duration_ms}
                                    # coverage: {files_owned, unresolved_local_imports, extraction_failures,
@@ -950,6 +951,9 @@ bounds describe --namespace NS     → {namespace, subsystems:[<describe payload
 bounds describe <name> --deep      → same + {semantic: {"note":"LLM enrichment (Tier 3) not enabled in this build"}}
 bounds validate [--quick|--mode M] [--enforce on|off|warn] [--base REF] [scan flags]
                                    → ValidationReport.to_dict()
+                                      # next_steps groups issue classes into remediation paths (calibrate,
+                                      # coverage mapping, cycle breaking, unresolved refs, etc.) so agents do
+                                      # not treat calibrate as a universal repair command.
 bounds preflight [scan flags]      → ValidationReport (mode=preflight) + {checks: per-check counts}
 bounds overview                    → {project, subsystems, roles:{...}, criticality:{...}, edges, cycles,
                                        schema_issues:[...], health:{ok, schema_errors, cycles, validation}}

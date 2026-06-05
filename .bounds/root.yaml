@@ -5,6 +5,7 @@ enforce: "off"
 # Root-level bootstrap files (globs) — exempt from `validate --fail-on-unowned`.
 entry_points: []
 subsystems:
+  - agenthook
   - cache
   - cli
   - config

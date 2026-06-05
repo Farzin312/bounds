@@ -210,6 +210,7 @@ def _coverage_why(coverage: dict | None) -> str:
     detail = "; ".join(bits) or "some library source is unmapped"
     return (
         f"mapped {coverage.get('mapped_pct', 0.0)}% of supported-language source; {detail}. "
+        "`bounds validate -H` prints issue-specific next steps; calibration does not map files. "
         "See docs/coverage.md."
     )
 
