@@ -45,6 +45,8 @@ def run_calibrate(
     project_root: Path, *, subsystem: str | None = None, apply: bool = False,
     prune_unknown: bool = False,
     prune_missing_exports: bool = False,
+    track_interfaces: bool = False,
+    coarsen_interfaces: bool = False,
 ) -> dict:
     """Reconcile manifests against source; return the proposed diff (and apply it if asked).
 
@@ -55,7 +57,15 @@ def run_calibrate(
 
     ``prune_missing_exports`` is an explicit review acceptance path: a supported-language expose that
     source no longer exports is removed even when another manifest still consumes it. Unsupported-
-    language exposes remain protected because Bounds has no extractor evidence that they are gone."""
+    language exposes remain protected because Bounds has no extractor evidence that they are gone.
+
+    ``track_interfaces`` opts into upgrading bare ``consumes`` edges to interface-level contracts.
+    Without it, calibration keeps discovered/draft dependency edges at subsystem granularity so
+    orphan-export checks do not suddenly judge every public export as curated contract data.
+
+    ``coarsen_interfaces`` is the explicit recovery path for manifests that already contain
+    accidental interface-level ``consumes`` data: it keeps the provider edges but removes the
+    interface lists so validation returns to subsystem-level dependency checks."""
     _root, subs, _ = manifest_loader.load_all(project_root)
     if subsystem is not None and subsystem not in subs:
         raise errors.BoundsError(
@@ -89,6 +99,7 @@ def run_calibrate(
         proposal = _calibrate_one(
             name, subs, file_owner, extracts, generated, known_noext, suffix_index,
             consumed_providers_ifaces, aliases, unsupported_owners,
+            track_interfaces=track_interfaces, coarsen_interfaces=coarsen_interfaces,
         )
         if prune_missing_exports:
             _accept_supported_review_removals(proposal)
@@ -105,9 +116,11 @@ def run_calibrate(
     return {
         "mode": "calibrate",
         "applied": applied,
+        "track_interfaces": track_interfaces,
+        "coarsen_interfaces": coarsen_interfaces,
         "subsystems": proposals,
         "summary": _summarize(proposals),
-        "next_steps": _next_steps(proposals, applied=applied),
+        "next_steps": _next_steps(proposals, applied=applied, track_interfaces=track_interfaces),
     }
 
 
@@ -125,6 +138,8 @@ def _calibrate_one(
     consumed_providers_ifaces: dict[str, set[str]],
     aliases: "tsconfig.TsAliases | None" = None,
     unsupported_owners: set[str] | None = None,
+    track_interfaces: bool = False,
+    coarsen_interfaces: bool = False,
 ) -> dict:
     sub = subs[name]
     # When the subsystem owns an unsupported-language file, its exposes may have been hand-authored
@@ -170,12 +185,14 @@ def _calibrate_one(
         for s in needs_review
     }
 
-    # CONSUMES reconciliation. A direct named import from a provider maps to an interface-level
-    # consume when the provider exposes that name; namespace/module imports still record only the
-    # provider edge. This keeps orphan checks useful after calibration instead of leaving real
-    # cross-subsystem APIs looking unconsumed.
+    # CONSUMES reconciliation. Always reconcile provider edges. Interface-level consumes are more
+    # precise but also activate orphan-export checks for that provider. That is only trustworthy for
+    # curated contracts, so default calibration preserves bare discover-generated edges as bare edges;
+    # it enriches interfaces only when the edge already had interface data or the user explicitly
+    # opts into --track-interfaces.
     actual_consumes: dict[str, set[str]] = {}
     declared_provider_names = {c.subsystem for c in sub.consumes}
+    interface_tracked_providers = {c.subsystem for c in sub.consumes if c.interfaces}
     for rel in own_files:
         for imp in extracts[rel].imports:
             for target, is_member in _resolve_import_targets(rel, imp, known_noext, suffix_index, aliases):
@@ -189,14 +206,23 @@ def _calibrate_one(
                     nm for nm in imp.names if nm in provider_exposes
                 )
     declared_consumes = {c.subsystem: set(c.interfaces) for c in sub.consumes}
-    add_consumes = [
-        {"subsystem": provider, "interfaces": sorted(actual_consumes[provider])}
-        for provider in sorted(set(actual_consumes) - set(declared_consumes))
+    coarsen_consume_interfaces = [
+        {"subsystem": c.subsystem, "interfaces": sorted(c.interfaces)}
+        for c in sub.consumes
+        if coarsen_interfaces and c.interfaces
     ]
+    add_consumes = []
+    for provider in sorted(set(actual_consumes) - set(declared_consumes)):
+        entry = {"subsystem": provider, "interfaces": []}
+        if track_interfaces:
+            entry["interfaces"] = sorted(actual_consumes[provider])
+        add_consumes.append(entry)
     add_consume_interfaces = [
         {"subsystem": provider, "interfaces": sorted(ifaces - declared_consumes[provider])}
         for provider, ifaces in sorted(actual_consumes.items())
         if provider in declared_consumes and ifaces - declared_consumes[provider]
+        and not coarsen_interfaces
+        and (track_interfaces or provider in interface_tracked_providers)
     ]
 
     remove_consumes: list[dict] = []
@@ -226,6 +252,7 @@ def _calibrate_one(
         "review_reasons": review_reasons,
         "add_consumes": add_consumes,
         "add_consume_interfaces": add_consume_interfaces,
+        "coarsen_consume_interfaces": coarsen_consume_interfaces,
         "remove_consumes": remove_consumes,
         "remove_consume_edges": sorted(set(remove_consume_edges)),
         "unknown_consumes": sorted(set(unknown_consumes)),
@@ -275,6 +302,7 @@ def _has_changes(p: dict) -> bool:
             "needs_review",
             "add_consumes",
             "add_consume_interfaces",
+            "coarsen_consume_interfaces",
             "remove_consumes",
             "remove_consume_edges",
             "unknown_consumes",  # surfaced so a dangling-consumes-only subsystem still appears
@@ -290,7 +318,7 @@ def _has_applicable_changes(p: dict, prune_unknown: bool) -> bool:
     would strip comments for nothing)."""
     if any(p.get(k) for k in
            ("add_exposes", "remove_exposes", "add_consumes", "add_consume_interfaces",
-            "remove_consumes", "remove_consume_edges")):
+            "coarsen_consume_interfaces", "remove_consumes", "remove_consume_edges")):
         return True
     return prune_unknown and bool(p.get("unknown_consumes"))
 
@@ -476,6 +504,11 @@ def _summarize(proposals: dict[str, dict]) -> dict:
             for p in proposals.values()
             for aci in p.get("add_consume_interfaces", [])
         ),
+        "consume_interfaces_removed": sum(
+            len(aci.get("interfaces", []))
+            for p in proposals.values()
+            for aci in p.get("coarsen_consume_interfaces", [])
+        ),
         "consumes_removed": (
             sum(len(p["remove_consumes"]) for p in proposals.values())
             + sum(len(p.get("remove_consume_edges", [])) for p in proposals.values())
@@ -484,7 +517,7 @@ def _summarize(proposals: dict[str, dict]) -> dict:
     }
 
 
-def _next_steps(proposals: dict[str, dict], *, applied: bool) -> list[str]:
+def _next_steps(proposals: dict[str, dict], *, applied: bool, track_interfaces: bool = False) -> list[str]:
     """Actionable follow-up for calibration's exact scope.
 
     Calibration can reconcile manifests with extracted source, but it cannot map new files or break
@@ -494,8 +527,9 @@ def _next_steps(proposals: dict[str, dict], *, applied: bool) -> list[str]:
     summary = _summarize(proposals)
     if not proposals:
         return [
-            "No manifest/source drift was found; run `bounds validate -H` for coverage gaps, cycles, "
-            "boundary violations, and contract issues outside calibration's scope."
+            "No manifest/source drift was found; `calibrate` does not add unmapped source files. "
+            "Run `bounds validate -H` for coverage gaps, cycles, boundary violations, and contract "
+            "issues outside calibration's scope."
         ]
 
     steps: list[str] = []
@@ -518,6 +552,18 @@ def _next_steps(proposals: dict[str, dict], *, applied: bool) -> list[str]:
         steps.append(
             "For consumes? entries, rename the referenced subsystem or re-run with "
             "`--prune-unknown --apply` to remove stale dangling edges."
+        )
+    if summary["consume_interfaces_removed"]:
+        steps.append(
+            "Interface lists were removed from consumes edges, leaving provider edges intact. "
+            "Use `--track-interfaces` later only for providers whose exact public contract you "
+            "want orphan-export checks to judge."
+        )
+    if summary["consumes_added"] and not track_interfaces:
+        steps.append(
+            "New consumes edges were recorded at subsystem granularity. Use "
+            "`bounds calibrate --track-interfaces --apply` only when you want curated "
+            "interface-level contracts and orphan-export checks for those providers."
         )
     steps.append(
         "`calibrate` does not add unmapped source files to subsystems and does not break import cycles; "
@@ -585,6 +631,12 @@ def _apply_proposal(sub, proposal: dict, prune_unknown: bool = False) -> None:
         merged = sorted(set(entry.get("interfaces") or []) | add_ifaces_by_provider[provider])
         if merged:
             entry["interfaces"] = merged
+    coarsen_providers = {
+        aci["subsystem"] for aci in proposal.get("coarsen_consume_interfaces", [])
+    }
+    for entry in consumes:
+        if isinstance(entry, dict) and entry.get("subsystem") in coarsen_providers:
+            entry.pop("interfaces", None)
     for prov in proposal["add_consumes"]:
         if isinstance(prov, dict):
             entry = {"subsystem": prov["subsystem"]}

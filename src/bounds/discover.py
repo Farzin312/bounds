@@ -26,6 +26,7 @@ Calibrate shares the extraction engine to *reconcile* existing manifests; discov
 
 from __future__ import annotations
 
+import re
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -131,6 +132,13 @@ def run_discover(
 
     # Map each source file to its candidate subsystem (merges win over directory grouping).
     merges = merges or []
+    for name, _paths in merges:
+        if not config.is_valid_subsystem_name(name):
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                f"invalid subsystem name {name!r}",
+                fix="use only letters, digits, '-' and '_' in --merge-into names",
+            )
     file_to_candidate, candidate_files = _group(sources, merges)
     file_owner_for_imports = {
         **existing_file_owner,
@@ -401,7 +409,7 @@ def _merge_match(rel: str, merge_index: list[tuple[str, list[str]]]) -> str | No
 
 
 def _basename(dkey: str) -> str:
-    return "root" if dkey == "" else dkey.rsplit("/", 1)[-1]
+    return "root" if dkey == "" else _safe_name_part(dkey.rsplit("/", 1)[-1])
 
 
 def _name_dirs(dirs: list[str]) -> dict[str, str]:
@@ -427,12 +435,28 @@ def _name_dirs(dirs: list[str]) -> dict[str, str]:
 
 def _disambiguate(dkey: str, used: set[str]) -> str:
     """Grow a name from the path tail until unique: utils -> b-utils -> a-b-utils."""
-    segs = [s for s in dkey.split("/") if s] or ["root"]
+    segs = [_safe_name_part(s) for s in dkey.split("/") if s] or ["root"]
     for take in range(2, len(segs) + 1):
         cand = "-".join(segs[-take:])
         if cand not in used:
             return cand
-    return "-".join(segs)
+    base = "-".join(segs)
+    idx = 2
+    while f"{base}-{idx}" in used:
+        idx += 1
+    return f"{base}-{idx}"
+
+
+def _safe_name_part(raw: str) -> str:
+    """Normalize one path segment into the safe subsystem-name alphabet.
+
+    Discovery writes manifest filenames, and the loader later enforces
+    :func:`config.is_valid_subsystem_name`. Hidden/tooling dirs such as ``.github`` must therefore
+    become ``github`` before they participate in candidate names; otherwise discover can generate a
+    model that Bounds itself refuses to read.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "-", raw).strip("-_")
+    return cleaned or "root"
 
 
 def _candidate_paths(name: str, files: list[str]) -> list[str]:

@@ -37,9 +37,14 @@ This is the rule that keeps the whole thing honest:
 You make that rule real with a CI gate, not a wiki page nobody reads. Every PR runs `bounds validate --quick` (git-diff incremental, safe for every commit). When the gate detects source/manifest drift, the author runs `bounds calibrate` to see the proposed manifest changes, `bounds calibrate --apply` to write them, and includes that manifest update **in the same PR** as the code change. Code and contract move together, always.
 
 Do not overgeneralize calibration. `bounds calibrate --apply` reconciles manifests with extracted
-source: exposes, consumes interfaces, stale consumes edges, and similar drift. It does **not** map
-new files, close `E_COVERAGE_GAP`, or break `E_CYCLE_DETECTED`; those are guided by
-`bounds validate -H` and usually require editing manifests' `paths:` or changing source boundaries.
+source: exposes, missing provider edges, stale consumes edges, and similar drift. It keeps bare
+`consumes` edges bare by default, because interface-level consumes activate orphan-export checks and
+should mean "we curated this exact contract." Use `bounds calibrate --track-interfaces --apply` only
+when that precision is intentional. If interface lists were added accidentally, use
+`bounds calibrate --coarsen-interfaces --apply` to keep the provider edges but return to
+subsystem-level contracts. Calibration does **not** map new files, close `E_COVERAGE_GAP`, or break
+`E_CYCLE_DETECTED`; those are guided by `bounds validate -H` and usually require editing manifests'
+`paths:` or changing source boundaries.
 
 ```
 edit code ──► bounds validate --quick ──► status fresh? ──► yes ──► open PR

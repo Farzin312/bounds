@@ -8,7 +8,7 @@ import subprocess
 import pytest
 import yaml
 
-from bounds import config
+from bounds import config, errors
 from bounds.discover import run_discover
 
 
@@ -281,6 +281,32 @@ def test_discover_disambiguates_colliding_basenames(tmp_path):
     # Two distinct utils dirs -> two distinct, path-derived candidate names.
     assert "a-utils" in names and "b-utils" in names
     assert "utils" not in names
+
+
+def test_discover_sanitizes_hidden_path_segments_in_generated_names(tmp_path):
+    """Hidden/tooling dirs like .github must not produce manifest names the loader rejects."""
+    scripts = tmp_path / ".github" / "scripts"
+    app_scripts = tmp_path / "app" / "scripts"
+    scripts.mkdir(parents=True)
+    app_scripts.mkdir(parents=True)
+    for i in range(5):
+        (scripts / f"task{i}.py").write_text(f"def gh_task_{i}():\n    pass\n")
+        (app_scripts / f"task{i}.py").write_text(f"def app_task_{i}():\n    pass\n")
+
+    result = run_discover(tmp_path, apply=True)
+    names = {c["name"] for c in result["candidates"] if not c["dropped"]}
+    assert "github-scripts" in names
+    assert ".github-scripts" not in names
+    assert all(config.is_valid_subsystem_name(name) for name in names)
+
+
+def test_discover_rejects_invalid_merge_name(tmp_path):
+    """An explicit merge target is a manifest filename; reject unsafe names before writing."""
+    _project(tmp_path)
+    with pytest.raises(errors.BoundsError) as exc:
+        run_discover(tmp_path, merges=[("../bad", ["src/auth"])])
+    assert exc.value.code == errors.E_USAGE
+    assert "invalid subsystem name" in exc.value.message
 
 
 def test_discover_apply_preserves_custom_root_keys(tmp_path):

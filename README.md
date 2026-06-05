@@ -168,10 +168,13 @@ comprehension layer — you still read source to understand *behavior*.)
 > zod 4 issues — all `ok: true`** (down from 314 / 191 / 3,025 on the large/type-heavy ones before
 > the noise fixes). What remains is real signal (boundary edges, import cycles, cross-module
 > re-export kinds), not flood: the orphan-export, test-case, and Next.js framework-callback floods
-> are eliminated (see [docs/known-issues.md](docs/known-issues.md) BOUNDS-012/015/016), and
-> `calibrate --apply` now rolls up per-subsystem orphan exports so it converges instead of
-> re-inflating the count. Treat the drift gate as something you reach after a light curation pass,
-> not a one-command guarantee on every repo. The
+> are eliminated (see [docs/known-issues.md](docs/known-issues.md) BOUNDS-012/015/016). By default,
+> `calibrate --apply` keeps draft/discovered `consumes` edges at subsystem granularity; use
+> `--track-interfaces` only when you intentionally want interface-level contracts and orphan-export
+> checks for those providers. If an older run enriched draft edges too aggressively,
+> `--coarsen-interfaces --apply` removes the interface lists while keeping the provider edges. Treat
+> the drift gate as something you reach after a light curation pass, not a one-command guarantee on
+> every repo. The
 > [cross-language report](benchmarks/results/oss-cross-language.md) documents this in full.
 
 **Contributors welcome:** `make benchmark` reports this repo's own coverage + token economics, and
