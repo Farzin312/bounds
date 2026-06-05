@@ -349,6 +349,8 @@ def run(
         "coverage": coverage,
         "duration_ms": duration_ms,
     }
+    if mode == "quick":
+        stats["skipped_checks"] = ["boundary", "contract", "cycles", "coverage", "orphans"]
     return ValidationReport(status=status, mode=mode, ok=not blocking, issues=issues, stats=stats)
 
 
@@ -413,6 +415,12 @@ def _coverage_gap_issue(mapping: dict, project_root: Path, subsystems: dict) -> 
         langs = ", ".join(f"{lang}×{n}" for lang, n in sorted(unsup["by_language"].items()))
         parts.append(f"{unsup['dark']} unsupported-language file(s) no manifest claims ({langs})")
     detail = "; ".join(parts) or "some source files"
+    samples = []
+    if sup.get("unowned_sample"):
+        samples.append("unmapped supported: " + ", ".join(sup["unowned_sample"]))
+    if unsup.get("dark_sample"):
+        samples.append("dark unsupported: " + ", ".join(unsup["dark_sample"]))
+    sample_text = "; ".join(samples)
 
     template_ref = _sample_manifest_path(project_root, subsystems)
     steps: list[str] = []
@@ -431,14 +439,17 @@ def _coverage_gap_issue(mapping: dict, project_root: Path, subsystems: dict) -> 
     fix = (
         "reach 100% of supported source + 0 dark files — " + "; ".join(steps)
         + f". {unsup['declared']} unsupported file(s) are already covered by a manifest. "
-        "See docs/coverage.md."
+        "Run `bounds validate -H` to see this issue with samples; see docs/coverage.md."
     )
+    if sample_text:
+        fix += f" First samples: {sample_text}."
     return Issue(
         errors.E_COVERAGE_GAP,
         "warning",
         f"mapped {mapping['mapped_pct']}% of supported-language source "
         f"({sup['mapped']}/{sup['total']} files); gap: {detail} "
-        f"({unsup['declared']} unsupported file(s) already covered; tests/docs tracked separately)",
+        f"({unsup['declared']} unsupported file(s) already covered; tests/docs tracked separately)"
+        + (f"; samples: {sample_text}" if sample_text else ""),
         fix=fix,
     )
 

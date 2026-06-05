@@ -127,6 +127,7 @@ def test_validate_emits_loud_coverage_gap_nonblocking(tmp_path):
     gaps = [i for i in report.issues if i.code == errors.E_COVERAGE_GAP]
     assert len(gaps) == 1
     assert "go" in gaps[0].message and "no manifest claims" in gaps[0].message
+    assert "goservice/f0.go" in gaps[0].message
     fix = gaps[0].fix
     assert fix  # actionable next step present
     # The fix names the unsupported-language move (no adapter → author a DURABLE manifest) and points
@@ -135,6 +136,7 @@ def test_validate_emits_loud_coverage_gap_nonblocking(tmp_path):
     assert "durable" in fix.lower()
     assert f"{config.BOUNDS_DIR}/{config.MANIFESTS_DIR}/svc.yaml" in fix  # concrete template_ref
     assert "docs/coverage.md" in fix
+    assert "goservice/f0.go" in fix
     assert gaps[0].severity == "warning"
     # the gap alone is non-blocking (advisory); enforce=on still reports ok unless a real error exists
     assert report.stats["coverage"]["mapping"]["mapped_pct"] == 100.0

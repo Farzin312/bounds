@@ -297,6 +297,19 @@ def test_calibrate_cli(monkeypatch, py_project):
     assert any(e["name"] == "run" for e in data["subsystems"].get("svc", {}).get("add_exposes", []))
 
 
+def test_edit_description_cli_updates_subsystem_metadata(monkeypatch, py_project):
+    """`bounds edit <subsystem> --description ...` is the safe CLI path for metadata updates."""
+    desc = "Structured operational logging for application events."
+    res = _invoke(monkeypatch, py_project, ["edit", "svc", "--description", desc])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["mode"] == "edit"
+    assert data["description"] == desc
+
+    described = json.loads(_invoke(monkeypatch, py_project, ["describe", "svc"]).output)
+    assert described["description"] == desc
+
+
 def test_agent_sync_cli(monkeypatch, py_project):
     """agent --sync --claude writes the canonical AGENTS.md plus the per-agent .claude/commands/bounds.md so the CLI is wired into the agent."""
     res = _invoke(monkeypatch, py_project, ["agent", "--sync", "--claude"])

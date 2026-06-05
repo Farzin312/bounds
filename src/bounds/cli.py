@@ -173,7 +173,7 @@ _COMMAND_GROUPS = (
     ("Set up", ("guide", "init", "discover", "agent", "ci")),
     ("Read the map (do this before grepping source)", ("list", "describe", "overview", "where", "impact")),
     ("Catch drift", ("validate", "preflight", "calibrate")),
-    ("Maintain", ("cache", "upgrade", "upgrade-check")),
+    ("Maintain", ("edit", "cache", "upgrade", "upgrade-check")),
 )
 
 # Leading "\b" marks the quick-start block as pre-formatted so click does not reflow the
@@ -794,9 +794,13 @@ def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
               help="With --apply, also remove consumes edges that name a non-existent subsystem "
                    "(stale/typo'd refs that keep validate reporting 'unresolved'). Off by default "
                    "so a genuine forward reference survives.")
+@click.option("--prune-missing-exports", "prune_missing_exports", is_flag=True, default=False,
+              help="With --apply, also remove supported-language exposes that source no longer "
+                   "exports even when they are listed under needs-review.")
 @_human
 def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
-                  do_check: bool, do_dump: bool, do_prune: bool, human: bool) -> None:
+                  do_check: bool, do_dump: bool, do_prune: bool,
+                  prune_missing_exports: bool, human: bool) -> None:
     """Keep contracts aligned with extracted source after code changes."""
     # Diff/apply/dump-baseline are interactive actions → announce in a terminal; --check is a
     # CI gate consumed by automation → keep it JSON-default (it still honors explicit --human).
@@ -824,9 +828,59 @@ def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
             sys.exit(config.EXIT_OK if payload["ok"] else config.EXIT_BLOCKED)
         with _progress("calibrating..."):
             payload = calibrate_mod.run_calibrate(
-                root, subsystem=subsystem, apply=do_apply, prune_unknown=do_prune
+                root, subsystem=subsystem, apply=do_apply, prune_unknown=do_prune,
+                prune_missing_exports=prune_missing_exports,
             )
         output.emit(payload, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
+# edit
+# ===========================================================================
+@main.command("edit", short_help="Safely update subsystem metadata")
+@click.argument("subsystem")
+@click.option("--description", default=None,
+              help="Set the subsystem description without opening raw Bounds manifests.")
+@_human
+def edit_cmd(subsystem: str, description: str | None, human: bool) -> None:
+    """Update small manifest metadata through the CLI, preserving the architecture API boundary."""
+    human = _interactive_human(human)
+
+    def go() -> None:
+        chosen = [name for name, val in (("--description", description),) if val is not None]
+        if len(chosen) != 1:
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                "pass exactly one metadata field to update",
+                fix="example: bounds edit logging --description 'Structured operational logging'",
+            )
+        root = _require_root()
+        _rootm, subs, _issues = manifest_loader.load_all(root)
+        sub = subs.get(subsystem)
+        if sub is None:
+            raise errors.BoundsError(
+                errors.E_SUBSYSTEM_NOT_FOUND,
+                f"subsystem '{subsystem}' not found",
+                fix=f"known subsystems: {sorted(subs)}",
+            )
+        import yaml
+
+        path = Path(sub.source_path)
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw["description"] = description or ""
+        path.write_text(yaml.safe_dump(raw, sort_keys=False, default_flow_style=False), encoding="utf-8")
+        output.emit(
+            {
+                "mode": "edit",
+                "subsystem": subsystem,
+                "updated": ["description"],
+                "description": raw["description"],
+                "manifest": path.relative_to(root).as_posix(),
+            },
+            human,
+        )
 
     _run(human, go)
 
