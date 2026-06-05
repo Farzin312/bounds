@@ -915,10 +915,17 @@ def discover_cmd(do_apply: bool, dry_run: bool, namespace: str | None,
 @click.option("--prune-missing-exports", "prune_missing_exports", is_flag=True, default=False,
               help="With --apply, also remove supported-language exposes that source no longer "
                    "exports even when they are listed under needs-review.")
+@click.option("--track-interfaces", "track_interfaces", is_flag=True, default=False,
+              help="Also record exact imported interface names on consumes edges. Off by default "
+                   "so draft/discovered subsystem edges do not trigger orphan-export noise.")
+@click.option("--coarsen-interfaces", "coarsen_interfaces", is_flag=True, default=False,
+              help="With --apply, remove interface lists from consumes edges while keeping provider "
+                   "edges. Use to recover from accidental interface-level contracts.")
 @_human
 def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
                   do_check: bool, do_dump: bool, do_prune: bool,
-                  prune_missing_exports: bool, human: bool) -> None:
+                  prune_missing_exports: bool, track_interfaces: bool,
+                  coarsen_interfaces: bool, human: bool) -> None:
     """Keep contracts aligned with extracted source after code changes."""
     # Diff/apply/dump-baseline are interactive actions → announce in a terminal; --check is a
     # CI gate consumed by automation → keep it JSON-default (it still honors explicit --human).
@@ -932,6 +939,13 @@ def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
             raise errors.BoundsError(
                 errors.E_USAGE, "pass at most one of --apply / --check / --dump-baseline",
                 fix="omit all for a diff, --apply to write, --check to gate, --dump-baseline to record",
+            )
+        if track_interfaces and coarsen_interfaces:
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                "pass only one of --track-interfaces or --coarsen-interfaces",
+                fix="use --track-interfaces to add exact consumes interfaces, or "
+                    "--coarsen-interfaces to remove them",
             )
         root = _require_root()
         if do_dump:
@@ -948,6 +962,8 @@ def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
             payload = calibrate_mod.run_calibrate(
                 root, subsystem=subsystem, apply=do_apply, prune_unknown=do_prune,
                 prune_missing_exports=prune_missing_exports,
+                track_interfaces=track_interfaces,
+                coarsen_interfaces=coarsen_interfaces,
             )
         output.emit(payload, human)
 

@@ -386,7 +386,9 @@ def _render_calibrate_human(payload: dict) -> str:
     header = (
         f"calibrate: {verb} {s.get('added', 0)} add / {s.get('removed', 0)} remove / "
         f"{s.get('needs_review', 0)} needs-review across {len(subs)} subsystem(s) "
-        f"(consumes +{s.get('consumes_added', 0)}/-{s.get('consumes_removed', 0)})"
+        f"(consumes +{s.get('consumes_added', 0)}/-{s.get('consumes_removed', 0)}, "
+        f"interfaces +{s.get('consume_interfaces_added', 0)}/"
+        f"-{s.get('consume_interfaces_removed', 0)})"
     )
     if s.get("consumes_unknown"):
         header += f"; {s['consumes_unknown']} unknown consumes edge(s)"
@@ -404,6 +406,22 @@ def _render_calibrate_human(payload: dict) -> str:
             bits.append("review: " + ", ".join(p["needs_review"]))
         if p.get("add_consumes"):
             bits.append("consumes+: " + ", ".join(c["subsystem"] for c in p["add_consumes"]))
+        if p.get("add_consume_interfaces"):
+            bits.append(
+                "interfaces+: "
+                + ", ".join(
+                    f"{c['subsystem']}({', '.join(c.get('interfaces') or [])})"
+                    for c in p["add_consume_interfaces"]
+                )
+            )
+        if p.get("coarsen_consume_interfaces"):
+            bits.append(
+                "interfaces-: "
+                + ", ".join(
+                    f"{c['subsystem']}({', '.join(c.get('interfaces') or [])})"
+                    for c in p["coarsen_consume_interfaces"]
+                )
+            )
         if p.get("remove_consume_edges"):
             bits.append("consumes-: " + ", ".join(p["remove_consume_edges"]))
         if p.get("unknown_consumes"):

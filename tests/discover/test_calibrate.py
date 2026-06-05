@@ -91,8 +91,12 @@ def test_calibrate_flags_ghost_consumes_interface(tmp_path):
     assert ("GHOST",) in removed  # db never exposes GHOST
 
 
-def test_calibrate_adds_imported_interfaces_to_existing_edge(tmp_path):
-    """A named import across an existing bare consume edge should enrich that edge with the interface name."""
+def test_calibrate_preserves_existing_bare_edge_by_default(tmp_path):
+    """Default calibration keeps discovered/draft consumes edges at subsystem granularity.
+
+    Interface-level consumes activate orphan-export checks for the provider, so auto-enriching a
+    bare edge turns a draft architecture map into a curated contract without human intent.
+    """
     _build(tmp_path)
     cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
     auth_path = cfg / "auth.yaml"
@@ -102,14 +106,71 @@ def test_calibrate_adds_imported_interfaces_to_existing_edge(tmp_path):
 
     result = run_calibrate(tmp_path, subsystem="auth")
     auth_proposal = result["subsystems"]["auth"]
-    assert auth_proposal["add_consume_interfaces"] == [
-        {"subsystem": "db", "interfaces": ["query"]}
-    ]
+    assert auth_proposal["add_consume_interfaces"] == []
+    assert result["summary"]["consume_interfaces_added"] == 0
 
     run_calibrate(tmp_path, subsystem="auth", apply=True)
     updated = yaml.safe_load(auth_path.read_text(encoding="utf-8"))
     db_edge = next(c for c in updated["consumes"] if c["subsystem"] == "db")
+    assert "interfaces" not in db_edge
+
+
+def test_calibrate_track_interfaces_enriches_existing_bare_edge(tmp_path):
+    """The explicit interface-tracking path records exact imported names on a bare consumes edge."""
+    _build(tmp_path)
+    cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
+    auth_path = cfg / "auth.yaml"
+    auth = yaml.safe_load(auth_path.read_text(encoding="utf-8"))
+    auth["consumes"] = [{"subsystem": "db"}]
+    auth_path.write_text(yaml.safe_dump(auth, sort_keys=False), encoding="utf-8")
+
+    result = run_calibrate(tmp_path, subsystem="auth", track_interfaces=True)
+    auth_proposal = result["subsystems"]["auth"]
+    assert auth_proposal["add_consume_interfaces"] == [
+        {"subsystem": "db", "interfaces": ["query"]}
+    ]
+
+    run_calibrate(tmp_path, subsystem="auth", apply=True, track_interfaces=True)
+    updated = yaml.safe_load(auth_path.read_text(encoding="utf-8"))
+    db_edge = next(c for c in updated["consumes"] if c["subsystem"] == "db")
     assert db_edge["interfaces"] == ["query"]
+
+
+def test_calibrate_enriches_already_curated_interface_edge(tmp_path):
+    """Once a manifest has interface-level consumes, calibration keeps that curated contract current."""
+    _build(tmp_path)
+    cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
+    auth_path = cfg / "auth.yaml"
+    auth = yaml.safe_load(auth_path.read_text(encoding="utf-8"))
+    auth["consumes"] = [{"subsystem": "db", "interfaces": ["connect"]}]
+    auth_path.write_text(yaml.safe_dump(auth, sort_keys=False), encoding="utf-8")
+
+    result = run_calibrate(tmp_path, subsystem="auth")
+    auth_proposal = result["subsystems"]["auth"]
+    assert auth_proposal["add_consume_interfaces"] == [
+        {"subsystem": "db", "interfaces": ["query"]}
+    ]
+
+
+def test_calibrate_coarsen_interfaces_removes_interface_lists_but_keeps_edges(tmp_path):
+    """`--coarsen-interfaces` is the recovery path for accidental interface-level contracts."""
+    _build(tmp_path)
+    cfg = tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR
+    auth_path = cfg / "auth.yaml"
+    auth = yaml.safe_load(auth_path.read_text(encoding="utf-8"))
+    auth["consumes"] = [{"subsystem": "db", "interfaces": ["query"]}]
+    auth_path.write_text(yaml.safe_dump(auth, sort_keys=False), encoding="utf-8")
+
+    result = run_calibrate(tmp_path, subsystem="auth", coarsen_interfaces=True)
+    auth_proposal = result["subsystems"]["auth"]
+    assert auth_proposal["coarsen_consume_interfaces"] == [
+        {"subsystem": "db", "interfaces": ["query"]}
+    ]
+    assert result["summary"]["consume_interfaces_removed"] == 1
+
+    run_calibrate(tmp_path, subsystem="auth", apply=True, coarsen_interfaces=True)
+    updated = yaml.safe_load(auth_path.read_text(encoding="utf-8"))
+    assert updated["consumes"] == [{"subsystem": "db"}]
 
 
 def test_calibrate_role_criticality_never_touched(tmp_path):

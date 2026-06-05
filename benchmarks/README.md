@@ -300,6 +300,8 @@ a boundary break before commit") — be specific about the task and model.
 |------------|-------|-------|-----------|
 | [`dogfood-claude.md`](results/dogfood-claude.md) | Claude Code | Claude (Opus) | tiktoken cl100k_base |
 | [`agentab-supermemory-sonnet.md`](results/agentab-supermemory-sonnet.md) | Claude Code (`claude -p` A/B) | Claude (Sonnet) | real Anthropic usage |
+| [`agentab-supermemory-sonnet-fixedbuild.md`](results/agentab-supermemory-sonnet-fixedbuild.md) | Claude Code (`claude -p` A/B, post BOUNDS-023/024) | Claude (Sonnet) | real Anthropic usage |
+| [`oss-firecrawl.md`](results/oss-firecrawl.md) | CLI harness | N/A (zero-LLM) | tiktoken cl100k_base |
 | [`oss-cross-language.md`](results/oss-cross-language.md) | CLI harness | Claude (Opus 4.8) | tiktoken cl100k_base |
 | [`oss-cross-language-2026-06.md`](results/oss-cross-language-2026-06.md) | CLI harness (fixed build) | N/A (zero-LLM) | tiktoken cl100k_base |
 | [`oss-fresh-discover-trust.md`](results/oss-fresh-discover-trust.md) | CLI harness | N/A | tiktoken cl100k_base |
