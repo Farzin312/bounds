@@ -13,7 +13,7 @@ import sys
 import threading
 from collections import Counter
 from contextlib import nullcontext
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import click
 
@@ -649,7 +649,7 @@ role: library
 criticality: leaf
 description: TODO describe this subsystem.
 {namespace_line}paths:
-  - src/{name}
+{paths_block}
 exposes: []
 consumes: []
 '''
@@ -659,8 +659,11 @@ consumes: []
 @click.option("--root", "root_flag", is_flag=True, default=False, help="Initialize .bounds/root.yaml.")
 @click.option("--subsystem", default=None, help="Scaffold a new subsystem manifest.")
 @click.option("--namespace", default=None, help="Namespace for the scaffolded subsystem (requires --subsystem).")
+@click.option("--path", "paths", multiple=True,
+              help="Repo-relative file/dir/glob owned by the subsystem. Repeat for multiple paths.")
 @_human
-def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, human: bool) -> None:
+def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None,
+             paths: tuple[str, ...], human: bool) -> None:
     """Initialize .bounds/ structure, or add a subsystem."""
     human = _interactive_human(human)  # interactive setup action: announce in a terminal
 
@@ -713,26 +716,141 @@ def init_cmd(root_flag: bool, subsystem: str | None, namespace: str | None, huma
                 skipped.append(gitignore_rel)
 
         result: dict = {"created": created, "skipped": skipped}
+        updated: list[str] = []
 
         if subsystem:
+            manifest_paths = [_clean_manifest_path(p) for p in paths] or [f"src/{subsystem}"]
             sub_file = bounds_dir / config.MANIFESTS_DIR / f"{subsystem}.yaml"
             sub_file.parent.mkdir(parents=True, exist_ok=True)
             rel = sub_file.relative_to(project).as_posix()
             if sub_file.exists():
                 skipped.append(rel)
+                if paths and _merge_subsystem_paths(sub_file, manifest_paths, subsystem, project):
+                    updated.append(rel)
             else:
                 namespace_line = f"namespace: {namespace}\n" if namespace else ""
+                paths_block = "".join(f"  - {p}\n" for p in manifest_paths)
                 sub_file.write_text(
-                    _SUBSYS_TEMPLATE.format(name=subsystem, namespace_line=namespace_line),
+                    _SUBSYS_TEMPLATE.format(
+                        name=subsystem, namespace_line=namespace_line, paths_block=paths_block,
+                    ),
                     encoding="utf-8",
                 )
                 created.append(rel)
-            result["hint"] = f"add '{subsystem}' to the 'subsystems' list in {config.BOUNDS_DIR}/{config.ROOT_FILE}"
+            root_file = bounds_dir / config.ROOT_FILE
+            if root_file.is_file():
+                if _register_subsystem(root_file, subsystem):
+                    updated.append(root_file.relative_to(project).as_posix())
+                result["registered"] = subsystem
+            else:
+                result["hint"] = (
+                    f"add '{subsystem}' to the 'subsystems' list in "
+                    f"{config.BOUNDS_DIR}/{config.ROOT_FILE}"
+                )
 
+        if updated:
+            result["updated"] = sorted(set(updated))
         result["bounds_dir"] = bounds_dir.relative_to(project).as_posix()
         output.emit(result, human)
 
     _run(human, go)
+
+
+def _clean_manifest_path(raw: str) -> str:
+    """Normalize one user-provided manifest path and reject traversal/absolute paths."""
+    path = str(raw).strip().replace("\\", "/")
+    if path.startswith("./"):
+        path = path[2:]
+    posix = PurePosixPath(path)
+    if not path or posix.is_absolute() or ".." in posix.parts:
+        raise errors.BoundsError(
+            errors.E_USAGE,
+            f"invalid subsystem path {raw!r}",
+            fix="use a repo-relative path such as src/auth or src/auth/index.ts",
+        )
+    return posix.as_posix()
+
+
+def _merge_subsystem_paths(
+    manifest_file: Path, paths: list[str], subsystem: str, project_root: Path,
+) -> bool:
+    """Merge paths into an existing subsystem manifest, replacing dead scaffold defaults.
+
+    `bounds init --subsystem name` historically scaffolded `src/name`. If the user later supplies
+    an explicit `--path` to close a coverage gap and that default does not exist, keeping it is noisy
+    false ownership. A real existing `src/name` path is preserved.
+    """
+    import yaml
+
+    raw = yaml.safe_load(manifest_file.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    original = [str(p) for p in (raw.get("paths") or [])]
+    current = list(original)
+    scaffold_default = f"src/{subsystem}"
+    if scaffold_default in current and not (project_root / scaffold_default).exists():
+        current = [p for p in current if p != scaffold_default]
+    merged = list(dict.fromkeys(current + paths))
+    if merged == original:
+        return False
+    raw["paths"] = merged
+    manifest_file.write_text(
+        yaml.safe_dump(raw, sort_keys=False, default_flow_style=False), encoding="utf-8"
+    )
+    return True
+
+
+def _register_subsystem(root_file: Path, subsystem: str) -> bool:
+    """Append a subsystem to root.yaml's subsystem list if it is not already registered.
+
+    Parse with YAML for correctness, but preserve the existing root.yaml style by replacing only the
+    `subsystems:` block when it has the normal list shape. Falling back to safe_dump is reserved for
+    unusual-but-valid YAML shapes.
+    """
+    import yaml
+
+    text = root_file.read_text(encoding="utf-8")
+    try:
+        raw = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise errors.BoundsError(
+            errors.E_MANIFEST_PARSE_ERROR,
+            f"could not parse .bounds/root.yaml: {exc}",
+            fix="fix the YAML syntax in .bounds/root.yaml, then retry",
+        ) from exc
+    if not isinstance(raw, dict):
+        raw = {}
+    current = [str(s) for s in (raw.get("subsystems") or [])]
+    if subsystem in current:
+        return False
+    updated = sorted(current + [subsystem])
+    if _rewrite_root_subsystems_block(root_file, text, updated):
+        return True
+    raw["subsystems"] = updated
+    root_file.write_text(yaml.safe_dump(raw, sort_keys=False, default_flow_style=False), encoding="utf-8")
+    return True
+
+
+def _rewrite_root_subsystems_block(root_file: Path, text: str, subsystems: list[str]) -> bool:
+    """Replace the root.yaml `subsystems:` block without reserializing the whole file."""
+    lines = text.splitlines(keepends=True)
+    for idx, line in enumerate(lines):
+        if line.strip().startswith("subsystems:") and not line.startswith((" ", "\t")):
+            start = idx + 1
+            end = start
+            while end < len(lines):
+                stripped = lines[end].strip()
+                if not stripped:
+                    end += 1
+                    continue
+                if lines[end].startswith((" ", "\t")) or stripped.startswith("- "):
+                    end += 1
+                    continue
+                break
+            replacement = ["subsystems:\n"] + [f"  - {name}\n" for name in subsystems]
+            root_file.write_text("".join(lines[:idx] + replacement + lines[end:]), encoding="utf-8")
+            return True
+    return False
 
 
 # ===========================================================================

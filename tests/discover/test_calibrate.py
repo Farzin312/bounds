@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import io
+
 import yaml
 
 from bounds import config
+from bounds import output
 from bounds.calibrate import check_drift, dump_baseline, run_calibrate
 
 
@@ -258,6 +261,21 @@ def test_calibrate_clean_subsystem_absent_from_proposal(tmp_path):
     result = run_calibrate(tmp_path)
     assert result["summary"]["added"] == 0
     assert result["summary"]["removed"] == 0
+
+
+def test_calibrate_next_steps_name_scope_and_apply_path(tmp_path):
+    """Human and JSON calibration output explain that --apply writes manifest drift only, while cycles/coverage require validate-driven fixes."""
+    _build(tmp_path)
+    result = run_calibrate(tmp_path)
+    assert any("bounds calibrate --apply" in step for step in result["next_steps"])
+    assert any("does not add unmapped source files" in step for step in result["next_steps"])
+
+    buf = io.StringIO()
+    output.emit(result, human=True, stream=buf)
+    rendered = buf.getvalue()
+    assert "next steps:" in rendered
+    assert "bounds validate -H" in rendered
+    assert "does not add unmapped source files" in rendered
 
 
 def _set_auth_consumes(tmp_path, edges):

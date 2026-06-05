@@ -48,6 +48,11 @@ past a few hundred lines, split it by concern (e.g. `validate/` splits checks vs
 test a one-line docstring saying what it pins (and *why*, if non-obvious) — the name says "what," the
 docstring says "why this matters."
 
+When a test covers a new subsystem edge case, update
+[subsystem-edge-cases.md](subsystem-edge-cases.md) in the same PR. The catalog is the human-readable
+index of the weird cases the suite protects, so future fixes do not have to rediscover the reasoning
+from individual test files.
+
 ## How tests are written here
 
 - **Build a throwaway project under `tmp_path`.** Write source files + a `.bounds/` (root.yaml +

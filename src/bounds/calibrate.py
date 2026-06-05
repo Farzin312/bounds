@@ -107,6 +107,7 @@ def run_calibrate(
         "applied": applied,
         "subsystems": proposals,
         "summary": _summarize(proposals),
+        "next_steps": _next_steps(proposals, applied=applied),
     }
 
 
@@ -481,6 +482,48 @@ def _summarize(proposals: dict[str, dict]) -> dict:
         ),
         "consumes_unknown": sum(len(p.get("unknown_consumes", [])) for p in proposals.values()),
     }
+
+
+def _next_steps(proposals: dict[str, dict], *, applied: bool) -> list[str]:
+    """Actionable follow-up for calibration's exact scope.
+
+    Calibration can reconcile manifests with extracted source, but it cannot map new files or break
+    source-level dependency cycles. Naming that boundary is the difference between a user knowing
+    what to do next and repeatedly running `calibrate` expecting unrelated validate errors to clear.
+    """
+    summary = _summarize(proposals)
+    if not proposals:
+        return [
+            "No manifest/source drift was found; run `bounds validate -H` for coverage gaps, cycles, "
+            "boundary violations, and contract issues outside calibration's scope."
+        ]
+
+    steps: list[str] = []
+    if applied:
+        steps.append(
+            "Re-run `bounds validate -H`; remaining E_CYCLE_DETECTED or E_COVERAGE_GAP issues require "
+            "source-boundary or mapping changes, not more calibration."
+        )
+    else:
+        steps.append(
+            "Review this diff, then run `bounds calibrate --apply` to write only these manifest/source "
+            "reconciliation changes."
+        )
+    if summary["needs_review"]:
+        steps.append(
+            "Resolve needs-review exposes by updating consumers or, for supported-language exports that "
+            "are intentionally gone, re-run with `--prune-missing-exports --apply`."
+        )
+    if summary["consumes_unknown"]:
+        steps.append(
+            "For consumes? entries, rename the referenced subsystem or re-run with "
+            "`--prune-unknown --apply` to remove stale dangling edges."
+        )
+    steps.append(
+        "`calibrate` does not add unmapped source files to subsystems and does not break import cycles; "
+        "use `bounds validate -H` for those exact issue classes and fixes."
+    )
+    return steps
 
 
 # ---------------------------------------------------------------------------

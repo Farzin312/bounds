@@ -351,7 +351,14 @@ def run(
     }
     if mode == "quick":
         stats["skipped_checks"] = ["boundary", "contract", "cycles", "coverage", "orphans"]
-    return ValidationReport(status=status, mode=mode, ok=not blocking, issues=issues, stats=stats)
+    return ValidationReport(
+        status=status,
+        mode=mode,
+        ok=not blocking,
+        issues=issues,
+        next_steps=_next_steps(issues, mode=mode),
+        stats=stats,
+    )
 
 
 # ===========================================================================
@@ -379,6 +386,64 @@ def _surface_stale_issue(subsystem: str, changed: list[str]) -> Issue:
         fix=f"re-verify {subsystem}.exposes against the changed file(s), then "
         "`bounds calibrate --dump-baseline` to re-confirm",
     )
+
+
+def _next_steps(issues: list[Issue], *, mode: str) -> list[str]:
+    """Group raw issue codes into the remediation ladder a human or agent should follow.
+
+    Individual issues still carry exact fixes; this higher-level list prevents a common mistake:
+    treating `bounds calibrate --apply` as a universal repair command when coverage gaps and cycles
+    require different work.
+    """
+    codes = {i.code for i in issues}
+    steps: list[str] = []
+    if mode == "quick":
+        steps.append(
+            "`--quick` skips boundary, contract, cycle, coverage, and orphan checks; run "
+            "`bounds validate -H` before claiming the repo is fully clean."
+        )
+    if errors.E_COVERAGE_GAP in codes:
+        steps.append(
+            "Close E_COVERAGE_GAP first: add supported files to subsystem `paths:` or hand-author a "
+            "manifest for dark unsupported-language source. Use "
+            "`bounds init --subsystem <name> --path <file-or-dir>` for a new subsystem; "
+            "`bounds calibrate` does not map files."
+        )
+    if errors.E_CYCLE_DETECTED in codes:
+        steps.append(
+            "Break E_CYCLE_DETECTED in source: invert the dependency, move shared code into a lower "
+            "library subsystem, or merge boundaries that do not represent separate architecture."
+        )
+    if any(c in codes for c in (
+        errors.E_STRUCTURAL_DRIFT,
+        errors.E_CONTRACT_MISSING_EXPORT,
+        errors.E_STALE_INTERFACE,
+    )):
+        steps.append(
+            "For source/manifest drift, run `bounds calibrate`, review the diff, then use "
+            "`bounds calibrate --apply` only when the contract change is intentional."
+        )
+    if errors.E_UNRESOLVED_REFERENCE in codes:
+        steps.append(
+            "For unresolved manifest references, declare the missing subsystem/interface, fix the name, "
+            "or use `bounds calibrate --prune-unknown --apply` for stale dangling consumes edges."
+        )
+    if errors.E_BOUNDARY_VIOLATION in codes:
+        steps.append(
+            "For boundary violations, either import a declared public interface or change the subsystem "
+            "contract deliberately and re-run validation."
+        )
+    if errors.E_SUBSYSTEM_OVERLAP in codes:
+        steps.append(
+            "For ownership overlaps, narrow one manifest path or move a shared file to `files:` so one "
+            "subsystem owns it deterministically."
+        )
+    if errors.E_UNSUPPORTED_SURFACE_STALE in codes:
+        steps.append(
+            "For unsupported surface staleness, manually re-check the hand-authored exposes and then "
+            "run `bounds calibrate --dump-baseline` to confirm the new file hashes."
+        )
+    return steps
 
 
 def _sample_manifest_path(project_root: Path, subsystems: dict) -> str | None:
@@ -427,7 +492,8 @@ def _coverage_gap_issue(mapping: dict, project_root: Path, subsystems: dict) -> 
     if sup["unowned"]:
         steps.append(
             "supported files (Python/TS/JS/SQL/Prisma/shell) → add each to a subsystem's `paths:` "
-            "(`bounds init --subsystem <name>` scaffolds one) — deterministic, no AI"
+            "(`bounds init --subsystem <name> --path <file-or-dir>` scaffolds/registers one) — "
+            "deterministic, no AI"
         )
     if unsup["dark"]:
         tmpl = f" (copy `{template_ref}` as a template)" if template_ref else ""

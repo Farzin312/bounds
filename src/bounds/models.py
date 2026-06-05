@@ -377,6 +377,7 @@ class ValidationReport:
     mode: str
     ok: bool = True
     issues: list[Issue] = field(default_factory=list)
+    next_steps: list[str] = field(default_factory=list)
     stats: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -391,6 +392,8 @@ class ValidationReport:
         }
         if self.stats.get("skipped_checks"):
             payload["skipped_checks"] = list(self.stats["skipped_checks"])
+        if self.next_steps:
+            payload["next_steps"] = list(self.next_steps)
         return payload
 
     def errors(self) -> list[Issue]:

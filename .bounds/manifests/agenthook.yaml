@@ -1,0 +1,19 @@
+name: agenthook
+role: library
+criticality: leaf
+description: TODO describe this subsystem.
+paths:
+- src/bounds/agenthook.py
+exposes:
+- name: HOOK_COMMAND
+  kind: const
+- name: merge_settings_hooks
+  kind: function
+- name: run_hook
+  kind: function
+- name: settings_path
+  kind: function
+- name: sync_claude_hooks
+  kind: function
+consumes:
+- subsystem: manifest

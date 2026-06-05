@@ -25,6 +25,7 @@ def _stream(*events: dict) -> str:
 
 
 def test_parse_stream_extracts_metrics_tools_and_bounds_calls():
+    """The stream parser recovers result metrics, total tool calls, Bounds tool calls, and the final answer."""
     agent_ab = _load()
     stdout = _stream(
         {"type": "assistant", "message": {"content": [
@@ -51,6 +52,7 @@ def test_parse_stream_extracts_metrics_tools_and_bounds_calls():
 
 
 def test_parse_stream_without_bounds_counts_no_bounds_calls():
+    """Non-Bounds tool use increments total tool calls while leaving bounds_calls at zero."""
     agent_ab = _load()
     stdout = _stream(
         {"type": "assistant", "message": {"content": [
@@ -67,6 +69,7 @@ def test_parse_stream_without_bounds_counts_no_bounds_calls():
 
 
 def test_parse_stream_falls_back_to_last_text_when_no_result_text():
+    """If the result event has no answer text, the parser falls back to the last assistant text block."""
     agent_ab = _load()
     stdout = _stream(
         {"type": "assistant", "message": {"content": [{"type": "text", "text": "the answer"}]}},
@@ -79,6 +82,7 @@ def test_parse_stream_falls_back_to_last_text_when_no_result_text():
 
 
 def test_is_bounds_cmd_matches_invocation_not_substring():
+    """Bounds-call detection matches actual command invocations, not arbitrary substrings."""
     agent_ab = _load()
     assert agent_ab._is_bounds_cmd("bounds describe mcp-src") is True
     assert agent_ab._is_bounds_cmd("  bounds where Profile") is True
@@ -90,6 +94,7 @@ def test_is_bounds_cmd_matches_invocation_not_substring():
 
 
 def test_parse_stream_handles_garbage_lines():
+    """Malformed stream lines are ignored so a partial harness log yields empty metrics instead of crashing."""
     agent_ab = _load()
     metrics, tool_calls, bounds_calls, answer = agent_ab._parse_stream("not json\n\n{bad}\n")
     assert metrics == {} and tool_calls == 0 and bounds_calls == 0 and answer == ""
