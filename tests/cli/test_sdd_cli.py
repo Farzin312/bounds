@@ -71,3 +71,16 @@ def test_sdd_doctor_reports_readiness_not_phase_completion(tmp_path, monkeypatch
     assert payload["ok"] is False
     assert next(check for check in payload["checks"] if check["name"] == "subsystem_map")["ok"] is False
     assert "not proof" in payload["note"]
+
+
+def test_sdd_conflicting_flags_returns_json_error_not_traceback(tmp_path, monkeypatch):
+    """Conflicting flags must go through _run() and produce a structured JSON error, not a traceback."""
+    _root(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["sdd", "--status", "--doctor"])
+
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "E_USAGE"
+    assert "--status" in payload["error"]["message"] or "--doctor" in payload["error"]["message"]

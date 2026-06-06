@@ -1052,16 +1052,15 @@ def fix_coverage_cmd(explain_path: str | None, do_auto: bool, apply: bool, human
 @_human
 def sdd_cmd(do_status: bool, phase_name: str | None, do_doctor: bool, human: bool) -> None:
     """Map optional SDD phases to deterministic Bounds commands. Read-only."""
-    chosen = [n for n, on in (("--status", do_status), ("--phase", bool(phase_name)),
-                              ("--doctor", do_doctor)) if on]
-    if len(chosen) > 1:
-        raise errors.BoundsError(
-            errors.E_USAGE, "pass at most one of --status, --phase, --doctor",
-            fix="run 'bounds sdd' for status, 'bounds sdd --phase implement' for one phase, "
-                "or 'bounds sdd --doctor' to self-check",
-        )
-
     def go() -> None:
+        chosen = [n for n, on in (("--status", do_status), ("--phase", bool(phase_name)),
+                                  ("--doctor", do_doctor)) if on]
+        if len(chosen) > 1:
+            raise errors.BoundsError(
+                errors.E_USAGE, "pass at most one of --status, --phase, --doctor",
+                fix="run 'bounds sdd' for status, 'bounds sdd --phase implement' for one phase, "
+                    "or 'bounds sdd --doctor' to self-check",
+            )
         root = _require_root()
         rootm, subs, _schema_issues = manifest_loader.load_all(root)
         if do_doctor:
