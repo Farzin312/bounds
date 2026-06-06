@@ -13,7 +13,7 @@ from . import config, errors
 from .models import RootManifest, SubsystemCompact
 from .validate import engine as validate_engine
 
-__all__ = ["phase_steps", "resolve_config", "run_sdd"]
+__all__ = ["phase_steps", "resolve_config", "run_sdd", "write_sdd_config"]
 
 
 _PHASE_COMMANDS = {
@@ -124,6 +124,69 @@ def _phase(root: RootManifest | None, name: str) -> dict | None:
         "available_in_preview": name in resolved["phases"],
         "phase": name,
         **_PHASE_COMMANDS[name],
+    }
+
+
+def write_sdd_config(
+    project_root: Path,
+    *,
+    enable: bool | None = None,
+    phases: list[str] | None = None,
+    add_phase: str | None = None,
+    remove_phase: str | None = None,
+) -> dict:
+    """Patch the ``sdd:`` block in root.yaml without touching any other key.
+
+    Returns the structured ``sdd-configure`` payload ready for ``output.emit``.
+    """
+    import yaml
+
+    root_path = project_root / config.BOUNDS_DIR / config.ROOT_FILE
+    raw: dict = {}
+    if root_path.is_file():
+        try:
+            loaded = yaml.safe_load(root_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                raw = dict(loaded)
+        except (OSError, yaml.YAMLError):
+            pass
+
+    existing = dict(raw.get("sdd") or {})
+    current_phases = list(existing.get("phases") or config.SDD_PHASES)
+
+    # Build the updated block in canonical key order.
+    block: dict = {}
+    block["enabled"] = enable if enable is not None else bool(existing.get("enabled", False))
+    agent = str(existing.get("agent") or "generic")
+    block["agent"] = agent if agent in config.SDD_AGENTS else "generic"
+
+    if phases is not None:
+        # Full replacement — enforce canonical ordering.
+        block["phases"] = [p for p in config.SDD_PHASES if p in set(phases)]
+    elif add_phase is not None:
+        block["phases"] = [p for p in config.SDD_PHASES if p in (set(current_phases) | {add_phase})]
+    elif remove_phase is not None:
+        block["phases"] = [p for p in current_phases if p != remove_phase]
+    elif "phases" in existing:
+        block["phases"] = existing["phases"]
+    elif enable:
+        # First-time enable with no explicit phases → all phases.
+        block["phases"] = list(config.SDD_PHASES)
+
+    raw["sdd"] = block
+    root_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    resolved = resolve_config(RootManifest.from_dict(raw))
+    return {
+        "mode": "sdd-configure",
+        "written": root_path.relative_to(project_root).as_posix(),
+        **resolved,
+        "steps": phase_steps(resolved),
+        "next_step": (
+            "run `bounds sdd --doctor` to verify readiness"
+            if resolved["enabled"]
+            else "run `bounds sdd --enable` to activate SDD"
+        ),
     }
 
 

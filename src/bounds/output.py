@@ -579,7 +579,7 @@ def _render_coverage_human(payload: dict) -> str:
 
 
 def _render_sdd_human(payload: dict) -> str:
-    """Render SDD as a command map or readiness report, never inferred progress."""
+    """Render SDD as a command map, readiness report, or configure confirmation."""
     mode = payload.get("mode")
     if mode == "sdd-phase":
         configured = "configured" if payload.get("configured") else "not configured"
@@ -594,6 +594,14 @@ def _render_sdd_human(payload: dict) -> str:
         lines = [f"sdd doctor: {'ready' if payload.get('ok') else 'needs attention'}"]
         for check in payload.get("checks", []) or []:
             lines.append(f"  [{'x' if check.get('ok') else ' '}] {check.get('name')}: {check.get('detail')}")
+        lines.append(f"next: {payload.get('next_step', '')}")
+        return "\n".join(lines)
+    if mode == "sdd-configure":
+        status = "enabled" if payload.get("enabled") else "disabled"
+        lines = [f"sdd configure: {status} ({payload.get('agent', 'generic')})"]
+        phases = payload.get("phases", [])
+        lines.append(f"  phases: {', '.join(phases) if phases else '(none)'}")
+        lines.append(f"  written: {payload.get('written', '')}")
         lines.append(f"next: {payload.get('next_step', '')}")
         return "\n".join(lines)
     lines = [f"sdd: {'enabled' if payload.get('enabled') else 'disabled'} ({payload.get('agent', 'generic')})"]

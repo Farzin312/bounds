@@ -1042,37 +1042,109 @@ def fix_coverage_cmd(explain_path: str | None, do_auto: bool, apply: bool, human
 # ===========================================================================
 # sdd
 # ===========================================================================
-@main.command("sdd", short_help="Optional Spec-Driven Development status (read-only)")
+@main.command("sdd", short_help="Optional SDD phase map and configuration")
 @click.option("--status", "do_status", is_flag=True, default=False,
               help="Print configured phases and their deterministic Bounds commands (default).")
 @click.option("--phase", "phase_name", default=None, metavar="PHASE",
               help="Print the Bounds command for one SDD phase (specify|clarify|plan|tasks|analyze|implement|verify).")
 @click.option("--doctor", "do_doctor", is_flag=True, default=False,
               help="Check SDD configuration and architecture-gate readiness.")
+@click.option("--enable", "do_enable", is_flag=True, default=False,
+              help="Enable SDD in .bounds/root.yaml.")
+@click.option("--disable", "do_disable", is_flag=True, default=False,
+              help="Disable SDD in .bounds/root.yaml.")
+@click.option("--phases", "phases_str", default=None, metavar="PHASES",
+              help="Comma-separated phase subset to configure (used with --enable). "
+                   "Example: --phases specify,implement,verify")
+@click.option("--add-phase", "add_phase", default=None, metavar="PHASE",
+              help="Add one phase to the configured list.")
+@click.option("--remove-phase", "remove_phase", default=None, metavar="PHASE",
+              help="Remove one phase from the configured list.")
 @_human
-def sdd_cmd(do_status: bool, phase_name: str | None, do_doctor: bool, human: bool) -> None:
-    """Map optional SDD phases to deterministic Bounds commands. Read-only."""
+def sdd_cmd(
+    do_status: bool, phase_name: str | None, do_doctor: bool,
+    do_enable: bool, do_disable: bool, phases_str: str | None,
+    add_phase: str | None, remove_phase: str | None, human: bool,
+) -> None:
+    """Map SDD phases to deterministic Bounds commands; configure optional SDD tracking."""
+    _is_write = do_enable or do_disable or bool(add_phase) or bool(remove_phase)
+    if _is_write:
+        human = _interactive_human(human)
+
     def go() -> None:
-        chosen = [n for n, on in (("--status", do_status), ("--phase", bool(phase_name)),
-                                  ("--doctor", do_doctor)) if on]
-        if len(chosen) > 1:
+        read_chosen = [n for n, on in (
+            ("--status", do_status), ("--phase", bool(phase_name)), ("--doctor", do_doctor),
+        ) if on]
+        write_chosen = [n for n, on in (
+            ("--enable", do_enable), ("--disable", do_disable),
+            ("--add-phase", bool(add_phase)), ("--remove-phase", bool(remove_phase)),
+        ) if on]
+
+        if len(read_chosen) > 1:
             raise errors.BoundsError(
                 errors.E_USAGE, "pass at most one of --status, --phase, --doctor",
                 fix="run 'bounds sdd' for status, 'bounds sdd --phase implement' for one phase, "
                     "or 'bounds sdd --doctor' to self-check",
             )
-        root = _require_root()
-        rootm, subs, _schema_issues = manifest_loader.load_all(root)
-        if do_doctor:
-            with _progress("checking SDD readiness..."):
-                payload = sdd_mod.run_sdd(root, rootm, subs, doctor=True)
-        else:
-            payload = sdd_mod.run_sdd(root, rootm, subs, phase_name=phase_name)
-        if payload is None:
+        if len(write_chosen) > 1:
             raise errors.BoundsError(
-                errors.E_USAGE, f"unknown SDD phase '{phase_name}'",
-                fix=f"valid phases: {', '.join(config.SDD_PHASES)}",
+                errors.E_USAGE,
+                f"pass at most one of --enable, --disable, --add-phase, --remove-phase; "
+                f"got {' and '.join(write_chosen)}",
+                fix="use --add-phase / --remove-phase for targeted updates, "
+                    "or --enable --phases x,y to replace the full list",
             )
+        if read_chosen and write_chosen:
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                f"cannot combine {read_chosen[0]} (read) with {write_chosen[0]} (write)",
+                fix="omit the read flag to configure, or omit the write flag to inspect",
+            )
+        if phases_str and not do_enable:
+            raise errors.BoundsError(
+                errors.E_USAGE, "--phases is only valid with --enable",
+                fix="use --enable --phases x,y,z, or --add-phase / --remove-phase for targeted edits",
+            )
+
+        root = _require_root()
+
+        if write_chosen:
+            # Parse and validate --phases when provided.
+            parsed_phases: list[str] | None = None
+            if phases_str:
+                parsed_phases = [p.strip() for p in phases_str.split(",") if p.strip()]
+                invalid = [p for p in parsed_phases if p not in config.SDD_PHASES]
+                if invalid:
+                    raise errors.BoundsError(
+                        errors.E_USAGE, f"unknown phase(s): {', '.join(invalid)}",
+                        fix=f"valid phases: {', '.join(config.SDD_PHASES)}",
+                    )
+            # Validate --add-phase / --remove-phase values.
+            for flag, val in (("--add-phase", add_phase), ("--remove-phase", remove_phase)):
+                if val and val not in config.SDD_PHASES:
+                    raise errors.BoundsError(
+                        errors.E_USAGE, f"unknown SDD phase '{val}' for {flag}",
+                        fix=f"valid phases: {', '.join(config.SDD_PHASES)}",
+                    )
+            payload = sdd_mod.write_sdd_config(
+                root,
+                enable=True if do_enable else (False if do_disable else None),
+                phases=parsed_phases,
+                add_phase=add_phase,
+                remove_phase=remove_phase,
+            )
+        else:
+            rootm, subs, _schema_issues = manifest_loader.load_all(root)
+            if do_doctor:
+                with _progress("checking SDD readiness..."):
+                    payload = sdd_mod.run_sdd(root, rootm, subs, doctor=True)
+            else:
+                payload = sdd_mod.run_sdd(root, rootm, subs, phase_name=phase_name)
+            if payload is None:
+                raise errors.BoundsError(
+                    errors.E_USAGE, f"unknown SDD phase '{phase_name}'",
+                    fix=f"valid phases: {', '.join(config.SDD_PHASES)}",
+                )
         output.emit(payload, human)
 
     _run(human, go)

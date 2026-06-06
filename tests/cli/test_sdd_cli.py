@@ -84,3 +84,125 @@ def test_sdd_conflicting_flags_returns_json_error_not_traceback(tmp_path, monkey
     payload = json.loads(result.output)
     assert payload["error"]["code"] == "E_USAGE"
     assert "--status" in payload["error"]["message"] or "--doctor" in payload["error"]["message"]
+
+
+def test_sdd_enable_writes_root_yaml_and_returns_configure_payload(tmp_path, monkeypatch):
+    """--enable sets enabled: true in root.yaml and returns a structured sdd-configure payload."""
+    _root(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["sdd", "--enable"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["mode"] == "sdd-configure"
+    assert payload["enabled"] is True
+    assert ".bounds/root.yaml" in payload["written"]
+    # Verify the file was actually patched.
+    import yaml
+    raw = yaml.safe_load((tmp_path / ".bounds" / "root.yaml").read_text())
+    assert raw["sdd"]["enabled"] is True
+
+
+def test_sdd_disable_sets_enabled_false(tmp_path, monkeypatch):
+    """--disable sets enabled: false without touching other root.yaml keys."""
+    _root(tmp_path, "sdd:\n  enabled: true\n  phases: [specify, verify]\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["sdd", "--disable"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["enabled"] is False
+    import yaml
+    raw = yaml.safe_load((tmp_path / ".bounds" / "root.yaml").read_text())
+    assert raw["sdd"]["enabled"] is False
+    # Other keys must be preserved.
+    assert raw["sdd"]["phases"] == ["specify", "verify"]
+
+
+def test_sdd_enable_with_phases_replaces_phase_list(tmp_path, monkeypatch):
+    """--enable --phases restricts the configured phase subset."""
+    _root(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["sdd", "--enable", "--phases", "specify,implement,verify"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["phases"] == ["specify", "implement", "verify"]
+
+
+def test_sdd_add_phase_inserts_in_canonical_order(tmp_path, monkeypatch):
+    """--add-phase inserts the phase into the canonical ordered list."""
+    _root(tmp_path, "sdd:\n  enabled: true\n  phases: [specify, verify]\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["sdd", "--add-phase", "implement"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    # specify → implement → verify is canonical order.
+    assert payload["phases"] == ["specify", "implement", "verify"]
+
+
+def test_sdd_remove_phase_drops_the_phase(tmp_path, monkeypatch):
+    """--remove-phase removes the given phase from the configured list."""
+    _root(tmp_path, "sdd:\n  enabled: true\n  phases: [specify, implement, verify]\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["sdd", "--remove-phase", "implement"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert "implement" not in payload["phases"]
+    assert payload["phases"] == ["specify", "verify"]
+
+
+def test_sdd_conflicting_write_flags_returns_usage_error(tmp_path, monkeypatch):
+    """--enable and --disable together must produce a structured E_USAGE error."""
+    _root(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["sdd", "--enable", "--disable"])
+
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "E_USAGE"
+
+
+def test_sdd_phases_without_enable_returns_usage_error(tmp_path, monkeypatch):
+    """--phases alone (without --enable) must produce a structured E_USAGE error."""
+    _root(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["sdd", "--phases", "specify,verify"])
+
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "E_USAGE"
+
+
+def test_sdd_mixing_read_and_write_flags_returns_usage_error(tmp_path, monkeypatch):
+    """Combining a read flag (--status) with a write flag (--enable) must produce E_USAGE."""
+    _root(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["sdd", "--status", "--enable"])
+
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "E_USAGE"
+
+
+def test_sdd_add_unknown_phase_returns_usage_error(tmp_path, monkeypatch):
+    """--add-phase with an invalid phase name must produce a structured E_USAGE error."""
+    _root(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["sdd", "--add-phase", "notaphase"])
+
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "E_USAGE"
+    assert "notaphase" in payload["error"]["message"]

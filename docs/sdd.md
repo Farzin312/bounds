@@ -61,7 +61,17 @@ Absent `sdd:` means today's behavior. You can preview the track without committi
 bounds guide --sdd
 ```
 
-Inspect the configured command map directly:
+Enable and configure SDD from the CLI — no manual YAML editing needed:
+
+```bash
+bounds sdd --enable                              # write sdd.enabled: true, all phases
+bounds sdd --enable --phases specify,implement,verify  # enable with a phase subset
+bounds sdd --disable                             # write sdd.enabled: false
+bounds sdd --add-phase clarify                   # add one phase to the configured list
+bounds sdd --remove-phase clarify                # remove one phase
+```
+
+Inspect the configured command map:
 
 ```bash
 bounds sdd                       # configured phases + deterministic commands
