@@ -1,26 +1,37 @@
-version: "1"
+version: '1'
 project: bounds
-languages: [python]
-enforce: "off"
-# Root-level bootstrap files (globs) — exempt from `validate --fail-on-unowned`.
+sdd:
+  enabled: false
+  agent: generic
+  phases:
+  - specify
+  - clarify
+  - plan
+  - tasks
+  - analyze
+  - implement
+  - verify
+languages:
+- python
+enforce: 'off'
 entry_points: []
 subsystems:
-  - agenthook
-  - cache
-  - cli
-  - config
-  - describe
-  - errors
-  - extract
-  - gitutil
-  - guide
-  - ignore
-  - locate
-  - manifest
-  - models
-  - output
-  - surface
-  - tsconfig
-  - update_check
-  - upgrade
-  - validate
+- agenthook
+- cache
+- cli
+- config
+- describe
+- errors
+- extract
+- gitutil
+- guide
+- ignore
+- locate
+- manifest
+- models
+- output
+- surface
+- tsconfig
+- update_check
+- upgrade
+- validate
