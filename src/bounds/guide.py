@@ -135,6 +135,7 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
                 "id": "sdd",
                 "title": "Spec-Driven Development",
                 "enabled": sdd_cfg["enabled"],
+                "current": "enabled" if sdd_cfg["enabled"] else "disabled",
                 "command": "bounds sdd --enable" if not sdd_cfg["enabled"] else "bounds sdd --doctor",
                 "use": "map SDD phases (specify → verify) to deterministic architecture checks",
                 "configure": "bounds sdd --enable / --disable / --phases x,y / --add-phase / --remove-phase",
@@ -143,9 +144,10 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
                 "id": "invocation",
                 "title": "Agent invocation level",
                 "enabled": invocation != "off",
+                "current": invocation,
                 "command": f"bounds agent --invocation {invocation}",
-                "use": "how assertively agents are pushed to query Bounds first (off / nudge / strict)",
-                "configure": "bounds agent --invocation off|nudge|strict",
+                "use": "how assertively agents push toward Bounds first",
+                "configure": "bounds agent --invocation off / nudge / strict",
             },
         ]
     return payload

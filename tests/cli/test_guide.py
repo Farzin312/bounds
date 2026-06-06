@@ -192,7 +192,7 @@ def test_guide_complete_includes_optional_features(tmp_path, monkeypatch):
 
 
 def test_guide_complete_optional_sdd_shows_enable_command_when_disabled(tmp_path, monkeypatch):
-    """When SDD is disabled, the optional SDD entry points at `bounds sdd --enable`."""
+    """When SDD is disabled, the optional SDD entry points at `bounds sdd --enable` and current='disabled'."""
     from bounds import agentsync
     monkeypatch.chdir(tmp_path)
     _complete_project(tmp_path, agentsync)
@@ -201,6 +201,7 @@ def test_guide_complete_optional_sdd_shows_enable_command_when_disabled(tmp_path
 
     sdd_entry = next(f for f in payload["optional"] if f["id"] == "sdd")
     assert sdd_entry["enabled"] is False
+    assert sdd_entry["current"] == "disabled"
     assert "bounds sdd --enable" in sdd_entry["command"]
 
 

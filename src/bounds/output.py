@@ -521,8 +521,8 @@ def _render_guide_human(payload: dict) -> str:
         lines.append("")
         lines.append("optional features:")
         for feat in optional:
-            status = "on" if feat.get("enabled") else "off"
-            lines.append(f"  {feat.get('title', ''):<28}  [{status}]  {feat.get('use', '')}")
+            current = feat.get("current", "on" if feat.get("enabled") else "off")
+            lines.append(f"  {feat.get('title', ''):<28}  [{current}]  {feat.get('use', '')}")
             lines.append(f"    configure: {feat.get('configure', feat.get('command', ''))}")
     return "\n".join(lines)
 
