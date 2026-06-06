@@ -31,7 +31,9 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from . import config, errors, gitutil, tsconfig
+from ..shared import config, errors, gitutil, tsconfig
+from ..shared.ignore import IgnoreMatcher, load_matcher
+from ..shared.models import SubsystemCompact
 from .extract import adapter_for_language, supported_extensions
 from .extract.scan import (
     coverage_has_gap,
@@ -45,9 +47,7 @@ from .extract.scan import (
     resolve_doc_owners,
     resolve_test_owners,
 )
-from .ignore import IgnoreMatcher, load_matcher
 from .manifest import loader as manifest_loader
-from .models import SubsystemCompact
 from .validate.checks import index_extracts, resolve_import
 from .validate.schema import SCHEMA_LANGUAGES, schema_catalog
 

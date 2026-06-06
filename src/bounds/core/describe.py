@@ -14,11 +14,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import errors, gitutil
+from ..shared import errors, gitutil
+from ..shared.ignore import IgnoreMatcher, load_matcher
+from ..shared.models import Issue, RootManifest, SubsystemCompact, ValidationReport
 from .extract import scan, supported_extensions
-from .ignore import IgnoreMatcher, load_matcher
+from .extract.scan import coverage_has_gap
 from .manifest import loader as manifest_loader
-from .models import Issue, SubsystemCompact, ValidationReport
 from .validate import engine as validate_engine
 from .validate.schema import (
     fold_subsystem_objects,
@@ -361,3 +362,158 @@ def subsystem_status(report: ValidationReport | None, name: str) -> str:
     if report is None:
         return "unresolved"
     return _derive_status([i for i in report.issues if i.subsystem == name])
+
+
+def run_list(subs: dict, rootm: RootManifest, namespace: str | None = None) -> dict:
+    """Return the subsystem map for the project. Read-only."""
+    entries: list[dict] = []
+    for n in sorted(subs):
+        sub = subs[n]
+        if namespace is not None and sub.namespace != namespace:
+            continue
+        entry: dict = {
+            "name": sub.name,
+            "role": sub.role,
+            "criticality": sub.criticality,
+        }
+        if sub.namespace:
+            entry["namespace"] = sub.namespace
+        entry.update({
+            "description": sub.description,
+            "exposes": len(sub.exposes),
+            "consumes": len(sub.consumes),
+            "consumed_by": sorted(sub.consumed_by),
+        })
+        entries.append(entry)
+    return {"mode": "list", "project": rootm.project, "subsystems": entries}
+
+
+def run_describe(subs: dict, name: str, root: Path, rootm: RootManifest, full: bool = False, deep: bool = False) -> dict | None:
+    """Describe one subsystem. Read-only."""
+    if name not in subs:
+        return None
+    report = status_report(root)
+    entry_matcher = IgnoreMatcher(rootm.entry_points)
+    return describe_one(root, subs[name], deep=deep, report=report, 
+                        entry_matcher=entry_matcher, full=full)
+
+
+def run_describe_namespace(subs: dict, namespace: str, root: Path, rootm: RootManifest, full: bool = False, deep: bool = False) -> dict | None:
+    """Describe all subsystems in a namespace. Read-only."""
+    targets = [s for s in subs.values() if s.namespace == namespace]
+    if not targets:
+        return None
+    report = status_report(root)
+    entry_matcher = IgnoreMatcher(rootm.entry_points)
+    payloads = [describe_one(root, s, deep=deep, report=report, 
+                             entry_matcher=entry_matcher, full=full)
+                for s in sorted(targets, key=lambda x: x.name)]
+    return {
+        "mode": "describe",
+        "namespace": namespace,
+        "subsystems": payloads,
+    }
+
+
+from collections import Counter
+from .validate.checks import CheckContext, check_cycles
+
+def run_overview(root: Path, rootm: RootManifest, subs: dict, schema_issues: list) -> dict:
+    """Return project health, coverage, and trust signals. Read-only."""
+    roles = Counter(s.role for s in subs.values())
+    criticality = Counter(s.criticality for s in subs.values())
+    edges = [
+        {"from": n, "to": c.subsystem, "interfaces": sorted(c.interfaces)}
+        for n in sorted(subs)
+        for c in subs[n].consumes
+    ]
+    edges.sort(key=lambda e: (e["from"], e["to"], e["interfaces"]))
+    
+    ctx = CheckContext(root, rootm, subs, {}, {}, set(), set())
+    cycle_issues = check_cycles(ctx)
+    schema_errors = sum(1 for i in schema_issues if i.severity == "error")
+
+    # Fold a real validation pass into health (BOUNDS-009).
+    report = validate_engine.run(root, mode="full", persist=False)
+    
+    counts: Counter = Counter()
+    for i in report.issues:
+        counts[i.code] += i.count
+        
+    cov = report.stats.get("coverage", {})
+    mapping = cov.get("mapping") or {}
+    validation_errors = report.errors()
+    
+    validation = {
+        "ok": not validation_errors and not schema_errors,
+        "errors": len(validation_errors) + schema_errors,
+        "warnings": len(report.warnings()),
+        "structural_drift": counts.get(errors.E_STRUCTURAL_DRIFT, 0),
+        "boundary_violations": counts.get(errors.E_BOUNDARY_VIOLATION, 0),
+        "ownership_overlaps": counts.get(errors.E_SUBSYSTEM_OVERLAP, 0),
+        "contract_gaps": counts.get(errors.E_CONTRACT_MISSING_EXPORT, 0),
+        "stale_interfaces": counts.get(errors.E_STALE_INTERFACE, 0),
+        "mapped_pct": mapping.get("supported", {}).get("mapped_pct", 0.0),
+    }
+    
+    described_n = sum(1 for s in subs.values() if (s.description or "").strip())
+    total_subs = len(subs)
+    validation["described"] = {
+        "with_description": described_n,
+        "total": total_subs,
+        "pct": round(100.0 * described_n / total_subs, 1) if total_subs else 100.0,
+    }
+
+    next_steps = list(report.next_steps)
+    if total_subs and described_n * 2 < total_subs:
+        missing = total_subs - described_n
+        next_steps.append(
+            f"Add subsystem descriptions ({missing} of {total_subs} are empty). Without prose, "
+            "concept lookups can't map a concept to a subsystem."
+        )
+    if cycle_issues:
+        next_steps.append("Break dependency cycles before treating impact results as complete.")
+    if schema_errors:
+        next_steps.append("Fix schema manifest errors before trusting schema/table answers.")
+    if validation.get("ownership_overlaps"):
+        next_steps.append(
+            "Resolve duplicate ownership: run `bounds validate -H` for the overlapping "
+            "subsystems and narrow their `paths:` so ownership is deterministic."
+        )
+    if not next_steps:
+        next_steps.append(
+            "Use `bounds list` → `bounds describe <name>` → `bounds impact <name>` to scope "
+            "changes, then `bounds validate --quick` after edits."
+        )
+    
+    validation["trust_note"] = (
+        "Bounds is authoritative for tree-sitter-verified symbols in mapped source. "
+        "If mapped_pct is below 100, unmapped library source is outside the architecture map; "
+        "use Bounds to scope first, then inspect source where the map is incomplete."
+    )
+    validation["next_steps"] = next_steps
+
+    # Informational doc/test linkage (JSON-first parity).
+    for label in ("tests", "docs"):
+        bucket = mapping.get(label) or {}
+        if bucket.get("total"):
+            validation[label] = {"linked": bucket.get("linked", 0),
+                                 "unlinked": bucket.get("unlinked", 0)}
+
+    return {
+        "mode": "overview",
+        "project": rootm.project,
+        "subsystems": total_subs,
+        "roles": dict(sorted(roles.items())),
+        "criticality": dict(sorted(criticality.items())),
+        "edges": edges,
+        "cycles": [i.message for i in cycle_issues],
+        "schema_issues": [i.to_dict() for i in schema_issues],
+        "health": {
+            "ok": not validation_errors and not cycle_issues and schema_errors == 0,
+            "schema_errors": schema_errors,
+            "cycles": len(cycle_issues),
+            "validation": validation,
+        },
+        "stats": report.stats,
+    }

@@ -13,9 +13,9 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
-from .. import config, errors
-from ..ignore import IgnoreMatcher, has_generated_marker
-from ..models import ExtractResult, Issue, SubsystemCompact
+from ...shared import config, errors
+from ...shared.ignore import IgnoreMatcher, has_generated_marker
+from ...shared.models import ExtractResult, Issue, SubsystemCompact
 from . import content_hash, get_adapter, supported_extensions
 
 __all__ = [
@@ -300,7 +300,7 @@ def resolve_owners(
     if matcher is not None:
         result = {rel: v for rel, v in result.items() if not matcher.matches(rel)}
     if repo is not None and not include_gitignored and result:
-        from .. import gitutil  # lazy: keep extract/ free of a top-level gitutil import
+        from ...shared import gitutil  # lazy: keep extract/ free of a top-level gitutil import
         ignored = gitutil.gitignored(repo, list(result))
         if ignored:
             result = {rel: v for rel, v in result.items() if rel not in ignored}
@@ -399,7 +399,7 @@ def _gitignore_filter(
     """
     if include_gitignored or repo is None or not rels:
         return rels
-    from .. import gitutil
+    from ...shared import gitutil
     ignored = gitutil.gitignored(repo, rels)
     return [r for r in rels if r not in ignored]
 
@@ -729,7 +729,7 @@ def mapping_coverage(
     all_rels = [path.relative_to(project_root).as_posix() for path in all_files]
     gitignored: set[str] = set()
     if not include_gitignored and repo is not None and all_rels:
-        from .. import gitutil
+        from ...shared import gitutil
         gitignored = set(gitutil.gitignored(repo, all_rels))
 
     exclusions = {

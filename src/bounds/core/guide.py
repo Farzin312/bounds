@@ -11,11 +11,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import agentsync, gitutil, sdd as sdd_mod
+from ..agents import sync as agentsync
+from ..shared import gitutil
+from ..shared.ignore import load_matcher
+from ..shared.models import RootManifest
+from . import sdd as sdd_mod
 from .extract import scan, supported_extensions
-from .ignore import load_matcher
 from .manifest import loader as manifest_loader
-from .models import RootManifest
 
 
 def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
@@ -48,7 +50,10 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
     coverage = _coverage(base, subs) if n_subsystems > 0 else None
 
     agent_check = agentsync.run_agent(base, mode="check")
-    agents_done = bool(agent_check.get("ok")) and bool(agent_check.get("configured"))
+    detected = agent_check.get("detected", [])
+    configured = agent_check.get("configured", [])
+    # Done if at least one detected agent is configured.
+    agents_done = bool(configured)
 
     steps = [
         {
@@ -70,16 +75,13 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
             "title": "Close coverage gaps (map 100% of library source)",
             "command": "bounds coverage -H",
             "why": _coverage_why(coverage),
-            # Done only once subsystems exist AND everything is mapped; until then this surfaces the
-            # gap loudly so an agent/human knows what's still dark and the durable hand-authored fix
-            # for unsupported languages. Not-done before discover (discover, ordered first, is `next`).
             "done": coverage is not None and not scan.coverage_has_gap(coverage),
         },
         {
             "id": "agents",
             "title": "Wire your AI coding agents",
             "command": "bounds agent --sync",
-            "why": "Teaches Claude/Codex/Gemini/Cursor/… to query Bounds before reading source.",
+            "why": _agents_why(agent_check),
             "done": agents_done,
         },
         {
@@ -114,6 +116,7 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
             "fix": "run `bounds validate -H` for the structured manifest error",
         }
         payload["next"] = "bounds validate -H"
+
     sdd_cfg = sdd_mod.resolve_config(rootm)
     if sdd or sdd_cfg["enabled"]:
         payload["sdd"] = {
@@ -128,29 +131,28 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
             },
         }
 
-    # Surface optional features when setup is complete so users know what's available.
-    if pending is None:
-        invocation = rootm.invocation_level() if rootm else "nudge"
-        payload["optional"] = [
-            {
-                "id": "sdd",
-                "title": "Spec-Driven Development",
-                "enabled": sdd_cfg["enabled"],
-                "current": "enabled" if sdd_cfg["enabled"] else "disabled",
-                "command": "bounds sdd --enable" if not sdd_cfg["enabled"] else "bounds sdd --doctor",
-                "use": "map SDD phases (specify → verify) to deterministic architecture checks",
-                "configure": "bounds sdd --enable / --disable / --phases x,y / --add-phase / --remove-phase",
-            },
-            {
-                "id": "invocation",
-                "title": "Agent invocation level",
-                "enabled": invocation != "off",
-                "current": invocation,
-                "command": f"bounds agent --invocation {invocation}",
-                "use": "how assertively agents push toward Bounds first",
-                "configure": "bounds agent --invocation off / nudge / strict",
-            },
-        ]
+    # Always surface optional features so users know what's available, even during setup.
+    invocation = rootm.invocation_level() if rootm else "nudge"
+    payload["optional"] = [
+        {
+            "id": "sdd",
+            "title": "Spec-Driven Development",
+            "enabled": sdd_cfg["enabled"],
+            "current": "enabled" if sdd_cfg["enabled"] else "disabled",
+            "command": "bounds sdd --enable" if not sdd_cfg["enabled"] else "bounds sdd --doctor",
+            "use": "map SDD phases (specify → verify) to deterministic architecture checks",
+            "configure": "bounds sdd --enable / --disable / --phases x,y / --add-phase / --remove-phase",
+        },
+        {
+            "id": "invocation",
+            "title": "Agent invocation level",
+            "enabled": invocation != "off",
+            "current": invocation,
+            "command": f"bounds agent --invocation {invocation}",
+            "use": "how assertively agents push toward Bounds first",
+            "configure": "bounds agent --invocation off / nudge / strict",
+        },
+    ]
     return payload
 
 
@@ -204,6 +206,34 @@ def _coverage_why(coverage: dict | None) -> str:
         "`bounds coverage -H` prints the distinct fix for each bucket; calibration does not map files. "
         "See docs/coverage.md."
     )
+
+
+def _agents_why(check: dict) -> str:
+    """One-line rationale for the agents step — names missing/stale tools when present."""
+    detected = check.get("detected", [])
+    configured = check.get("configured", [])
+    missing = check.get("missing", [])
+    stale = check.get("stale", [])
+    
+    if not detected:
+        return "Teaches Claude/Codex/Gemini/Cursor/… to query Bounds before reading source."
+    
+    if check.get("ok") and len(configured) == len(detected):
+        return (
+            f"All {len(detected)} detected coding agents ({', '.join(configured)}) are wired. "
+            "Re-syncing is only needed after contract or SDD changes."
+        )
+
+    bits: list[str] = []
+    if configured:
+        bits.append(f"configured: {', '.join(configured)}")
+    if missing:
+        bits.append(f"missing: {', '.join(missing)}")
+    if stale:
+        bits.append(f"stale: {', '.join(stale)}")
+    
+    detail = "; ".join(bits)
+    return f"Wired agent status ({detail}). Run `bounds agent --sync` to refresh."
 
 
 def _ci_installed(root: Path) -> bool:

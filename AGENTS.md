@@ -1,5 +1,5 @@
 <!-- BOUNDS:START -->
-<!-- BOUNDS:GENERATED v=2026.6.24 h=3ef14a6d -->
+<!-- BOUNDS:GENERATED v=2026.6.24 h=d4406165 -->
 > Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agentsync.py`) instead.
 
 ## Bounds — architecture contract for agents
@@ -41,7 +41,7 @@ A `bounds impact` miss likewise returns a `fix` with "did you mean" subsystems a
 ### Source of Truth
 - GitHub is the single source of truth.
 - This repo uses `setuptools-scm` for automatic versioning (no static version string).
-- If the local `bounds` CLI is stale, run: `pipx install --force git+https://github.com/Farzin312/bounds.git`.
+- If the local `bounds` CLI is stale, run: `pip install --upgrade bounds-cli`.
 
 ### Hard rules
 - NEVER read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/manifests/*.yaml`, or `.bounds/root.yaml` directly. The cache is binary; the manifests bypass tree-sitter verification.

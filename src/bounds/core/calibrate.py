@@ -31,10 +31,10 @@ from pathlib import Path
 
 import yaml
 
-from . import config, errors, gitutil, surface
-from . import tsconfig
+from ..shared import config, errors, gitutil, surface
+from ..shared import tsconfig
+from ..shared.ignore import load_matcher
 from .extract.scan import extract_project, subsystems_with_unsupported_source, unsupported_surface_files
-from .ignore import load_matcher
 from .manifest import loader as manifest_loader
 from .validate.checks import index_extracts, resolve_import
 

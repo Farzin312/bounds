@@ -61,7 +61,7 @@ from pathlib import Path
 
 import yaml
 
-from bounds import errors
+from ..shared import errors
 
 __all__ = ["run_ci_install"]
 

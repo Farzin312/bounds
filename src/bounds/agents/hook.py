@@ -1,27 +1,8 @@
-"""Agent-invocation hook: the runtime that nudges/gates coding agents toward the Bounds CLI.
+"""Claude Code harness hook: UserPromptSubmit (nudge) and PreToolUse (strict).
 
-This is the *enforcement* layer that complements the advisory files written by ``agentsync``.
-Advisory text (AGENTS.md / skills / rules) is pull-based and a model may ignore it; a harness
-hook is run by the harness itself, so it actually changes behavior. Today only Claude Code has a
-hook mechanism rich enough to use (``UserPromptSubmit`` + ``PreToolUse``); other harnesses degrade
-to the strongest advisory lever they support (see ``agentsync``).
-
-Two responsibilities live here:
-
-* **Runtime decision** (:func:`run_hook`) — the body of the hidden ``bounds agent-hook`` command.
-  It reads a harness hook event (on stdin) and returns the hook-protocol response: a one-line
-  reminder injected into an architecture-shaped prompt (``nudge``), or a pause-and-ask before a
-  broad source search Bounds can actually answer (``strict``).
-* **Wiring** (:func:`sync_claude_hooks`) — merge/remove Bounds-owned hook entries in
-  ``.claude/settings.json``, preserving any hooks the user authored.
-
-The governing invariant is **non-regression / fail-open**: enforcement may only ever *redirect*
-the agent to an answer Bounds actually has. The instant Bounds can't answer — no ``.bounds/``, a
-miss, an unmapped area, an unsupported language, a malformed manifest, an unexpected error — the
-hook allows the tool and (where useful) signposts the fallback. A miss is a green light, never a
-wall. Every public entry is wrapped so any exception degrades to "allow / no-op", and the strict
-gate is *coverage-gated* against the cheap declared surface (manifests only, never a tree-sitter
-walk), so it can never block a search Bounds wouldn't have answered and never blows the perf budget.
+Wired into ``.claude/settings.json`` by ``bounds agent --invocation [nudge|strict]``.
+This harness-run code executes on every turn (even when the agent isn't calling Bounds),
+so it must be lightweight (no tree walk, no heavy parsing).
 """
 
 from __future__ import annotations
@@ -31,10 +12,11 @@ import hashlib
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
-from . import config
-from .manifest import loader as manifest_loader
+from ..shared import config
+from ..core.manifest import loader as manifest_loader
 
 __all__ = [
     "HOOK_COMMAND",
@@ -283,6 +265,21 @@ def _resolve_root(payload: dict, start: Path | None) -> Path | None:
         return manifest_loader.find_root(Path(start))
     except Exception:  # noqa: BLE001
         return None
+
+
+def agent_hook_cmd() -> None:
+    """The body of the hidden `bounds agent-hook` command (moved from cli.py)."""
+    from ..shared.io import emit_loud, read_stdin_json
+
+    payload = read_stdin_json() or {}
+    try:
+        result = run_hook(payload if isinstance(payload, dict) else {})
+    except Exception as exc:  # noqa: BLE001 - hook must fail open
+        emit_loud(f"agent hook failed open ({type(exc).__name__}: {exc})")
+        result = {}
+    if result:
+        sys.stdout.write(json.dumps(result))
+    sys.exit(config.EXIT_OK)
 
 
 def _resolve_level(root: Path) -> str:

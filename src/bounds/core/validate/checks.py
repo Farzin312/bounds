@@ -12,10 +12,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from posixpath import normpath
 
-from .. import errors, tsconfig
+from ...shared import errors, tsconfig
 from ..extract import get_adapter
 from ..extract.scan import is_framework_entry_file, is_test_file, is_test_symbol, strip_ext
-from ..models import ExtractResult, Issue, RootManifest, SubsystemCompact
+from ...shared.models import ExtractResult, Issue, RootManifest, SubsystemCompact
 from .schema import SCHEMA_LANGUAGES, _fold_subsystem_schema, schema_diagnostics
 
 __all__ = ["CheckContext", "check_cycles", "index_extracts", "resolve_import"]

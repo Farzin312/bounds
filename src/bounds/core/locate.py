@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 
-from . import errors
-from . import tsconfig
+from ..shared import errors
+from ..shared import tsconfig
+from ..shared.ignore import load_matcher
 from .extract import scan
-from .ignore import load_matcher
 from .manifest import loader as manifest_loader
 from .validate import propagation
 from .validate.checks import index_extracts, resolve_import

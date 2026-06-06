@@ -23,7 +23,8 @@ import json
 import urllib.error
 import urllib.request
 
-from . import __version__, config
+from .. import __version__
+from ..shared import config
 
 # GitHub Releases API for the canonical repository. The "latest" endpoint returns
 # the most recent non-draft, non-prerelease release.

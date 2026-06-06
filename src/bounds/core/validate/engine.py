@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from collections import Counter
 from pathlib import Path
 
-from .. import config, errors, gitutil, surface
-from ..cache import store as cache_store
+from ...shared import config, errors, gitutil, surface
+from ...shared.cache import store as cache_store
 from ..extract import content_hash, get_adapter, supported_extensions, scan
-from ..ignore import IgnoreMatcher, has_generated_marker, load_matcher
+from ...shared.ignore import IgnoreMatcher, has_generated_marker, load_matcher
 from ..manifest import loader as manifest_loader
-from ..models import Issue, ValidationReport
+from ...shared.models import Issue, ValidationReport
 from . import propagation
 from .checks import CHECKS_BY_MODE, CheckContext
 
@@ -385,6 +386,63 @@ def run(
 # Helpers
 # ===========================================================================
 _SURFACE_SAMPLE_CAP = 5  # token-lean: name at most this many changed files, then "+N more"
+
+
+def run_validate_quick(root: Path) -> dict:
+    """Run a quick drift check. Read-only."""
+    return run(root, mode="quick", persist=True).to_dict()
+
+
+def run_validate(
+    root: Path,
+    include_ignored: bool = False,
+    include_gitignored: bool = False,
+    follow_symlinks: bool = False,
+    fail_on_unowned: bool = False,
+) -> dict:
+    """Run full architecture checks. Read-only."""
+    return run(
+        root,
+        mode="full",
+        include_ignored=include_ignored,
+        include_gitignored=include_gitignored,
+        follow_symlinks=follow_symlinks,
+        fail_on_unowned=fail_on_unowned,
+        persist=True,
+    ).to_dict()
+
+
+def run_preflight(
+    root: Path,
+    include_ignored: bool = False,
+    include_gitignored: bool = False,
+    follow_symlinks: bool = False,
+    fail_on_unowned: bool = False,
+) -> dict:
+    """Run production-ready architecture gate. Read-only."""
+    report = run(
+        root,
+        mode="preflight",
+        include_ignored=include_ignored,
+        include_gitignored=include_gitignored,
+        follow_symlinks=follow_symlinks,
+        fail_on_unowned=fail_on_unowned,
+        persist=True,
+    )
+    counts: Counter = Counter()
+    for i in report.issues:
+        counts[i.code] += i.count
+
+    payload = report.to_dict()
+    payload["checks"] = {
+        "structural_drift": counts.get(errors.E_STRUCTURAL_DRIFT, 0),
+        "boundary_compliance": counts.get(errors.E_BOUNDARY_VIOLATION, 0),
+        "contract_compliance": counts.get(errors.E_CONTRACT_MISSING_EXPORT, 0),
+        "cross_subsystem_impact": counts.get(errors.E_STALE_INTERFACE, 0),
+        "cycle_detection": counts.get(errors.E_CYCLE_DETECTED, 0),
+        "orphan_detection": counts.get(errors.E_ORPHAN_EXPORT, 0),
+    }
+    return payload
 
 
 def _surface_stale_issue(subsystem: str, changed: list[str]) -> Issue:

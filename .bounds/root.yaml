@@ -1,7 +1,7 @@
 version: '1'
 project: bounds
 sdd:
-  enabled: false
+  enabled: true
   agent: generic
   phases:
   - specify

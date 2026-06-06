@@ -12,11 +12,11 @@ import os
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from . import config, gitutil
+from ..shared import config, gitutil
+from ..shared.ignore import load_matcher
+from ..shared.models import SubsystemCompact
 from .extract import scan, supported_extensions
 from .extract.scan import is_config_file
-from .ignore import load_matcher
-from .models import SubsystemCompact
 
 __all__ = [
     "run_coverage",

@@ -10,7 +10,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from . import config
+from ..shared import config
 
 _PACKAGE_NAME = "bounds-cli"
 # A pipx install builds from git (clone + wheel build); minutes, not seconds. Generous
