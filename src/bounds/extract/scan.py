@@ -22,6 +22,7 @@ __all__ = [
     "coverage_has_gap",
     "extract_file",
     "extract_project",
+    "is_config_file",
     "is_framework_entry_file",
     "is_test_file",
     "is_test_symbol",
@@ -667,13 +668,24 @@ def unsupported_surface_files(
 _COVERAGE_SAMPLE_CAP = 10  # token-lean: coverage buckets preview at most this many sorted paths
 
 
+def is_config_file(rel: str) -> bool:
+    """Whether ``rel`` is executable build/tool config mistaken for library source."""
+    name = PurePosixPath(rel).name
+    suffix = PurePosixPath(name).suffix
+    if suffix not in config.KNOWN_SOURCE_EXTS:
+        return False
+    stem = name[: -len(suffix)]
+    return stem in config.CONFIG_FILE_STEMS
+
+
 def mapping_coverage(
     project_root: Path,
     owned: set[str],
     matcher: IgnoreMatcher | None = None,
     repo: Path | None = None,
     include_gitignored: bool = False,
-    subsystems: dict[str, "SubsystemCompact"] | None = None,
+    subsystems: dict[str, SubsystemCompact] | None = None,
+    sample_cap: int | None = _COVERAGE_SAMPLE_CAP,
 ) -> dict:
     """How much of the repo's *supported-language* source Bounds verified, plus an honest, separately
     tracked account of the unsupported-language source it can't yet parse — the metric that stops a
@@ -692,32 +704,67 @@ def mapping_coverage(
     reachable and means "100% of what Bounds can parse"; unsupported source is reported beside it
     (``declared`` vs ``dark``), never folded into the %. Returns ``mapped_pct`` plus ``supported`` /
     ``unsupported`` / ``tests`` / ``docs`` blocks (each with sorted samples capped at
-    :data:`_COVERAGE_SAMPLE_CAP`). ``subsystems`` resolves all-extension ownership (so a declared
+    :data:`_COVERAGE_SAMPLE_CAP``). ``subsystems`` resolves all-extension ownership (so a declared
     unsupported file counts as covered) and doc/test linkage; absent ⇒ unsupported files are all
     ``dark`` and docs/tests all unlinked. Deterministic; safe to skip on the ``--quick`` hot path
     (callers gate it). Honors ``.gitignore`` when ``repo`` is given and ``include_gitignored`` is
     False, matching the gitignore-aware file universe the rest of validation uses.
+
+    The ``supported`` block now carries a ``unowned_breakdown`` so the agent (or a human)
+    can distinguish:
+      * **user_decision_needed** — a real source file in no subsystem (legit mapping gap;
+        the user must decide where it goes or author a new subsystem);
+      * **algorithm_miss** — a file Bounds should have excluded or auto-mapped but didn't
+        (e.g. a ``vite.config.ts`` in a monorepo). Carries a ``reason`` per sample so
+        ``bounds coverage --why <path>`` and ``bounds fix-coverage --auto`` can name the
+        exact fix.
+    The legacy ``unowned`` count and ``unowned_sample`` are kept (sum of both new buckets)
+    for back-compat with every existing test and dashboard.
     """
     supported = supported_extensions()
-    # Collect source-code candidates first so gitignore can be applied in one batched call (parity
-    # with the engine's owned-file gitignore filtering). Test files are bucketed separately below
-    # and never enter the source denominator.
-    candidates: list[tuple[str, str, str]] = []  # (rel, ext, lang)
-    for abs_path in walk_supported(project_root, None):  # None => every file
+    all_files = sorted(
+        walk_supported(project_root, None),
+        key=lambda path: path.relative_to(project_root).as_posix(),
+    )
+    all_rels = [path.relative_to(project_root).as_posix() for path in all_files]
+    gitignored: set[str] = set()
+    if not include_gitignored and repo is not None and all_rels:
+        from .. import gitutil
+        gitignored = set(gitutil.gitignored(repo, all_rels))
+
+    exclusions = {
+        "boundsignored": 0,
+        "gitignored": 0,
+        "test_files": 0,
+        "non_source": 0,
+        # The recursive walker never enters these directories. Report the
+        # number of active rules rather than inventing a file count we did not
+        # pay to compute.
+        "default_ignore_directory_rules": len(config.DEFAULT_IGNORES),
+    }
+    exclusion_samples: dict[str, list[str]] = {
+        "boundsignored": [],
+        "gitignored": [],
+        "test_files": [],
+        "non_source": [],
+    }
+    candidates: list[tuple[str, str, str]] = []
+    for abs_path, rel in zip(all_files, all_rels):
+        if matcher and matcher.matches(rel):
+            _record_exclusion(exclusions, exclusion_samples, "boundsignored", rel)
+            continue
+        if rel in gitignored:
+            _record_exclusion(exclusions, exclusion_samples, "gitignored", rel)
+            continue
+        if is_test_file(rel):
+            _record_exclusion(exclusions, exclusion_samples, "test_files", rel)
+            continue
         ext = abs_path.suffix
         lang = config.KNOWN_SOURCE_EXTS.get(ext)
         if lang is None:
-            continue  # not source code (docs/config/assets) — out of the denominator
-        rel = abs_path.relative_to(project_root).as_posix()
-        if matcher and matcher.matches(rel):
+            _record_exclusion(exclusions, exclusion_samples, "non_source", rel)
             continue
-        if is_test_file(rel):
-            continue  # tests are NOT library source — counted in the `tests` bucket, never a gap
         candidates.append((rel, ext, lang))
-    if not include_gitignored and repo is not None:
-        from .. import gitutil  # lazy: keep extract/ free of a top-level gitutil import
-        ignored = gitutil.gitignored(repo, [c[0] for c in candidates])
-        candidates = [c for c in candidates if c[0] not in ignored]
 
     # Ownership over EVERY extension (not just supported) so a hand-authored manifest that claims an
     # unsupported-language file makes it `declared` (covered + durable) instead of `dark`. Reuses the
@@ -732,6 +779,11 @@ def mapping_coverage(
     by_lang: dict[str, int] = {}
     unowned_rels: list[str] = []
     dark_rels: list[str] = []
+    # The unowned-supported split: a sample of each category is what `coverage --why` /
+    # `fix-coverage --auto` reads. The full lists live in the same dict, capped at sample
+    # size, so the JSON payload stays token-lean for an agent / dashboard.
+    user_decision_needed: list[str] = []
+    algorithm_miss: list[tuple[str, str]] = []  # (rel, reason)
     for rel, ext, lang in candidates:
         if ext in supported:
             sup_total += 1
@@ -740,6 +792,10 @@ def mapping_coverage(
             else:
                 sup_unowned += 1
                 unowned_rels.append(rel)
+                if is_config_file(rel):
+                    algorithm_miss.append((rel, "build_config"))
+                else:
+                    user_decision_needed.append(rel)
         else:
             unsup_total += 1
             by_lang[lang] = by_lang.get(lang, 0) + 1
@@ -758,37 +814,106 @@ def mapping_coverage(
     subs = subsystems or {}
     test_owners = resolve_test_owners(project_root, subs, matcher, repo, include_gitignored)
     doc_owners = resolve_doc_owners(project_root, subs, matcher, repo, include_gitignored)
+    user_decision_needed.sort()
+    algorithm_miss.sort()
+    cap = len(candidates) if sample_cap is None else max(sample_cap, 0)
     return {
         "mapped_pct": pct,
         "supported": {
             "total": sup_total,
             "mapped": sup_mapped,
+            # Legacy: total unowned (sum of both new buckets). Kept so every existing
+            # test / dashboard / E_COVERAGE_GAP `fix` string still reads correctly.
             "unowned": sup_unowned,
-            "unowned_sample": sorted(unowned_rels)[:_COVERAGE_SAMPLE_CAP],
+            "unowned_sample": sorted(unowned_rels)[:cap],
+            # The distinction: "needs your decision" vs "missed by the algorithm". The
+            # sum equals `unowned`. A user running `bounds coverage` or `fix-coverage`
+            # should see these two buckets separately so the guidance differs.
+            "unowned_breakdown": {
+                "user_decision_needed": {
+                    "count": len(user_decision_needed),
+                    "sample": user_decision_needed[:cap],
+                },
+                "algorithm_miss": {
+                    "count": len(algorithm_miss),
+                    "sample": [rel for rel, _ in algorithm_miss[:cap]],
+                    "reasons": _reason_breakdown(algorithm_miss),
+                },
+            },
         },
         "unsupported": {
             "total": unsup_total,
             "declared": unsup_declared,
             "dark": unsup_dark,
-            "dark_sample": sorted(dark_rels)[:_COVERAGE_SAMPLE_CAP],
+            "dark_sample": sorted(dark_rels)[:cap],
             "by_language": dict(sorted(by_lang.items())),
+        },
+        # Principled-exclusion bucket: why the 100% denominator is what it is. A repo
+        # with 5,200 node_modules files in DEFAULT_IGNORES is not "missing 5,200
+        # files from the map" — those files were never supposed to be mapped. The
+        # bucket makes the exclusion visible so a user reading `bounds coverage`
+        # understands the headline % is over the right denominator, and so the
+        # fix-coverage flow can explain a file as `excluded_by_design: build_cache`
+        # instead of guessing.
+        "principled_exclusions": {
+            "counts": exclusions,
+            "samples": exclusion_samples,
+            "note": (
+                "Excluded by design before the source denominator is computed. "
+                "DEFAULT_IGNORES directories are not traversed, so Bounds reports "
+                "the active rule count rather than a fabricated excluded-file count."
+            ),
         },
         "tests": _linkage_bucket(test_owners),
         "docs": _linkage_bucket(doc_owners),
     }
 
 
+def _reason_breakdown(items: list[tuple[str, str]]) -> dict[str, int]:
+    """Tally algorithm-miss reasons so the user sees the dominant pattern at a glance.
+
+    e.g. ``{"build_config": 7, "narrow_glob": 2}`` — the majority of the gap is
+    build config files, which is the kind of finding a user can act on
+    (``bounds fix-coverage --auto`` handles them) rather than opening manifests.
+    Sorted by descending count for deterministic, useful output.
+    """
+    counts: dict[str, int] = {}
+    for _, reason in items:
+        counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def _record_exclusion(
+    counts: dict[str, int],
+    samples: dict[str, list[str]],
+    category: str,
+    rel: str,
+) -> None:
+    """Record one exclusion while keeping the public payload token-lean."""
+    counts[category] += 1
+    if len(samples[category]) < 3:
+        samples[category].append(rel)
+
+
 def coverage_has_gap(mapping: dict) -> bool:
     """True when validation should surface an ``E_COVERAGE_GAP`` for this coverage ``mapping``.
 
-    The gap is the *closeable* set: supported files in no subsystem (deterministic — add to
-    ``paths:``) and unsupported files no manifest claims (``dark``). A ``declared`` unsupported file
-    is **covered** (durable hand-authored manifest) and is never a gap. The single predicate shared by
-    the engine, guide, discover and overview so they never disagree on "is coverage complete?".
-    Fail-soft: a missing/empty mapping (e.g. the --quick path omits it) reports no gap rather than
-    raising, matching the advisory-never-crash contract.
+    The gap is the *closeable* set: supported files in no subsystem — broken into
+    ``user_decision_needed`` (real mapping gap) and ``algorithm_miss`` (file Bounds
+    should have caught). Both are closeable: the first by adding the file to a manifest's
+    ``paths:`` or running ``bounds init --subsystem``, the second by ``bounds
+    fix-coverage --auto`` or by filing a DEFAULT_IGNORES gap. Unsupported files no
+    manifest claims (``dark``) are also closeable. A ``declared`` unsupported file is
+    **covered** (durable hand-authored manifest) and is never a gap. The single predicate
+    shared by the engine, guide, discover and overview so they never disagree on
+    "is coverage complete?". Fail-soft: a missing/empty mapping (e.g. the --quick path
+    omits it) reports no gap rather than raising, matching the advisory-never-crash contract.
     """
-    return mapping.get("supported", {}).get("unowned", 0) > 0 \
+    sup = mapping.get("supported", {})
+    breakdown = sup.get("unowned_breakdown", {})
+    user_decision = breakdown.get("user_decision_needed", {}).get("count", 0) if breakdown else sup.get("unowned", 0)
+    algo_miss = breakdown.get("algorithm_miss", {}).get("count", 0) if breakdown else 0
+    return (user_decision + algo_miss) > 0 \
         or mapping.get("unsupported", {}).get("dark", 0) > 0
 
 

@@ -40,6 +40,8 @@ exposes:
   kind: function
 - name: unsupported_surface_files
   kind: function
+- name: is_config_file
+  kind: function
 consumes:
 - subsystem: models
   via: models

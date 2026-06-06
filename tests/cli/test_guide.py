@@ -175,3 +175,30 @@ def test_guide_sdd_null_phases_defaults_to_all_phases(tmp_path):
         "implement",
         "verify",
     ]
+
+
+def test_guide_surfaces_manifest_error_with_cli_recovery(tmp_path):
+    """Broken YAML is reported explicitly instead of being disguised as zero completed steps."""
+    cfg = tmp_path / ".bounds"
+    cfg.mkdir()
+    (cfg / "root.yaml").write_text("project: [broken\n", encoding="utf-8")
+
+    payload = guide.run_guide(tmp_path)
+
+    assert payload["manifest_error"]["message"]
+    assert payload["manifest_error"]["fix"] == "run `bounds validate -H` for the structured manifest error"
+    assert payload["next"] == "bounds validate -H"
+
+
+def test_guide_human_view_does_not_hide_manifest_error(tmp_path, monkeypatch):
+    """Human rendering leads with the parse failure and the structured recovery command."""
+    cfg = tmp_path / ".bounds"
+    cfg.mkdir()
+    (cfg / "root.yaml").write_text("project: [broken\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["guide", "--human"])
+
+    assert result.exit_code == 0
+    assert "manifest error:" in result.output
+    assert "bounds validate -H" in result.output

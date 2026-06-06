@@ -105,6 +105,7 @@ __all__ = [
     "BUILTIN_CRITICALITY_DEPTH",
     "BUILTIN_ROLES",
     "CACHE_FILE",
+    "CONFIG_FILE_STEMS",
     "DEFAULT_IGNORES",
     "DEFAULT_INVOCATION",
     "DOC_EXTS",
@@ -223,16 +224,65 @@ DEFAULT_IGNORES = {
     ".svelte-kit",
     ".vercel",
     ".cache",
+    # JS/TS test/build artifact conventions
+    "__snapshots__",  # Jest/Vitest snapshot dirs
+    ".parcel-cache",
+    ".eslintcache",
     # Python
     "__pycache__",
     ".venv",
     "venv",
     ".mypy_cache",
     ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    # iOS / Apple
+    "Pods",  # CocoaPods
+    "DerivedData",
+    # Misc build / tool caches
+    ".terraform",  # Terraform state/providers
+    "obj",
     # Bounds itself
     ".bounds",
     ".compact",  # legacy config dir
 }
+
+# Build/tool configuration stems whose final suffix is a known source extension.
+# ``is_config_file`` removes the final suffix before matching, so
+# ``vite.config.ts`` becomes ``vite.config`` and ``setup.py`` becomes ``setup``.
+# Non-source files (for example ``pyproject.toml``) do not belong here because
+# they never enter mapping coverage's source denominator.
+CONFIG_FILE_STEMS = frozenset({
+    "vite.config",
+    "next.config",
+    "nuxt.config",
+    "remix.config",
+    "astro.config",
+    "svelte.config",
+    "rollup.config",
+    "webpack.config",
+    "parcel.config",
+    "esbuild.config",
+    "tsup.config",
+    "vitest.config",
+    "jest.config",
+    "playwright.config",
+    "cypress.config",
+    "tailwind.config",
+    "postcss.config",
+    "babel.config",
+    ".babelrc",
+    "prettier.config",
+    "eslint.config",
+    ".eslintrc",
+    "lint-staged.config",
+    "commitlint.config",
+    "stylelint.config",
+    # Python executable configuration modules
+    "setup",
+    "noxfile",
+    "conftest",
+})
 
 # Extension -> language label for *known source code*, language-agnostic. The denominator for
 # mapping-coverage: how much of a repo's source Bounds actually mapped, and an honest, by-language

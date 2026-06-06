@@ -20,13 +20,14 @@ states what behavior it pins.
 | Coverage gap remains after calibrate | New or dark source files are not owned by any subsystem. | Add supported files to a subsystem `paths:` or hand-author a manifest for unsupported-language source. |
 | Unknown `consumes` edge | A manifest names a subsystem that does not exist. | Declare/fix the target name, or use `bounds calibrate --prune-unknown --apply` for stale dangling edges. |
 | Needs-review expose | A declared expose is missing from extracted source but still consumed, or belongs to unsupported source. | Update consumers or, for supported-language exports intentionally removed, use `--prune-missing-exports --apply`; re-verify unsupported exposes by hand. |
-| Quick validation looks clean | `--quick` skips boundary, contract, cycle, coverage, and orphan checks. | Use quick after edits; use `bounds validate -H` or `bounds preflight --ci` before claiming full repo health. |
+| Quick validation looks clean | `--quick` skips boundary, contract, cycle, coverage, and orphan checks; `coverage_summary.complete` is `null`. | Use quick after edits; use `bounds coverage -H`, `bounds validate -H`, or `bounds preflight --ci` before claiming full repo health. |
 
 ## Ownership and coverage
 
 | Edge case | Covered behavior | Fix path |
 |-----------|------------------|----------|
 | Supported source outside every subsystem | Reported as `E_COVERAGE_GAP` with sample files. | Add the files to an existing subsystem `paths:` or scaffold/register a new one with `bounds init --subsystem <name> --path <file-or-dir>`. |
+| Tool/build config classified as supported source | Reported under `supported.unowned_breakdown.algorithm_miss`, distinct from real source ownership decisions. | Preview exact paths with `bounds fix-coverage --auto`; write them only with `bounds fix-coverage --auto --apply`. |
 | Unsupported source no manifest claims | Reported as dark unsupported source, not silently ignored. | Hand-author a subsystem manifest with `paths:` and public `exposes:`. |
 | Unsupported source already declared | Counted as covered; hand-authored exposes are durable. | Keep exposes current manually until Bounds has an adapter for that language. |
 | Unsupported source changed after confirmation | Reported as `E_UNSUPPORTED_SURFACE_STALE` when a surface baseline exists. | Re-check the hand-authored exposes, then run `bounds calibrate --dump-baseline`. |

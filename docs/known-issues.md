@@ -248,6 +248,24 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Fix:** discovery now normalizes generated path segments into the loader-safe alphabet before naming candidates, and rejects invalid explicit `--merge-into` names up front. In Firecrawl, `.github/scripts` now becomes `github-scripts` and validation can read the generated model.
 - **Test:** `tests/discover/test_discover.py::test_discover_sanitizes_hidden_path_segments_in_generated_names`, `::test_discover_rejects_invalid_merge_name`.
 
+### BOUNDS-025 — `agent-hook` could wait forever for stdin EOF
+- **Severity / Status:** high / **Fixed**
+- **Found:** 2026-06-05 while testing Claude Code's real open-pipe hook lifecycle.
+- **Affected:** hidden `bounds agent-hook` invocations where the parent writes one JSON event but keeps the pipe open while waiting for the child.
+- **Symptom:** the hook process could hang until the harness killed it even though a complete JSON object had already arrived. CliRunner tests missed the bug because StringIO always reaches EOF.
+- **Root cause:** whole-stream stdin reads use EOF as the message boundary, but the hook protocol's boundary is one complete JSON value.
+- **Fix:** `_io.read_stdin_json` incrementally decodes one top-level value, returns as soon as it is complete, and retains a five-second wall-clock cap. The hook remains fail-open at exit `0`; malformed input, I/O errors, and timeouts go to stderr only.
+- **Test:** `tests/agent/test_agenthook.py::test_cli_agent_hook_real_pipe_does_not_wait_for_eof`, plus malformed/empty stdin regressions.
+
+### BOUNDS-026 — mapping coverage hid ownership decisions and algorithm misses in one bucket
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-05 while auditing configuration-heavy TypeScript repositories.
+- **Affected:** `validate`, `overview`, and coverage guidance for files such as `vite.config.ts`.
+- **Symptom:** real unmapped source and build/tool configuration both appeared as `supported.unowned`, so the suggested ownership edit was wrong for one class. Quick validation also tempted consumers to treat cached owned-file counts as complete coverage.
+- **Root cause:** the compatibility bucket carried no reason taxonomy, and the CLI had no shared per-path explanation/repair service.
+- **Fix:** `supported.unowned_breakdown` separates `user_decision_needed` from `algorithm_miss` while preserving legacy totals. `bounds coverage`/`--why` and `bounds fix-coverage` share one classifier; auto-fix previews exact repo-relative `.boundsignore` rules and requires explicit `--apply`. Quick mode reports `coverage_summary.complete: null`.
+- **Test:** `tests/validate/test_coverage.py`, `tests/cli/test_coverage_cli.py`.
+
 ---
 
 See also: [coverage.md](coverage.md) (the mapping-coverage metric + how to close a gap),

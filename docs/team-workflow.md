@@ -10,10 +10,11 @@ A cheap, verified architecture contract is only useful if it still matches the c
 
 ## Adoption path
 
-Onboarding an existing repo is four steps:
+Onboarding an existing repo starts with the state-aware guide, then four setup actions:
 
 ```bash
 cd your-project
+bounds guide               # inspect current state and the single next action
 bounds discover            # preview auto-generated manifests (dry-run)
 bounds discover --apply    # write root.yaml + per-subsystem manifests
 # → review the generated manifests by hand: fix boundaries, roles, names
@@ -23,10 +24,11 @@ bounds agent --sync        # wire Bounds into the coding agents your team uses
 
 (Teammates can run bare `bounds agent` any time to see which agents are wired — it's read-only — and `bounds agent --check` is the CI-friendly way to verify the wiring is still current.)
 
-1. **`bounds discover`** groups source by directory, tree-sitter-extracts each candidate's verified `exposes`, infers `consumes` from the cross-candidate import graph, and seeds `role`/`criticality` from graph degree. It is a dry-run by default and never overwrites existing manifests.
-2. **Review the manifests.** Discovery proposes; humans decide. This is where you correct boundaries the heuristic got wrong and confirm the roles.
-3. **Commit `.bounds/root.yaml` and `.bounds/manifests/`** so the contract is versioned with the code. (The cache `.bounds/cache.db` is gitignored and regenerated — never commit it.)
-4. **`bounds agent --sync`** writes the canonical contract into `AGENTS.md` plus per-tool pointer files — including a marked block in each agent's always-loaded memory file (e.g. `CLAUDE.md`), created if absent or appended non-destructively if present — telling each agent to query `bounds describe`/`bounds list` instead of reading raw source.
+1. **`bounds guide`** detects initialization, manifests, coverage, agent wiring, and CI. It is read-only and fails loud when a manifest cannot be loaded instead of disguising the error as zero progress.
+2. **`bounds discover`** groups source by directory, tree-sitter-extracts each candidate's verified `exposes`, infers `consumes` from the cross-candidate import graph, and seeds `role`/`criticality` from graph degree. It is a dry-run by default and never overwrites existing manifests.
+3. **Review the manifests.** Discovery proposes; humans decide. This is where you correct boundaries the heuristic got wrong and confirm the roles.
+4. **Commit `.bounds/root.yaml` and `.bounds/manifests/`** so the contract is versioned with the code. (The cache `.bounds/cache.db` is gitignored and regenerated — never commit it.)
+5. **`bounds agent --sync`** writes the canonical contract into `AGENTS.md` plus per-tool pointer files — including a marked block in each agent's always-loaded memory file (e.g. `CLAUDE.md`), created if absent or appended non-destructively if present — telling each agent to query `bounds describe`/`bounds list` instead of reading raw source.
 
 ## The freshness loop (the core discipline)
 
@@ -34,7 +36,12 @@ This is the rule that keeps the whole thing honest:
 
 > **A PR that changes a subsystem's public surface MUST update that subsystem's manifest — in the same PR.**
 
-You make that rule real with a CI gate, not a wiki page nobody reads. Every PR runs `bounds validate --quick` (git-diff incremental, safe for every commit). When the gate detects source/manifest drift, the author runs `bounds calibrate` to see the proposed manifest changes, `bounds calibrate --apply` to write them, and includes that manifest update **in the same PR** as the code change. Code and contract move together, always.
+Use `bounds validate --quick` in the edit loop, then make the rule real with the full
+`bounds preflight --ci` PR gate. Quick mode skips boundary, contract, cycle, coverage, and orphan
+checks; its `coverage_summary.complete` is deliberately `null`, so a clean quick result is not a
+claim of full repo health. When validation detects source/manifest drift, run `bounds calibrate`,
+review the proposal, apply only intentional changes, and include that manifest update **in the same
+PR** as the code change.
 
 Do not overgeneralize calibration. `bounds calibrate --apply` reconciles manifests with extracted
 source: exposes, missing provider edges, stale consumes edges, and similar drift. It keeps bare

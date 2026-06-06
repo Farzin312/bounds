@@ -77,3 +77,5 @@ exposes:
   kind: const
 - name: VALID_INVOCATION
   kind: const
+- name: CONFIG_FILE_STEMS
+  kind: const

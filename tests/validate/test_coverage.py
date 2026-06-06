@@ -49,7 +49,14 @@ def test_mapping_coverage_supported_only_pct_and_unsupported_split(tmp_path):
     _polyglot(tmp_path)
     cov = scan.mapping_coverage(tmp_path, {"svc/m0.py", "svc/m1.py", "svc/m2.py"})
     assert cov["mapped_pct"] == 100.0  # 3/3 supported mapped — unsupported never drags the %
-    assert cov["supported"] == {"total": 3, "mapped": 3, "unowned": 0, "unowned_sample": []}
+    assert cov["supported"]["total"] == 3
+    assert cov["supported"]["mapped"] == 3
+    assert cov["supported"]["unowned"] == 0
+    assert cov["supported"]["unowned_sample"] == []
+    assert cov["supported"]["unowned_breakdown"] == {
+        "user_decision_needed": {"count": 0, "sample": []},
+        "algorithm_miss": {"count": 0, "sample": [], "reasons": {}},
+    }
     assert cov["unsupported"]["total"] == 5
     assert cov["unsupported"]["dark"] == 5      # no manifest claims them (subsystems not passed)
     assert cov["unsupported"]["declared"] == 0
@@ -167,7 +174,43 @@ def test_quick_mode_skips_coverage_scan(tmp_path):
     _polyglot(tmp_path)
     report = engine.run(tmp_path, mode="quick", include_gitignored=True)
     assert "mapping" not in report.stats["coverage"]
+    assert report.stats["coverage_summary"]["complete"] is None
+    assert "unknown" in report.stats["coverage_summary"]["note"]
     assert [i for i in report.issues if i.code == errors.E_COVERAGE_GAP] == []
+
+
+def test_config_file_is_an_algorithm_miss_not_an_ownership_decision(tmp_path):
+    """Known tool config remains in legacy unowned totals but gets the distinct automated-fix bucket."""
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "main.ts").write_text("export const main = true\n", encoding="utf-8")
+    (tmp_path / "vite.config.ts").write_text("export default {}\n", encoding="utf-8")
+    _git_init(tmp_path)
+
+    cov = scan.mapping_coverage(tmp_path, {"app/main.ts"}, repo=tmp_path)
+    breakdown = cov["supported"]["unowned_breakdown"]
+
+    assert scan.is_config_file("vite.config.ts") is True
+    assert cov["supported"]["unowned"] == 1
+    assert cov["supported"]["unowned_sample"] == ["vite.config.ts"]
+    assert breakdown["user_decision_needed"]["count"] == 0
+    assert breakdown["algorithm_miss"] == {
+        "count": 1,
+        "sample": ["vite.config.ts"],
+        "reasons": {"build_config": 1},
+    }
+
+
+def test_generic_bin_directory_is_not_silently_ignored(tmp_path):
+    """A conventional but ambiguous `bin/` directory may contain real source and must stay visible."""
+    source = tmp_path / "bin"
+    source.mkdir()
+    (source / "tool.py").write_text("def main():\n    return 0\n", encoding="utf-8")
+
+    cov = scan.mapping_coverage(tmp_path, set(), include_gitignored=True)
+
+    assert cov["supported"]["total"] == 1
+    assert cov["supported"]["unowned_sample"] == ["bin/tool.py"]
 
 
 def test_gitignored_owned_file_not_counted_as_unmapped(tmp_path):

@@ -40,7 +40,7 @@ import hashlib
 import re
 from pathlib import Path
 
-from . import agenthook, config, errors
+from . import agenthook, config, errors, sdd as sdd_mod
 from .manifest import loader as manifest_loader
 
 __all__ = ["run_agent"]
@@ -72,6 +72,7 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 - Where a symbol or table is defined → `bounds where <symbol>`
 - What breaks if you change a subsystem or table → `bounds impact <name>`
 - Confirm an edit didn't drift the contract → `bounds validate --quick`
+- Full mapping denominator / why one file is excluded → `bounds coverage` / `bounds coverage --why <path>`
 - Project health, coverage, and trust guidance → `bounds overview`
 
 ### Workflow
@@ -79,8 +80,8 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 2. `bounds describe <name>` to scope the contract, then read only the implementation files you need to edit.
 3. `bounds impact <name>` before changing an interface or a migration.
 4. If `bounds overview` reports partial coverage, overlaps, cycles, or validation errors, follow `health.validation.next_steps` before trusting that part of the map.
-5. On an `E_COVERAGE_GAP`, follow the issue `fix`: add supported files to a manifest's `paths:` (deterministic); for an unsupported language (no adapter yet), author a manifest with a hand-written `exposes:` — durable, calibrate/validate keep it (never stripped or flagged as drift).
-6. `bounds validate --quick` after edits; fix drift before broadening context.
+5. On an `E_COVERAGE_GAP`, use `bounds coverage`: assign `user_decision_needed` source to a subsystem; preview deterministic `algorithm_miss` exclusions with `bounds fix-coverage --auto`; hand-map dark unsupported source with durable `exposes:`.
+6. `bounds validate --quick` after edits; it skips boundary/contract/cycle/coverage/orphan checks, so run full validation or preflight before claiming repo-wide health.
 
 ### When a lookup misses (don't fall back to grep)
 A `bounds where <symbol>` that returns `count: 0` is NOT "bounds has nothing" — it usually means the name is a *sub-symbol* (a field, route, or key inside a larger exported object) or internal. The 0-result payload carries a `suggestions` block; follow it instead of grepping:
@@ -107,7 +108,8 @@ A `bounds impact` miss likewise returns a `fix` with "did you mean" subsystems a
 
 ### Optional Spec-Driven Development
 - If this repo enables `sdd:` in Bounds root config, treat Bounds as the verified architecture layer across specify → clarify → plan → tasks → analyze → implement → verify.
-- Bounds does not run the prose workflow and never calls an LLM; it supplies deterministic facts (`overview`, `list`, `describe`, `where`, `impact`) and gates (`validate --quick`, `preflight --ci`, `calibrate --check`).
+- Run `bounds sdd` for the configured phase map, `bounds sdd --phase <name>` for one command, or `bounds sdd --doctor` for architecture readiness.
+- Bounds does not run or infer prose-workflow progress and never calls an LLM; it supplies deterministic facts (`overview`, `list`, `describe`, `where`, `impact`) and gates (`validate --quick`, `preflight --ci`, `calibrate --check`).
 - Intentional contract changes belong in the spec: update the manifest, then re-baseline with `bounds calibrate --dump-baseline`.
 """
 
@@ -333,25 +335,15 @@ def _expected_body(
 
 def _sdd_config(root: Path | None) -> dict:
     """Return resolved SDD config for generated agent artifacts, fail-soft when absent/broken."""
-    raw = {}
+    rootm = None
     if root is not None:
         try:
             found = manifest_loader.find_root(root)
             if found is not None:
                 rootm = manifest_loader.load_root(found)
-                if isinstance(rootm.sdd, dict):
-                    raw = rootm.sdd
         except Exception:  # noqa: BLE001 - agent sync must still work with a broken root manifest
-            raw = {}
-    enabled = bool(raw.get("enabled", False))
-    agent = str(raw.get("agent") or "generic")
-    if agent not in config.SDD_AGENTS:
-        agent = "generic"
-    requested = raw.get("phases")
-    if requested is None:
-        requested = config.SDD_PHASES
-    phases = [p for p in config.SDD_PHASES if p in set(requested)]
-    return {"enabled": enabled, "agent": agent, "phases": phases}
+            rootm = None
+    return sdd_mod.resolve_config(rootm)
 
 
 def _invocation_level(root: Path | None) -> str:
@@ -413,15 +405,6 @@ def _append_invocation_directive(body: str, level: str, fmt: str = _MARKDOWN) ->
 
 def _sdd_body(agent_key: str, sdd_cfg: dict) -> str:
     """Agent-facing SDD phase map expressed as Bounds commands, not a new workflow engine."""
-    phase_uses = {
-        "specify": ("`bounds overview` / `bounds list`", "ground the spec in the real subsystem map, coverage, and boundaries"),
-        "clarify": ("`bounds describe <name>` / `bounds where <symbol>`", "answer what the current verified contract of X is"),
-        "plan": ("`bounds impact <name>`", "include blast radius and declared boundaries in the implementation plan"),
-        "tasks": ("`bounds impact <name>`", "scope and order tasks by subsystem dependency edges"),
-        "analyze": ("`bounds validate` / `bounds preflight`", "cross-check plan/tasks against architecture before coding"),
-        "implement": ("`bounds validate --quick`", "catch drift after each edit; manifest updates are part of intentional spec changes"),
-        "verify": ("`bounds preflight --ci`", "final deterministic architecture gate"),
-    }
     lines = [
         "## Bounds in Spec-Driven Development",
         "",
@@ -430,11 +413,8 @@ def _sdd_body(agent_key: str, sdd_cfg: dict) -> str:
         "",
         "### Phase contract",
     ]
-    for phase in config.SDD_PHASES:
-        if phase not in set(sdd_cfg.get("phases", config.SDD_PHASES)):
-            continue
-        command, use = phase_uses[phase]
-        lines.append(f"- **{phase}** → {command} — {use}.")
+    for step in sdd_mod.phase_steps(sdd_cfg):
+        lines.append(f"- **{step['phase']}** → `{step['command']}` — {step['use']}.")
     lines.extend(
         [
             "",
@@ -1188,16 +1168,22 @@ def _config_status(
             body = _append_sdd_body(art.body.rstrip("\n"), agent.key, sdd_cfg)
             if _target_status(root, art.path, art.fmt, body, True, art.front) != "configured":
                 return "stale"  # a present artifact is broken/outdated — re-sync to refresh
-    # An always-loaded memory file (CLAUDE.md) that exists but lacks/holds an outdated bounds block
-    # downgrades to stale so the gate tells you to re-sync. A merely-absent one does not (an
-    # idempotent --sync creates it non-destructively), mirroring the optional-artifact rule above.
+    # An always-loaded memory file (CLAUDE.md) with a managed but outdated block is stale. An
+    # unmarked file that already contains deliberate Bounds instructions is an accepted authored
+    # override: sync intentionally preserves it, so check must not prescribe a sync that cannot
+    # change it. An unrelated markerless file remains stale.
     mem = _MEMORY_FILES.get(agent.key)
     if mem is not None and (root / Path(mem)).exists():
         mem_body = _append_sdd_body(
             _append_invocation_directive(_AGENT_POINTER_BODY.rstrip("\n"), level, _MARKDOWN),
             agent.key, sdd_cfg,
         )
-        if _target_status(root, mem, _MARKDOWN, mem_body, False, "") != "configured":
+        mem_status = _target_status(root, mem, _MARKDOWN, mem_body, False, "")
+        authored_override = (
+            mem_status == "missing"
+            and _looks_bounds_authored(_read_text(root / Path(mem)))
+        )
+        if mem_status != "configured" and not authored_override:
             return "stale"
     # Claude's invocation hook (.claude/settings.json) is part of its wiring at nudge/strict — a
     # deleted, never-written, stale, or corrupted hook is real drift the gate must catch, so a

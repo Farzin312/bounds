@@ -1,7 +1,8 @@
 name: agenthook
 role: library
 criticality: leaf
-description: TODO describe this subsystem.
+description: Claude Code hook integration - idempotent settings sync and fail-open
+  event handling with bounded stdin reads so agent sessions never hang.
 paths:
 - src/bounds/agenthook.py
 exposes:

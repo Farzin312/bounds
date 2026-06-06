@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import agentsync, config, gitutil
+from . import agentsync, gitutil, sdd as sdd_mod
 from .extract import scan, supported_extensions
 from .ignore import load_matcher
 from .manifest import loader as manifest_loader
@@ -31,11 +31,17 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
     n_subsystems = 0
     subs: dict = {}
     rootm: RootManifest | None = None
+    manifest_error: str | None = None
     if has_bounds:
         try:
             rootm, subs, _issues = manifest_loader.load_all(base)
             n_subsystems = len(subs)
-        except Exception:  # noqa: BLE001 - a broken manifest shouldn't break the guide
+        except Exception as exc:  # noqa: BLE001 - surface the error to the caller, do not silently zero
+            # The previous behavior of "swallow to 0/5 steps done" hid manifest YAML/syntax
+            # errors behind a happy-looking checklist — a new user thought Bounds was broken
+            # when really their root.yaml had a parse error. The fix is to capture the
+            # error and surface it in the guide payload so the user is told what to do.
+            manifest_error = str(exc)
             n_subsystems = 0
             subs = {}
 
@@ -62,7 +68,7 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
         {
             "id": "coverage",
             "title": "Close coverage gaps (map 100% of library source)",
-            "command": "bounds validate -H",
+            "command": "bounds coverage -H",
             "why": _coverage_why(coverage),
             # Done only once subsystems exist AND everything is mapped; until then this surfaces the
             # gap loudly so an agent/human knows what's still dark and the durable hand-authored fix
@@ -101,12 +107,18 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
         "next": pending["command"] if pending else None,
         "complete": pending is None,
     }
-    sdd_cfg = _sdd_config(rootm)
+    if manifest_error:
+        payload["manifest_error"] = {
+            "message": manifest_error,
+            "fix": "run `bounds validate -H` for the structured manifest error",
+        }
+        payload["next"] = "bounds validate -H"
+    sdd_cfg = sdd_mod.resolve_config(rootm)
     if sdd or sdd_cfg["enabled"]:
         payload["sdd"] = {
             **sdd_cfg,
             "forced": bool(sdd and not sdd_cfg["enabled"]),
-            "steps": _sdd_steps(sdd_cfg),
+            "steps": sdd_mod.phase_steps(sdd_cfg),
             "freshness": {
                 "contract": "manifests evolve with the spec; intentional surface changes update manifests and re-baseline drift",
                 "during_implementation": "bounds validate --quick",
@@ -115,59 +127,6 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
             },
         }
     return payload
-
-
-def _sdd_config(root: RootManifest | None) -> dict:
-    """Resolved optional SDD settings from root.yaml, with deterministic defaults."""
-    raw = root.sdd if root is not None and isinstance(root.sdd, dict) else {}
-    enabled = bool(raw.get("enabled", False))
-    agent = str(raw.get("agent") or "generic")
-    if agent not in config.SDD_AGENTS:
-        agent = "generic"
-    requested = raw.get("phases")
-    if requested is None:
-        requested = config.SDD_PHASES
-    phases = [p for p in config.SDD_PHASES if p in set(requested)]
-    return {"enabled": enabled, "agent": agent, "phases": phases}
-
-
-def _sdd_steps(sdd_cfg: dict) -> list[dict]:
-    """Bounds' deterministic command contract for each enabled SDD phase."""
-    phase_map = {
-        "specify": {
-            "command": "bounds overview && bounds list",
-            "use": "ground the spec in the current subsystem map, coverage, and boundaries",
-        },
-        "clarify": {
-            "command": "bounds describe <name> && bounds where <symbol>",
-            "use": "answer what the current verified contract of a subsystem or symbol is",
-        },
-        "plan": {
-            "command": "bounds impact <name>",
-            "use": "account for the blast radius and declared manifests the plan must respect",
-        },
-        "tasks": {
-            "command": "bounds impact <name>",
-            "use": "scope and order implementation tasks by subsystem dependency edges",
-        },
-        "analyze": {
-            "command": "bounds validate && bounds preflight",
-            "use": "cross-check the plan/tasks against declared boundaries and drift",
-        },
-        "implement": {
-            "command": "bounds validate --quick",
-            "use": "catch drift after each edit; update manifests when the spec intentionally changes surface",
-        },
-        "verify": {
-            "command": "bounds preflight --ci",
-            "use": "run the final architecture gate before review or merge",
-        },
-    }
-    return [
-        {"phase": phase, **phase_map[phase]}
-        for phase in config.SDD_PHASES
-        if phase in set(sdd_cfg.get("phases", config.SDD_PHASES))
-    ]
 
 
 def _coverage(base: Path, subs: dict) -> dict | None:
@@ -196,10 +155,17 @@ def _coverage_why(coverage: dict | None) -> str:
             "files are covered too. Keep new source mapped so none falls outside the map."
         )
     bits: list[str] = []
+    breakdown = coverage["supported"].get("unowned_breakdown", {})
+    decisions = breakdown.get("user_decision_needed", {}).get("count", 0)
+    misses = breakdown.get("algorithm_miss", {}).get("count", 0)
     unowned = coverage["supported"]["unowned"]
     dark = coverage["unsupported"]["dark"]
-    if unowned:
-        bits.append(f"{unowned} supported file(s) in no subsystem — add to a manifest's `paths:`")
+    if decisions:
+        bits.append(f"{decisions} source file(s) need an ownership decision")
+    if misses:
+        bits.append(f"{misses} tool-config miss(es) — run `bounds fix-coverage --auto`")
+    if unowned and not breakdown:
+        bits.append(f"{unowned} supported file(s) in no subsystem")
     if dark:
         langs = ", ".join(sorted(coverage["unsupported"]["by_language"]))
         bits.append(
@@ -210,7 +176,7 @@ def _coverage_why(coverage: dict | None) -> str:
     detail = "; ".join(bits) or "some library source is unmapped"
     return (
         f"mapped {coverage.get('mapped_pct', 0.0)}% of supported-language source; {detail}. "
-        "`bounds validate -H` prints issue-specific next steps; calibration does not map files. "
+        "`bounds coverage -H` prints the distinct fix for each bucket; calibration does not map files. "
         "See docs/coverage.md."
     )
 

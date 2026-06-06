@@ -61,13 +61,15 @@ Bounds maintains a hidden `.bounds/` directory of tiny YAML **subsystem manifest
 tree-sitter to validate them against your real source, in both directions.
 
 - **`bounds describe`** — hand an agent a subsystem's exact public surface as JSON, each interface flagged `verified: true/false`; schema subsystems include the current table catalog folded from migrations, plus — for Postgres/Supabase — the live policy/RLS surface and a derived **RLS posture** (which tables are protected vs exposed).
-- **`bounds validate`** — catch drift the moment your code's exports stop matching the manifest. Seven checks, zero LLM.
+- **`bounds validate`** — catch drift the moment your code's exports stop matching the manifest. Eight checks, zero LLM.
 - **`bounds validate --quick`** — git-diff incremental validation, safe for every commit.
 - **`bounds preflight`** — run all the pre-PR checks at once: drift, boundary violations, broken contracts, dependency cycles, orphaned subsystems, and cross-subsystem impact.
 - **`bounds impact <name>`** — transitive blast radius: who breaks if this subsystem's surface or a table changes.
 - **`bounds discover` / `bounds calibrate`** — set up manifests for a repo that has none in one command, then keep them honest against what tree-sitter actually finds in your source.
 - **`bounds agent --sync`** — wire Bounds into eight coding agents (Claude Code, Codex, Gemini, Cursor, …) with one command. It generates each tool's *native* invokable command/skill — an auto-triggering Claude/Codex **skill**, a Gemini/OpenCode **command**, a Copilot **prompt file**, a Windsurf **workflow** — plus the shared `AGENTS.md` contract and a marked pointer in each agent's always-loaded memory file (`CLAUDE.md`, `GEMINI.md`, …), created if absent or appended non-destructively if it already exists, so the agent reaches for Bounds on its own. Bare `bounds agent` lists which agents are present (read-only).
 - **`bounds guide`** — a state-aware setup checklist (init → discover → wire agents → CI) for humans and agents; `bounds guide --sdd` previews the optional Spec-Driven Development track; `bounds --help` groups every command by purpose.
+- **`bounds coverage` / `bounds fix-coverage`** — separate real ownership decisions from deterministic tool-config misses, explain one path with `--why`, and preview exact ignore repairs before applying them.
+- **`bounds sdd`** — map configured SDD phases to deterministic Bounds commands without guessing prose-workflow progress.
 - **Deterministic** — same input, same byte-stable output. No network, no flakiness.
 
 ## Why use it
@@ -93,9 +95,11 @@ bounds guide                 # state-aware setup checklist (what to run next)
 bounds guide --sdd           # preview the optional SDD phase track
 bounds discover --apply      # auto-generate root.yaml + manifests from your source
 bounds agent --sync          # teach Claude/Codex/Gemini/Cursor/etc. to query Bounds first
+bounds coverage              # full mapping breakdown; --why <path> explains one file
 bounds describe auth         # one subsystem's verified surface, as JSON
 bounds impact users          # if users is a table/interface, see declared consumers before changing it
 bounds validate --quick      # fast incremental drift check
+bounds fix-coverage --auto   # preview deterministic coverage repairs
 bounds upgrade-check         # is a newer release available?
 ```
 
@@ -194,21 +198,25 @@ Bounds has no adapter for — split into `declared` (a manifest claims it → co
 manifest → the real gap). A partial map is always *visible*, never silently half-dark; tests and docs
 are tracked in their own buckets and never drag the number down.
 
-There are exactly two closeable gaps, and an agent can close either — with the CLI as the deterministic
-verifier:
+There are three closeable buckets, and each has a different action:
 
 ```mermaid
 flowchart LR
   D["bounds discover --apply"] --> V{"bounds validate"}
   V -->|"100% supported + 0 dark"| DONE["✓ fully covered"]
-  V -->|"unowned supported file"| S["add the file to a<br/>manifest's paths:"]
+  V -->|"ownership decision"| S["add real source to a<br/>manifest's paths:"]
+  V -->|"algorithm miss"| F["fix-coverage --auto<br/>then --apply"]
   V -->|"dark unsupported file"| AI["agent authors a manifest<br/>(copy .bounds/manifests/*.yaml)"]
   S -.->|"re-validate"| V
+  F -.->|"re-validate"| V
   AI -.->|"re-validate"| V
 ```
 
-- **Unowned but supported** (a Python/TS/JS/SQL/Prisma/shell file in no subsystem) → add it to a manifest's
+- **`user_decision_needed`** (real Python/TS/JS/SQL/Prisma/shell source in no subsystem) → add it to a manifest's
   `paths:`. Deterministic, no AI needed; `mapped_pct` rises to 100%.
+- **`algorithm_miss`** (known build/tool config such as `vite.config.ts`) → preview exact,
+  repo-relative exclusions with `bounds fix-coverage --auto`, then apply them explicitly with
+  `--apply`. Bounds never assigns these files to a subsystem automatically.
 - **Unsupported language** (Go/Rust/Java — no adapter yet) → the `E_COVERAGE_GAP` fix hands the
   agent the `by_language` list and a concrete template manifest to copy; it authors `paths` + a
   hand-written `exposes` (+ `consumes`), then `bounds validate` confirms it clean. That **moves the
@@ -221,9 +229,9 @@ Bounds names exactly what it can't yet parse and hands an agent a template, inst
 quietly inflating the number. As language adapters ship, files move from `unsupported` to verified
 automatically and the number rises on its own.
 
-The full human-and-AI workflow is in **[docs/coverage.md](docs/coverage.md)**. On this repo `bounds
-validate` reports **100% of supported-language source mapped** (38/38 non-test files) — Bounds
-dogfoods its own gate.
+The full human-and-AI workflow is in **[docs/coverage.md](docs/coverage.md)**. Bounds dogfoods the
+same command and validation gate on this repository; the exact file count comes from live command
+output rather than a duplicated number in this README.
 
 ## Languages & platforms
 

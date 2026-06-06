@@ -61,6 +61,17 @@ Absent `sdd:` means today's behavior. You can preview the track without committi
 bounds guide --sdd
 ```
 
+Inspect the configured command map directly:
+
+```bash
+bounds sdd                       # configured phases + deterministic commands
+bounds sdd --phase implement     # one phase; reports whether it is configured
+bounds sdd --doctor              # config + full/quick/preflight readiness checks
+```
+
+`bounds sdd` does **not** infer the current prose phase or claim a phase is complete. That state
+belongs to the team's spec workflow, not to deterministic architecture inspection.
+
 `bounds agent --sync` includes the SDD phase contract in generated agent files only when `sdd.enabled`
 is true. The regular Bounds contract still appears in `AGENTS.md`, because agents should know Bounds
 exists even outside SDD.
@@ -74,7 +85,7 @@ flowchart LR
   S[specify<br/>overview + list] --> C[clarify<br/>describe + where]
   C --> P[plan<br/>impact]
   P --> T[tasks<br/>impact order]
-  T --> A[analyze<br/>validate + preflight]
+  T --> A[analyze<br/>validate]
   A --> I[implement<br/>validate --quick]
   I --> V[verify<br/>preflight --ci]
   I -->|intentional surface change| M[update manifest]
@@ -107,7 +118,7 @@ consumers: provider contract first, then dependent subsystems, then verification
 
 ### analyze
 
-Before implementation, run `bounds validate` or `bounds preflight` and compare the plan/tasks against
+Before implementation, run `bounds validate` and compare the plan/tasks against
 the declared architecture. A plan that crosses an undeclared boundary should either change the
 architecture intentionally, with a manifest update, or avoid the dependency.
 
