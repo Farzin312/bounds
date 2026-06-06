@@ -97,6 +97,7 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
         {"command": "bounds where <symbol>", "use": "locate a symbol or table without grepping"},
         {"command": "bounds impact <name>", "use": "blast radius before a risky change"},
         {"command": "bounds validate --quick", "use": "catch drift after an edit"},
+        {"command": "bounds guide", "use": "setup status + optional features (SDD, invocation level)"},
     ]
 
     pending = next((s for s in steps if not s["done"]), None)

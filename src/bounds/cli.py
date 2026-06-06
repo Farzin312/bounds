@@ -189,6 +189,9 @@ _HELP_EPILOG = (
     "Quick start:\n"
     "  bounds init --root  ·  bounds discover --apply  ·  bounds agent --sync\n"
     "\n"
+    "Already set up? 'bounds guide' also shows optional features (SDD, agent invocation)\n"
+    "with their current state and the exact command to change each one.\n"
+    "\n"
     "Output is JSON by default; add -H/--human for a readable view of the same data.\n"
     "AI agents: read AGENTS.md, then use 'bounds list' and 'bounds describe <name>'."
 )
