@@ -103,11 +103,18 @@ def _status(root: RootManifest | None) -> dict:
             "Bounds maps architecture commands to SDD phases; it does not infer "
             "which prose phase your team has completed."
         ),
+        "configure": {
+            "enable": "bounds sdd --enable",
+            "disable": "bounds sdd --disable",
+            "set_phases": "bounds sdd --enable --phases specify,implement,verify",
+            "add_phase": "bounds sdd --add-phase <phase>",
+            "remove_phase": "bounds sdd --remove-phase <phase>",
+        },
     }
     payload["next_step"] = (
         "run `bounds sdd --phase <phase>` for one phase"
         if resolved["enabled"]
-        else "enable `sdd: { enabled: true }` in root.yaml, or use `bounds guide --sdd` to preview"
+        else "run `bounds sdd --enable` to activate, or `bounds guide --sdd` to preview"
     )
     return payload
 

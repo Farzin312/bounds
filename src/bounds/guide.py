@@ -126,6 +126,28 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
                 "intentional_change": "bounds calibrate --dump-baseline",
             },
         }
+
+    # Surface optional features when setup is complete so users know what's available.
+    if pending is None:
+        invocation = rootm.invocation_level() if rootm else "nudge"
+        payload["optional"] = [
+            {
+                "id": "sdd",
+                "title": "Spec-Driven Development",
+                "enabled": sdd_cfg["enabled"],
+                "command": "bounds sdd --enable" if not sdd_cfg["enabled"] else "bounds sdd --doctor",
+                "use": "map SDD phases (specify → verify) to deterministic architecture checks",
+                "configure": "bounds sdd --enable / --disable / --phases x,y / --add-phase / --remove-phase",
+            },
+            {
+                "id": "invocation",
+                "title": "Agent invocation level",
+                "enabled": invocation != "off",
+                "command": f"bounds agent --invocation {invocation}",
+                "use": "how assertively agents are pushed to query Bounds first (off / nudge / strict)",
+                "configure": "bounds agent --invocation off|nudge|strict",
+            },
+        ]
     return payload
 
 

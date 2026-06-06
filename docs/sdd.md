@@ -55,7 +55,9 @@ Fields:
 - `phases`: optional subset of `specify`, `clarify`, `plan`, `tasks`, `analyze`, `implement`,
   `verify`. Omit it to use all phases.
 
-Absent `sdd:` means today's behavior. You can preview the track without committing config:
+Absent `sdd:` means today's behavior. `bounds guide` shows an **optional features** section once
+all 5 setup steps are done — SDD appears there with a one-command path to activate it. You can also
+preview the track without committing config:
 
 ```bash
 bounds guide --sdd

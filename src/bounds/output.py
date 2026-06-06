@@ -516,6 +516,14 @@ def _render_guide_human(payload: dict) -> str:
         freshness = sdd.get("freshness") or {}
         if freshness:
             lines.append(f"  freshness: {freshness.get('contract', '')}")
+    optional = payload.get("optional") or []
+    if optional:
+        lines.append("")
+        lines.append("optional features:")
+        for feat in optional:
+            status = "on" if feat.get("enabled") else "off"
+            lines.append(f"  {feat.get('title', ''):<28}  [{status}]  {feat.get('use', '')}")
+            lines.append(f"    configure: {feat.get('configure', feat.get('command', ''))}")
     return "\n".join(lines)
 
 
@@ -609,6 +617,9 @@ def _render_sdd_human(payload: dict) -> str:
         lines.append(f"  {step.get('phase', ''):<9} {step.get('command', '')}")
     lines.append(payload.get("note", ""))
     lines.append(f"next: {payload.get('next_step', '')}")
+    cfg = payload.get("configure") or {}
+    if cfg:
+        lines.append("configure: bounds sdd --enable / --disable · --phases x,y · --add-phase/--remove-phase <phase>")
     return "\n".join(lines)
 
 
