@@ -36,4 +36,6 @@ jobs:
       # Non-blocking by default (|| true) until you commit a baseline and trust the signal;
       # drop the `|| true` to make new drift fail the build.
       - run: bounds calibrate --check || true
+      # The preflight gate: fails on drift, boundary violations, and dependency cycles.
+      # See https://github.com/Farzin312/bounds/blob/main/docs/troubleshooting-ci.md for fix guidance.
       - run: bounds preflight --ci

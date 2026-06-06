@@ -22,7 +22,7 @@
 [![Zero LLM](https://img.shields.io/badge/structural%20validation-zero%20LLM-brightgreen.svg)](docs/how-it-works.md)
 [![GitHub stars](https://img.shields.io/github/stars/Farzin312/bounds?logo=github&label=stars&color=blue)](https://github.com/Farzin312/bounds/stargazers)
 
-[Quick start](#quick-start) · [Why use it](docs/why-bounds.md) · [How it works](docs/how-it-works.md) · [SDD](docs/sdd.md) · [Token economics](docs/token-economics.md) · [CLI reference](docs/cli-reference.md) · [For AI agents](docs/ai-agents.md) · [Docs](docs/README.md)
+[Quick start](#quick-start) · [Why use it](docs/why-bounds.md) · [How it works](docs/how-it-works.md) · [SDD](docs/sdd.md) · [Token economics](docs/token-economics.md) · [CLI reference](docs/cli-reference.md) · [For AI agents](docs/ai-agents.md) · [Troubleshooting CI](docs/troubleshooting-ci.md) · [Docs](docs/README.md)
 
 </div>
 

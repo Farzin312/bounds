@@ -18,6 +18,7 @@ command reference, and the deep dives on how Bounds works and why it pays off.
 - [team-workflow.md](team-workflow.md) — how a team adopts and lives with Bounds day to day.
 - [use-cases.md](use-cases.md) — concrete workflows: pre-PR safety, dropping an agent into a strange repo, enforcing architecture in CI.
 - [sdd.md](sdd.md) — optional Spec-Driven Development integration: where Bounds grounds each phase and how manifests stay fresh with the spec.
+- [troubleshooting-ci.md](troubleshooting-ci.md) — how to resolve red Bounds gates, from architectural cycles to structural drift.
 
 ## Reference
 
