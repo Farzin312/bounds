@@ -659,10 +659,13 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict
     # half-set-up/empty project (a missing .bounds/ just reads early steps as not-done).
     # → {mode:"guide", steps:[{id,title,command,why,done}], daily:[{command,use}],
     #    next:<next undone command or null>, complete:bool, sdd?:{enabled,agent,phases,forced,
-    #    steps:[{phase,command,use}], freshness:{...}}}
+    #    steps:[{phase,command,use}], freshness:{...}},
+    #    optional?:[{id,title,enabled,current,command,use,configure}]}
     #   setup step ids (ordered): init / discover / coverage / agents / ci. The optional SDD
     #   block appears when root.yaml has sdd.enabled=true or the caller passes sdd=True
-    #   (`bounds guide --sdd`). Human view renders only this same payload.
+    #   (`bounds guide --sdd`). When complete=true, optional[] surfaces SDD and agent-invocation
+    #   with their current values (current="disabled"/"enabled"; current="off"/"nudge"/"strict")
+    #   and one-command configure paths. Human view renders only this same payload.
 ```
 
 ### `agentsync.py` — cross-agent config generation
@@ -903,13 +906,16 @@ The scan-bearing commands (`validate`, `preflight`) also accept `--include-ignor
 
 ```
 bounds guide [--sdd]               → {mode:"guide", steps:[{id,title,command,why,done}],
-                                       daily:[{command,use}], next, complete, sdd?}
+                                       daily:[{command,use}], next, complete, sdd?, optional?}
                                        # read-only state-aware setup checklist (ids: init/discover/
                                        # coverage/agents/ci); next = the next undone command or null.
                                        # sdd? appears when root.yaml enables it or --sdd is passed:
                                        # {enabled,agent,phases,forced,steps:[{phase,command,use}],
                                        #  freshness:{contract,during_implementation,ci_gate,
                                        #             intentional_change}}
+                                       # optional? appears only when complete=true — surfaces SDD and
+                                       # agent-invocation: [{id,title,enabled,current,command,use,configure}]
+                                       # current="disabled"/"enabled" (SDD), "off"/"nudge"/"strict" (invocation)
 bounds list [--namespace NS]       → {project, subsystems:[{name, role, criticality, namespace?,
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count, entry_points, validation_status,

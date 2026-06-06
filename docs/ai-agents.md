@@ -92,10 +92,14 @@ or removing the hook) in one step:
 
 ```bash
 bounds agent --invocation off       # advisory files only (the pre-hook behavior)
-bounds agent --invocation nudge      # gentle reminder hook (default)
-bounds agent --invocation strict     # pause before a broad search Bounds can answer
-bounds agent                          # bare detect also prints the current level
+bounds agent --invocation nudge     # gentle reminder hook (default)
+bounds agent --invocation strict    # pause before a broad search Bounds can answer
+bounds agent                        # bare detect also prints the current level
 ```
+
+`bounds guide` (once all 5 setup steps are done) shows the current invocation level in the
+**optional features** section — `[nudge]`, `[strict]`, or `[off]` — so you always have a one-line
+reminder of what's active and the exact command to change it.
 
 | Level | What it does |
 |-------|--------------|
