@@ -95,7 +95,13 @@ The cache is subsystem-indexed (so a caller can do partial per-subsystem reads i
 3. Compare extracted exports against declared per subsystem.
 4. **Reference propagation** — for each changed subsystem, check every consumer's declared interfaces against current exports by manifest graph. This is interface-name comparison, zero tree-sitter.
 
-A content-only edit (comment or function body) changes a file's `content_hash` but not its `structure_hash`, so consumers are not invalidated and propagation stops early. On a warm cache with nothing changed, `--quick` re-extracts zero files — pure reference propagation and exit. In quick mode every issue is downgraded to a non-blocking warning (except `--fail-on-unowned`, which stays a hard gate in any mode).
+A content-only edit (comment or function body) changes a file's `content_hash` but not its
+`structure_hash`, so consumers are not invalidated and propagation stops early. On a warm cache with
+nothing changed, `--quick` re-extracts zero files. It runs structural drift, cross-impact, schema
+health, and adapter-contract checks. It **skips** boundary, contract, cycle, coverage, and orphan
+checks; those names are returned in `skipped_checks`. Because no full-tree coverage walk occurs,
+`stats.coverage_summary.complete` is `null` and points to `bounds coverage` or full validation.
+Quick-mode issues are non-blocking warnings except `--fail-on-unowned`, which remains a hard gate.
 
 ## Performance
 

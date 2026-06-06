@@ -55,11 +55,34 @@ Fields:
 - `phases`: optional subset of `specify`, `clarify`, `plan`, `tasks`, `analyze`, `implement`,
   `verify`. Omit it to use all phases.
 
-Absent `sdd:` means today's behavior. You can preview the track without committing config:
+Absent `sdd:` means today's behavior. `bounds guide` shows an **optional features** section once
+all 5 setup steps are done — SDD appears there with a one-command path to activate it. You can also
+preview the track without committing config:
 
 ```bash
 bounds guide --sdd
 ```
+
+Enable and configure SDD from the CLI — no manual YAML editing needed:
+
+```bash
+bounds sdd --enable                              # write sdd.enabled: true, all phases
+bounds sdd --enable --phases specify,implement,verify  # enable with a phase subset
+bounds sdd --disable                             # write sdd.enabled: false
+bounds sdd --add-phase clarify                   # add one phase to the configured list
+bounds sdd --remove-phase clarify                # remove one phase
+```
+
+Inspect the configured command map:
+
+```bash
+bounds sdd                       # configured phases + deterministic commands
+bounds sdd --phase implement     # one phase; reports whether it is configured
+bounds sdd --doctor              # config + full/quick/preflight readiness checks
+```
+
+`bounds sdd` does **not** infer the current prose phase or claim a phase is complete. That state
+belongs to the team's spec workflow, not to deterministic architecture inspection.
 
 `bounds agent --sync` includes the SDD phase contract in generated agent files only when `sdd.enabled`
 is true. The regular Bounds contract still appears in `AGENTS.md`, because agents should know Bounds
@@ -74,7 +97,7 @@ flowchart LR
   S[specify<br/>overview + list] --> C[clarify<br/>describe + where]
   C --> P[plan<br/>impact]
   P --> T[tasks<br/>impact order]
-  T --> A[analyze<br/>validate + preflight]
+  T --> A[analyze<br/>validate]
   A --> I[implement<br/>validate --quick]
   I --> V[verify<br/>preflight --ci]
   I -->|intentional surface change| M[update manifest]
@@ -107,7 +130,7 @@ consumers: provider contract first, then dependent subsystems, then verification
 
 ### analyze
 
-Before implementation, run `bounds validate` or `bounds preflight` and compare the plan/tasks against
+Before implementation, run `bounds validate` and compare the plan/tasks against
 the declared architecture. A plan that crosses an undeclared boundary should either change the
 architecture intentionally, with a manifest update, or avoid the dependency.
 

@@ -1,14 +1,18 @@
 name: cli
 role: service
 criticality: connector
-description: Click command-line entry point + gen-3 command modules (list, describe,
-  validate, preflight, overview, init, discover, calibrate, agent, ci, cache, impact).
+description: Click command-line entry point and reusable command services, including
+  architecture queries, validation, coverage diagnosis and repair, agent sync, CI
+  setup, and deterministic SDD guidance.
 paths:
 - src/bounds/cli.py
 - src/bounds/discover.py
 - src/bounds/calibrate.py
 - src/bounds/agentsync.py
 - src/bounds/ciconfig.py
+- src/bounds/_io.py
+- src/bounds/coverage.py
+- src/bounds/sdd.py
 exposes:
 - name: main
   kind: function
@@ -19,6 +23,22 @@ exposes:
 - name: run_agent
   kind: function
 - name: run_ci_install
+  kind: function
+- name: emit_loud
+  kind: function
+- name: phase_steps
+  kind: function
+- name: read_stdin_json
+  kind: function
+- name: resolve_config
+  kind: function
+- name: run_coverage
+  kind: function
+- name: run_fix_coverage
+  kind: function
+- name: run_sdd
+  kind: function
+- name: write_sdd_config
   kind: function
 consumes:
 - subsystem: manifest
@@ -42,21 +62,22 @@ consumes:
 - subsystem: extract
   via: scan
   interfaces:
-  - get_adapter
-  - supported_extensions
-  - extract_file
-  - iter_repo_source
-  - strip_ext
-  - extract_project
   - adapter_for_language
+  - coverage_has_gap
+  - extract_file
+  - extract_project
+  - get_adapter
+  - is_config_file
+  - is_framework_entry_file
   - is_test_file
   - is_test_symbol
-  - is_framework_entry_file
+  - iter_repo_source
   - mapping_coverage
   - resolve_doc_owners
   - resolve_test_owners
+  - strip_ext
   - subsystems_with_unsupported_source
-  - coverage_has_gap
+  - supported_extensions
   - unsupported_surface_files
 - subsystem: cache
   via: store
@@ -74,6 +95,7 @@ consumes:
   - load_matcher
 - subsystem: models
   interfaces:
+  - RootManifest
   - SubsystemCompact
 tests:
 - tests/cli

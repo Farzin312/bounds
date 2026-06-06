@@ -1,8 +1,8 @@
 name: validate
 role: platform
 criticality: connector
-description: "Validation engine \u2014 mode dispatch, cached extraction, reference\
-  \ propagation, and the 6 checks."
+description: Validation engine - mode dispatch, cached extraction, reference propagation,
+  and the eight full validation checks, with an explicitly partial quick mode.
 paths:
 - src/bounds/validate
 exposes:

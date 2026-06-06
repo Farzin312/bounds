@@ -4,6 +4,11 @@
 
 ### Fixed (correctness — found by re-running the OSS cross-language benchmark + internal Next.js/Supabase dogfood)
 
+- **Agent hook open-pipe hang (BOUNDS-025).** The hidden hook now incrementally decodes one complete JSON event without waiting for EOF, with a five-second wall-clock cap and stderr-only degraded-path diagnostics. The protocol remains fail-open at exit `0`; a real `os.pipe()` regression test covers the lifecycle CliRunner cannot model.
+- **Coverage remediation ambiguity (BOUNDS-026).** Coverage now preserves `supported.unowned` for compatibility while splitting it into real ownership decisions and deterministic tool-config misses. New `coverage`, `fix-coverage`, and `coverage --why` surfaces share one classifier; auto-fix is preview-first and writes exact root-relative `.boundsignore` paths only with `--apply`.
+- **Agent check/sync ownership mismatch.** `bounds agent --check` now accepts an authored `CLAUDE.md` that already contains deliberate Bounds guidance, matching `agent --sync`'s non-destructive `skipped_custom: authored` behavior. Unrelated markerless files and stale managed blocks still fail the check.
+- **Guide manifest failures were hidden.** `bounds guide` now carries and renders the manifest parse/load error and points to `bounds validate -H` instead of displaying a misleading zero-progress checklist.
+- **Quick coverage overclaim.** `validate --quick` keeps coverage outside the nested full mapping block and reports `coverage_summary.complete: null`; cached owned-file rows are no longer presented as the repository total.
 - **TS type/re-export extraction (BOUNDS-008).** `export type`/`interface`/`enum`, `export * as ns`, and local vs cross-module re-exports are now detected with correct `kind` (`enum_declaration`→`enum`, not `const`; overload signatures collapse to one `function` symbol); discover and validate agree, so a fresh `discover → validate` no longer shows false `E_STRUCTURAL_DRIFT` on type-heavy TS modules (chalk drift ~4).
 - **Test cases re-flagged as drift (BOUNDS-015).** A tests subsystem's `test_*`/`Test*` cases — excluded from `exposes` by BOUNDS-014 — were still flagged as "undeclared exports", flooding `validate` (click had silently regressed to **479** issues / 476 info-drifts). `check_structural_drift` now excludes them symmetrically; click is back to **3** (0 drift).
 - **Next.js framework-entry exports flooded drift (BOUNDS-016).** `page`/`layout`/`route`/… files under `app/`|`pages/` export framework-invoked callbacks (the default component, `GET`/`POST`, `generateMetadata`, `revalidate`, …); these are no longer flagged as undeclared exports (zod 166→155). Directly improves the TS + Postgres/Supabase target stack.
@@ -16,6 +21,8 @@
 
 ### Added
 
+- **Reusable command services.** Coverage and SDD behavior moved out of the Click entry point into `coverage.py` and `sdd.py`; bounded hook I/O lives in `_io.py`. `cli.py` remains option/dispatch/output glue for these commands.
+- **`bounds sdd`.** Read-only phase command map with explicit phase lookup and deterministic readiness checks. It never infers prose-workflow completion.
 - **Subsystem ↔ docs/tests linkage.** Optional `docs:`/`tests:` manifest fields (human-curated, authoritative) + convention auto-detection (`tests/<area>/` → `<area>`, `docs/<name>.*` → `<name>`); `bounds discover` auto-populates them. `bounds validate`/`overview` coverage gains informational `tests`/`docs` buckets, and **test files are excluded from the source denominator** so a repo's tests never read as an unmapped gap. `describe --full` shows a subsystem's linked docs + tests. Coverage stays "100%-or-guidance": an unmapped library file fires `E_COVERAGE_GAP` with the exact fix; tests/docs are tracked but never block. See [docs/coverage.md](docs/coverage.md).
 
 ### Changed

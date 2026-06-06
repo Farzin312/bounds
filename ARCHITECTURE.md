@@ -38,7 +38,10 @@ bounds/
 ├── src/
 │   └── bounds/
 │       ├── __init__.py            # dynamic __version__ (importlib.metadata)
-│       ├── cli.py                 # click group + all commands (arg-parse + one go() per command)
+│       ├── cli.py                 # click registration, option parsing, output/exit dispatch
+│       ├── _io.py                 # bounded one-value stdin JSON + stderr-only loud warnings
+│       ├── coverage.py            # reusable coverage/explain/fix command services
+│       ├── sdd.py                 # deterministic SDD phase map + readiness services
 │       ├── describe.py            # Tier-1+2 `describe` assembly (reuses extract/scan + validate engine)
 │       ├── locate.py              # backs `where` + `impact` (symbol/table location + blast radius)
 │       ├── config.py              # constants: dir names, schema version, defaults, role/criticality registries
@@ -77,7 +80,7 @@ bounds/
 │           ├── engine.py          # mode dispatch + orchestration
 │           ├── propagation.py     # reference propagation (consumers of changed providers) + transitive_consumers
 │           ├── schema.py          # deterministic per-subsystem SQL/Prisma schema fold
-│           └── checks.py          # the 7 checks + schema-health advisory + import resolution
+│           └── checks.py          # the 8 checks + import resolution
 └── tests/                         # the full suite (CI reports the live count)
     ├── conftest.py
     ├── test_extract.py
@@ -656,10 +659,13 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict
     # half-set-up/empty project (a missing .bounds/ just reads early steps as not-done).
     # → {mode:"guide", steps:[{id,title,command,why,done}], daily:[{command,use}],
     #    next:<next undone command or null>, complete:bool, sdd?:{enabled,agent,phases,forced,
-    #    steps:[{phase,command,use}], freshness:{...}}}
+    #    steps:[{phase,command,use}], freshness:{...}},
+    #    optional?:[{id,title,enabled,current,command,use,configure}]}
     #   setup step ids (ordered): init / discover / coverage / agents / ci. The optional SDD
     #   block appears when root.yaml has sdd.enabled=true or the caller passes sdd=True
-    #   (`bounds guide --sdd`). Human view renders only this same payload.
+    #   (`bounds guide --sdd`). When complete=true, optional[] surfaces SDD and agent-invocation
+    #   with their current values (current="disabled"/"enabled"; current="off"/"nudge"/"strict")
+    #   and one-command configure paths. Human view renders only this same payload.
 ```
 
 ### `agentsync.py` — cross-agent config generation
@@ -833,16 +839,16 @@ docs:                           # optional — doc files that document this subs
 | Mode | When | Files | Checks | Blocking |
 |------|------|-------|--------|----------|
 | `quick` | every commit/PR | git-diff ∩ subsystems | drift, cross-impact, schema, adapter-contracts | warning only |
-| `full` | structure changes | all subsystem files | all 7 | iff `enforce=on` |
-| `preflight` | pre-push | all | all 7 | always |
+| `full` | structure changes | all subsystem files | all 8 | iff `enforce=on` |
+| `preflight` | pre-push | all | all 8 | always |
 | `hotfix` | emergency | — | none | never (always ok) |
-| `audit` | weekly | all | all 7 | never (report) |
+| `audit` | weekly | all | all 8 | never (report) |
 
-`bounds validate` defaults to `full`. `--quick` → quick. `--mode M` explicit. `bounds preflight` → preflight mode. In `quick` mode every issue is downgraded to a `warning` (advisory, never blocks) — except `--fail-on-unowned`, which stays a hard gate in any mode.
+`bounds validate` defaults to `full`. `--quick` → quick. `--mode M` explicit. `bounds preflight` → preflight mode. Quick mode skips boundary, contract, cycle, coverage, and orphan checks; it reports those names in `skipped_checks` and sets top-level `stats.coverage_summary.complete` to `null`. Issues from the checks it does run are downgraded to warnings, except `--fail-on-unowned`, which stays a hard gate.
 
 ---
 
-## 7. The 7 checks (logic)
+## 7. The 8 checks (logic)
 
 1. **Structural drift** (`E_STRUCTURAL_DRIFT`, error/info): for each subsystem, compare declared `exposes` names against the union of `exported` symbols actually extracted from its files plus any surviving tables from the subsystem's SQL/Prisma schema fold. Declared-but-missing → drift (`error`); a column-granular expose (`users.email`) is resolved against the fold (table exposed **and** column still present), so a dropped column drifts in both the exposes and consumes directions. Undeclared-but-exported (a symbol/table in source, absent from `exposes`) → `info` for **any** subsystem that declares a non-empty expose set (bidirectional drift; a subsystem with no declared exposes is exempt so an un-calibrated subsystem isn't spammed). Two classes are excluded from this undeclared-export direction, symmetrically with `discover._exposes_for` (so a fresh discover→validate doesn't re-flood): **test cases** (`test_*` / `Test*` in a test file — `scan.is_test_symbol`+`is_test_file`) and **Next.js framework-entry exports** (a `page`/`layout`/`route`/… file under `app/`|`pages/` — `scan.is_framework_entry_file`), since both are framework-/runner-invoked by convention, not a consumable surface. The `info` severity never blocks, so exit codes are unchanged. Fix: "add/remove `<name>` in exposes of `<subsystem>`".
 2. **Boundary compliance** (`E_BOUNDARY_VIOLATION`, error): for each import in subsystem A resolving to a file owned by subsystem B, the imported names must all be in B's `exposes`. Importing a non-exposed (internal) symbol → violation. Resolution (`checks.resolve_import`): match import `module` against B's file paths via exact-stem, package `/index`/`/__init__`, then a trailing-segment suffix fallback. Relative imports handle both dialects — a TS `./auth.service` keeps the dotted filename (never split into `auth/service`), a Python `..models` treats the dots as separators. For a bare specifier from a TS/JS file the project's `tsconfig.json` `baseUrl`/`paths` aliases (loaded via `tsconfig.load`, threaded as `CheckContext.ts_aliases()`) are tried first, so an aliased import like `@/common` resolves. Fix: "import only B's exposed interfaces, or add `<name>` to B.exposes".
@@ -851,9 +857,8 @@ docs:                           # optional — doc files that document this subs
 5. **Cycle detection** (`E_CYCLE_DETECTED`, error): build the directed graph from `consumes`; DFS for back-edges; report each cycle as a chain `A → B → C → A`. Fix: "break the dependency cycle; introduce an interface/inversion".
 6. **Orphan detection** (`E_ORPHAN_EXPORT`, warning): an exposed interface that appears in no subsystem's `consumes`, where the owning subsystem's role does **not** carry `orphan_exposes` (the `service` base, and any custom role extending it, legitimately expose unconsumed surface — resolved via `RootManifest.role_registry()`). Fix: "interface `<x>` of `<A>` is consumed by no one; consider removing or marking entrypoint".
 
-7. **Adapter output contracts** (`E_ADAPTER_CONTRACT`, warning): for every extracted file, the owning adapter's `check_contract()` inspects the output against its declared self-consistency invariants. Pure regression guard (zero LLM, no tree-sitter re-parse, no filesystem read — operates only on the already-built `ExtractResult`). Catches adapter logic regressions that extraction alone would silently pass — e.g., a Prisma relation field leaking as a column, or an all-unparsable SQL migration whose revision header masked the failure. Always advisory (warning only, never blocks). Runs in `quick`/`full`/`preflight`/`audit`.
-
-Plus one **schema-health advisory** (`check_schema`, warnings only — never blocks): a migration statement that didn't parse → `E_SCHEMA_UNPARSED` (the file's other statements still folded); order-dependent migrations with no deterministic order → `E_SCHEMA_NO_ORDER`. Runs in `quick`/`full`/`preflight`/`audit`.
+7. **Schema health** (`check_schema`, warnings only): a migration statement that didn't parse → `E_SCHEMA_UNPARSED` (the file's other statements still fold); order-dependent migrations with no deterministic order → `E_SCHEMA_NO_ORDER`. Runs in `quick`/`full`/`preflight`/`audit`.
+8. **Adapter output contracts** (`E_ADAPTER_CONTRACT`, warning): for every extracted file, the owning adapter's `check_contract()` inspects the output against its declared self-consistency invariants. Pure regression guard (zero LLM, no tree-sitter re-parse, no filesystem read — operates only on the already-built `ExtractResult`). Catches adapter logic regressions that extraction alone would silently pass — e.g., a Prisma relation field leaking as a column, or an all-unparsable SQL migration whose revision header masked the failure. Always advisory (warning only, never blocks). Runs in `quick`/`full`/`preflight`/`audit`.
 
 Forward references (a `consumes.subsystem` or path that doesn't resolve to a known subsystem) → `E_UNRESOLVED_REFERENCE` (warning) and set report status `unresolved`.
 
@@ -870,7 +875,7 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_CYCLE_DETECTED` | error | circular subsystem dependency |
 | `E_ORPHAN_EXPORT` | warning | exposed interface consumed by no one |
 | `E_UNRESOLVED_REFERENCE` | warning | forward ref to unknown subsystem/interface |
-| `E_COVERAGE_GAP` | warning | a closeable coverage gap — a supported file in no subsystem (`supported.unowned`) or an unsupported-language file no manifest claims (`unsupported.dark`); reports `mapped_pct` of **supported-language source** (so 100% is reachable) + a numbered fix and template. A `declared` unsupported file is covered, and test/doc files are tracked in their own buckets — none counted as a gap |
+| `E_COVERAGE_GAP` | warning | a closeable coverage gap — `supported.unowned` remains the compatibility total, split into real ownership decisions and deterministic algorithm misses, plus unsupported-language files no manifest claims (`unsupported.dark`). The fix routes each bucket to `init --path`, `fix-coverage --auto`, or durable hand-authored exposes |
 | `E_SUBSYSTEM_OVERLAP` | warning | two subsystems declare the identical path/file at equal specificity, so ownership rides on the sorted-first tie-break; surfaced by `describe` (advisory) |
 | `E_UNOWNED_FILE` | error / warning | tracked source file owned by no subsystem (`--fail-on-unowned`); a `root.entry_points` match degrades to a non-blocking warning |
 | `E_EXTERNAL_SYMLINK` | warning | a scanned path resolves outside the project via a symlink (skipped unless `--follow-symlinks`) |
@@ -901,13 +906,16 @@ The scan-bearing commands (`validate`, `preflight`) also accept `--include-ignor
 
 ```
 bounds guide [--sdd]               → {mode:"guide", steps:[{id,title,command,why,done}],
-                                       daily:[{command,use}], next, complete, sdd?}
+                                       daily:[{command,use}], next, complete, sdd?, optional?}
                                        # read-only state-aware setup checklist (ids: init/discover/
                                        # coverage/agents/ci); next = the next undone command or null.
                                        # sdd? appears when root.yaml enables it or --sdd is passed:
                                        # {enabled,agent,phases,forced,steps:[{phase,command,use}],
                                        #  freshness:{contract,during_implementation,ci_gate,
                                        #             intentional_change}}
+                                       # optional? appears only when complete=true — surfaces SDD and
+                                       # agent-invocation: [{id,title,enabled,current,command,use,configure}]
+                                       # current="disabled"/"enabled" (SDD), "off"/"nudge"/"strict" (invocation)
 bounds list [--namespace NS]       → {project, subsystems:[{name, role, criticality, namespace?,
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}
 bounds describe <name> [--full]    → SubsystemCompact.to_dict() + {file_count, entry_points, validation_status,
@@ -1001,6 +1009,16 @@ bounds discover [--apply|--dry-run] [--namespace NS] [--merge-into 'name=p1,p2' 
 bounds calibrate [--subsystem S] [--apply|--dry-run|--check|--dump-baseline]
                                    → run_calibrate payload, or calibrate-check / calibrate-baseline payload (see §4)
                                    → --check exits 1 on NEW drift above the committed baseline
+bounds coverage [--summary|--why PATH]
+                                   → full mapping payload, token-lean summary, or one-path explanation
+                                   # legacy supported.unowned remains; unowned_breakdown splits
+                                   # user_decision_needed from algorithm_miss.
+bounds fix-coverage [--explain PATH|--auto [--apply]]
+                                   → diagnose, explain, or preview/apply exact root .boundsignore paths
+                                   # mutation requires --auto --apply; never assigns source ownership.
+bounds sdd [--status|--phase NAME|--doctor]
+                                   → configured deterministic phase map or architecture readiness
+                                   # never infers prose-workflow phase completion.
 bounds agent [--detect|--sync|--check] [--<agent> ...]   (no mode = --detect)
                                    → agentsync.run_agent payload (see §4)
                                    # --sync writes AGENTS.md + each agent's pointer AND its native

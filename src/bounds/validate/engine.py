@@ -334,6 +334,21 @@ def run(
     if mapping is not None:
         coverage["mapping"] = mapping
 
+    # Quick mode deliberately does not walk the full tree, so it cannot claim a
+    # coverage percentage or completeness. It can still report the owned-file
+    # evidence already in hand and point at the skipped full check.
+    coverage_summary: dict | None = None
+    if mode == "quick":
+        coverage_summary = {
+            "complete": None,
+            "owned_files_current": len(file_owner),
+            "cached_file_records": len(state.files),
+            "note": (
+                "coverage completeness is unknown because --quick skips the full-tree coverage check; "
+                "run `bounds coverage` for the breakdown or `bounds validate` for the full report"
+            ),
+        }
+
     stats = {
         "files_total": len(files),
         "files_parsed": parsed,
@@ -349,6 +364,11 @@ def run(
         "coverage": coverage,
         "duration_ms": duration_ms,
     }
+    if coverage_summary is not None:
+        # Top-level so the `mapping not in coverage` contract the existing test
+        # relies on still holds (--quick omits `mapping`, but always reports a
+        # summary; downstream consumers can read either field).
+        stats["coverage_summary"] = coverage_summary
     if mode == "quick":
         stats["skipped_checks"] = ["boundary", "contract", "cycles", "coverage", "orphans"]
     return ValidationReport(
@@ -404,10 +424,10 @@ def _next_steps(issues: list[Issue], *, mode: str) -> list[str]:
         )
     if errors.E_COVERAGE_GAP in codes:
         steps.append(
-            "Close E_COVERAGE_GAP first: add supported files to subsystem `paths:` or hand-author a "
-            "manifest for dark unsupported-language source. Use "
-            "`bounds init --subsystem <name> --path <file-or-dir>` for a new subsystem; "
-            "`bounds calibrate` does not map files."
+            "Close E_COVERAGE_GAP first with `bounds coverage`: assign `user_decision_needed` "
+            "source with `bounds init --subsystem <name> --path <file-or-dir>`, preview "
+            "`algorithm_miss` repairs with `bounds fix-coverage --auto`, or hand-author a "
+            "manifest for dark unsupported source. `bounds calibrate` does not map files."
         )
     if errors.E_CYCLE_DETECTED in codes:
         steps.append(
@@ -458,30 +478,51 @@ def _sample_manifest_path(project_root: Path, subsystems: dict) -> str | None:
 def _coverage_gap_issue(mapping: dict, project_root: Path, subsystems: dict) -> Issue:
     """One loud, advisory issue for the CLOSEABLE coverage gap + a concrete, agent-followable procedure.
 
-    Fired only when a closeable gap remains. Two gap kinds, two moves (named separately because the
-    right fix differs):
+    Fired only when a closeable gap remains. Three gap kinds, three moves (named separately because
+    the right fix differs):
 
-      * **supported file in no subsystem** (we have an adapter — Python/TS/JS/SQL/Prisma/shell): a
-        deterministic fix — add it to a subsystem's `paths:`.
+      * **user_decision_needed** — a real source file in no subsystem (we have an adapter — Python/
+        TS/JS/SQL/Prisma/shell). The user must decide where it goes. Deterministic fix: add it to a
+        manifest's `paths:` or `bounds init --subsystem <name> --path <file-or-dir>`.
+      * **algorithm_miss** — a file Bounds should have caught but didn't (e.g. a `vite.config.ts` in
+        a monorepo not in any subsystem). The fix is `bounds fix-coverage --auto` for known
+        patterns, or widen a subsystem's `paths:` glob.
       * **unsupported-language file no manifest claims** (`dark`, no adapter yet): author a manifest;
         the `exposes` you hand-write are DURABLE (calibrate routes them to needs_review, validate
         never flags them as drift). A *declared* unsupported file is already covered and never here.
 
-    The `fix` carries a numbered procedure and a concrete `template_ref` so a JSON-first agent can act
-    without opening the docs. The headline % is supported-language source only — reachable. Test/doc
-    linkage is reported separately in stats, never here.
+    The `fix` carries a numbered procedure and a concrete `template_ref` so a JSON-first agent can
+    act without opening the docs. The headline % is supported-language source only — reachable.
+    Test/doc linkage is reported separately in stats, never here.
     """
     sup = mapping["supported"]
     unsup = mapping["unsupported"]
+    breakdown = sup.get("unowned_breakdown", {})
+    user_decision_count = breakdown.get("user_decision_needed", {}).get("count", 0) if breakdown else sup.get("unowned", 0)
+    algo_miss_count = breakdown.get("algorithm_miss", {}).get("count", 0) if breakdown else 0
+    # Back-compat: when the breakdown is absent (older mapping payloads), `unowned` carries both.
+    if not breakdown and user_decision_count:
+        algo_miss_count = sup.get("unowned", 0) - user_decision_count
+
     parts = []
-    if sup["unowned"]:
-        parts.append(f"{sup['unowned']} supported file(s) in no subsystem")
+    if user_decision_count:
+        parts.append(f"{user_decision_count} supported file(s) need your decision (add to a subsystem's `paths:`)")
+    if algo_miss_count:
+        parts.append(f"{algo_miss_count} supported file(s) are algorithm misses (e.g. build config) — run `bounds fix-coverage --auto`")
     if unsup["dark"]:
         langs = ", ".join(f"{lang}×{n}" for lang, n in sorted(unsup["by_language"].items()))
         parts.append(f"{unsup['dark']} unsupported-language file(s) no manifest claims ({langs})")
     detail = "; ".join(parts) or "some source files"
     samples = []
-    if sup.get("unowned_sample"):
+    if breakdown:
+        ud_sample = breakdown.get("user_decision_needed", {}).get("sample", [])
+        am_sample = breakdown.get("algorithm_miss", {}).get("sample", [])
+        if ud_sample:
+            samples.append("needs your decision: " + ", ".join(ud_sample))
+        if am_sample:
+            samples.append("algorithm miss: " + ", ".join(am_sample))
+    elif sup.get("unowned_sample"):
+        # Legacy payload fallback.
         samples.append("unmapped supported: " + ", ".join(sup["unowned_sample"]))
     if unsup.get("dark_sample"):
         samples.append("dark unsupported: " + ", ".join(unsup["dark_sample"]))
@@ -489,11 +530,17 @@ def _coverage_gap_issue(mapping: dict, project_root: Path, subsystems: dict) -> 
 
     template_ref = _sample_manifest_path(project_root, subsystems)
     steps: list[str] = []
-    if sup["unowned"]:
+    if user_decision_count:
         steps.append(
-            "supported files (Python/TS/JS/SQL/Prisma/shell) → add each to a subsystem's `paths:` "
+            "user-decision files (real source in no subsystem) → add each to a subsystem's `paths:` "
             "(`bounds init --subsystem <name> --path <file-or-dir>` scaffolds/registers one) — "
             "deterministic, no AI"
+        )
+    if algo_miss_count:
+        steps.append(
+            "algorithm-miss files (e.g. build configs the walker classified as source) → run "
+            "`bounds fix-coverage --auto` to apply known fixes, or `bounds coverage --why <path>` "
+            "to see the per-file reason"
         )
     if unsup["dark"]:
         tmpl = f" (copy `{template_ref}` as a template)" if template_ref else ""
@@ -505,7 +552,8 @@ def _coverage_gap_issue(mapping: dict, project_root: Path, subsystems: dict) -> 
     fix = (
         "reach 100% of supported source + 0 dark files — " + "; ".join(steps)
         + f". {unsup['declared']} unsupported file(s) are already covered by a manifest. "
-        "Run `bounds validate -H` to see this issue with samples; see docs/coverage.md."
+        "Run `bounds validate -H` to see this issue with samples, `bounds coverage -H` for the "
+        "gap breakdown, or see docs/coverage.md."
     )
     if sample_text:
         fix += f" First samples: {sample_text}."
@@ -518,8 +566,6 @@ def _coverage_gap_issue(mapping: dict, project_root: Path, subsystems: dict) -> 
         + (f"; samples: {sample_text}" if sample_text else ""),
         fix=fix,
     )
-
-
 def _is_external_symlink(abs_path: Path, project_root: Path) -> bool:
     """True if ``abs_path`` reaches its target through a symlink that escapes the project.
 

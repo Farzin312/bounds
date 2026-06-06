@@ -1,4 +1,4 @@
-"""The 7 checks (six structural + the adapter-output-contract advisory) + a schema-health advisory + the CheckContext they run against + the per-mode dispatch table.
+"""The 8 checks (six structural + schema health + adapter output contracts), their context, and mode dispatch.
 
 Every check is a pure function ``(CheckContext) -> list[Issue]``. None of them read the filesystem or
 call tree-sitter — they operate on the already-extracted results and the loaded manifests. All produced

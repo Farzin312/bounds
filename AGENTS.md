@@ -1,5 +1,5 @@
 <!-- BOUNDS:START -->
-<!-- BOUNDS:GENERATED v=2026.6.24 h=a5bcee9e -->
+<!-- BOUNDS:GENERATED v=2026.6.24 h=3ef14a6d -->
 > Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agentsync.py`) instead.
 
 ## Bounds — architecture contract for agents
@@ -13,6 +13,7 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 - Where a symbol or table is defined → `bounds where <symbol>`
 - What breaks if you change a subsystem or table → `bounds impact <name>`
 - Confirm an edit didn't drift the contract → `bounds validate --quick`
+- Full mapping denominator / why one file is excluded → `bounds coverage` / `bounds coverage --why <path>`
 - Project health, coverage, and trust guidance → `bounds overview`
 
 ### Workflow
@@ -20,8 +21,8 @@ Bounds models this codebase as subsystem boundary manifests. Query architecture 
 2. `bounds describe <name>` to scope the contract, then read only the implementation files you need to edit.
 3. `bounds impact <name>` before changing an interface or a migration.
 4. If `bounds overview` reports partial coverage, overlaps, cycles, or validation errors, follow `health.validation.next_steps` before trusting that part of the map.
-5. On an `E_COVERAGE_GAP`, follow the issue `fix`: add supported files to a manifest's `paths:` (deterministic); for an unsupported language (no adapter yet), author a manifest with a hand-written `exposes:` — durable, calibrate/validate keep it (never stripped or flagged as drift).
-6. `bounds validate --quick` after edits; fix drift before broadening context.
+5. On an `E_COVERAGE_GAP`, use `bounds coverage`: assign `user_decision_needed` source to a subsystem; preview deterministic `algorithm_miss` exclusions with `bounds fix-coverage --auto`; hand-map dark unsupported source with durable `exposes:`.
+6. `bounds validate --quick` after edits; it skips boundary/contract/cycle/coverage/orphan checks, so run full validation or preflight before claiming repo-wide health.
 
 ### When a lookup misses (don't fall back to grep)
 A `bounds where <symbol>` that returns `count: 0` is NOT "bounds has nothing" — it usually means the name is a *sub-symbol* (a field, route, or key inside a larger exported object) or internal. The 0-result payload carries a `suggestions` block; follow it instead of grepping:
@@ -48,7 +49,8 @@ A `bounds impact` miss likewise returns a `fix` with "did you mean" subsystems a
 
 ### Optional Spec-Driven Development
 - If this repo enables `sdd:` in Bounds root config, treat Bounds as the verified architecture layer across specify → clarify → plan → tasks → analyze → implement → verify.
-- Bounds does not run the prose workflow and never calls an LLM; it supplies deterministic facts (`overview`, `list`, `describe`, `where`, `impact`) and gates (`validate --quick`, `preflight --ci`, `calibrate --check`).
+- Run `bounds sdd` for the configured phase map, `bounds sdd --phase <name>` for one command, or `bounds sdd --doctor` for architecture readiness.
+- Bounds does not run or infer prose-workflow progress and never calls an LLM; it supplies deterministic facts (`overview`, `list`, `describe`, `where`, `impact`) and gates (`validate --quick`, `preflight --ci`, `calibrate --check`).
 - Intentional contract changes belong in the spec: update the manifest, then re-baseline with `bounds calibrate --dump-baseline`.
 
 **Invocation policy:** before grepping or opening files to answer an architecture question (what/where something is, what depends on it, what breaks if it changes), FIRST run the relevant Bounds command — `bounds list`, `bounds describe <area>`, `bounds where <symbol>`, `bounds impact <subsystem>`. Fall back to source search only when a lookup misses (a `count: 0` carries `suggestions` — try those first) or the area is unmapped / an unsupported language — then searching directly is expected.

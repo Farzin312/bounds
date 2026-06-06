@@ -156,6 +156,103 @@ def test_guide_sdd_empty_phase_list_is_respected(tmp_path):
     assert payload["sdd"]["steps"] == []
 
 
+def _complete_project(tmp_path, agentsync_mod):
+    """Scaffold a fully-wired project and stub out agent detection so all 5 steps are done."""
+    cfg = tmp_path / ".bounds"
+    (cfg / "manifests").mkdir(parents=True)
+    (cfg / "root.yaml").write_text(
+        'version: "1"\nproject: full\nlanguages: [python]\nsubsystems: [app]\n',
+        encoding="utf-8",
+    )
+    (cfg / "manifests" / "app.yaml").write_text(
+        "name: app\nrole: library\ncriticality: leaf\npaths: [app]\nexposes: []\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "m.py").write_text("def f():\n    pass\n", encoding="utf-8")
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "bounds.yml").write_text("name: bounds\n", encoding="utf-8")
+    # Stub the agent check so the agents step reads as done without needing a wired AGENTS.md.
+    agentsync_mod.run_agent = lambda *a, **kw: {"ok": True, "configured": ["codex"]}
+
+
+def test_guide_complete_includes_optional_features(tmp_path, monkeypatch):
+    """When all 5 required steps are done, guide includes an 'optional' section listing SDD and agent invocation."""
+    from bounds import agentsync
+    monkeypatch.chdir(tmp_path)
+    _complete_project(tmp_path, agentsync)
+
+    payload = guide.run_guide(tmp_path)
+
+    assert payload["complete"] is True
+    assert "optional" in payload
+    ids = [f["id"] for f in payload["optional"]]
+    assert "sdd" in ids
+    assert "invocation" in ids
+
+
+def test_guide_complete_optional_sdd_shows_enable_command_when_disabled(tmp_path, monkeypatch):
+    """When SDD is disabled, the optional SDD entry points at `bounds sdd --enable` and current='disabled'."""
+    from bounds import agentsync
+    monkeypatch.chdir(tmp_path)
+    _complete_project(tmp_path, agentsync)
+
+    payload = guide.run_guide(tmp_path)
+
+    sdd_entry = next(f for f in payload["optional"] if f["id"] == "sdd")
+    assert sdd_entry["enabled"] is False
+    assert sdd_entry["current"] == "disabled"
+    assert "bounds sdd --enable" in sdd_entry["command"]
+
+
+def test_guide_complete_optional_sdd_shows_doctor_when_enabled(tmp_path, monkeypatch):
+    """When SDD is enabled, the optional SDD entry points at `bounds sdd --doctor`."""
+    from bounds import agentsync
+    monkeypatch.chdir(tmp_path)
+    _complete_project(tmp_path, agentsync)
+    # Enable SDD in root.yaml.
+    root = tmp_path / ".bounds" / "root.yaml"
+    root.write_text(root.read_text() + "sdd:\n  enabled: true\n", encoding="utf-8")
+
+    payload = guide.run_guide(tmp_path)
+
+    sdd_entry = next(f for f in payload["optional"] if f["id"] == "sdd")
+    assert sdd_entry["enabled"] is True
+    assert "bounds sdd --doctor" in sdd_entry["command"]
+
+
+def test_guide_incomplete_does_not_include_optional(tmp_path):
+    """Optional features are only shown when setup is complete — not before."""
+    payload = guide.run_guide(tmp_path)  # no .bounds/ → not complete
+    assert payload["complete"] is False
+    assert "optional" not in payload
+
+
+def test_guide_human_output_shows_optional_section(tmp_path, monkeypatch):
+    """The human view shows the 'optional features' block when setup is complete."""
+    from bounds import agentsync
+    from click.testing import CliRunner
+    monkeypatch.chdir(tmp_path)
+    _complete_project(tmp_path, agentsync)
+
+    result = CliRunner().invoke(main, ["guide", "--human"])
+
+    assert result.exit_code == 0
+    assert "optional features:" in result.output
+    assert "Spec-Driven Development" in result.output
+    assert "Agent invocation level" in result.output
+
+
+def test_sdd_status_payload_includes_configure_hints():
+    """The bounds sdd status payload carries a 'configure' key with the CLI commands for all write ops."""
+    from bounds import sdd as sdd_mod
+    payload = sdd_mod._status(None)
+    assert "configure" in payload
+    cfg = payload["configure"]
+    assert "bounds sdd --enable" in cfg.get("enable", "")
+    assert "bounds sdd --disable" in cfg.get("disable", "")
+
+
 def test_guide_sdd_null_phases_defaults_to_all_phases(tmp_path):
     """A blank YAML phases value normalizes to the default phase list instead of crashing."""
     cfg = tmp_path / ".bounds"
@@ -175,3 +272,30 @@ def test_guide_sdd_null_phases_defaults_to_all_phases(tmp_path):
         "implement",
         "verify",
     ]
+
+
+def test_guide_surfaces_manifest_error_with_cli_recovery(tmp_path):
+    """Broken YAML is reported explicitly instead of being disguised as zero completed steps."""
+    cfg = tmp_path / ".bounds"
+    cfg.mkdir()
+    (cfg / "root.yaml").write_text("project: [broken\n", encoding="utf-8")
+
+    payload = guide.run_guide(tmp_path)
+
+    assert payload["manifest_error"]["message"]
+    assert payload["manifest_error"]["fix"] == "run `bounds validate -H` for the structured manifest error"
+    assert payload["next"] == "bounds validate -H"
+
+
+def test_guide_human_view_does_not_hide_manifest_error(tmp_path, monkeypatch):
+    """Human rendering leads with the parse failure and the structured recovery command."""
+    cfg = tmp_path / ".bounds"
+    cfg.mkdir()
+    (cfg / "root.yaml").write_text("project: [broken\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["guide", "--human"])
+
+    assert result.exit_code == 0
+    assert "manifest error:" in result.output
+    assert "bounds validate -H" in result.output

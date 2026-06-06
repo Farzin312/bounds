@@ -202,6 +202,23 @@ def test_check_flags_claude_md_missing_bounds_block_as_stale(tmp_path):
     assert "claude" in check["stale"] and check["ok"] is False
 
 
+def test_check_accepts_authored_claude_md_that_sync_intentionally_preserves(tmp_path):
+    """Check and sync must agree on ownership: an authored CLAUDE.md with deliberate Bounds
+    guidance is a valid override, not stale state that the recommended sync cannot repair."""
+    root = _mk_root(tmp_path)
+    authored = "# Project rules\n\nRun `bounds list` before broad architecture searches.\n"
+    (root / "CLAUDE.md").write_text(authored, encoding="utf-8")
+
+    report = agentsync.run_agent(root, mode="sync", only={"claude"})
+    assert report["skip_reasons"]["CLAUDE.md"] == "authored"
+    assert (root / "CLAUDE.md").read_text(encoding="utf-8") == authored
+
+    check = agentsync.run_agent(root, mode="check", only={"claude"})
+    assert check["ok"] is True
+    assert check["configured"] == ["claude"]
+    assert check["stale"] == []
+
+
 def test_sync_paths_are_sorted_posix(tmp_path):
     """Reported paths must be sorted and posix-formed (no backslashes) so output is byte-stable cross-platform (determinism + posix-path constraints)."""
     root = _mk_root(tmp_path)

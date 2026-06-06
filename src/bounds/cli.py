@@ -24,12 +24,14 @@ from . import (
     calibrate as calibrate_mod,
     ciconfig,
     config,
+    coverage as coverage_mod,
     describe as describe_mod,
     discover as discover_mod,
     errors,
     guide as guide_mod,
     locate,
     output,
+    sdd as sdd_mod,
     upgrade as upgrade_mod,
     update_check,
 )
@@ -98,7 +100,10 @@ class _Spinner:
     def __exit__(self, *_):
         self._stop.set()
         if self._thread.is_alive():
-            self._thread.join()
+            # Bounded join: a stuck spinner thread would otherwise prevent stdout from
+            # being written after validation completes (the entire output is the result
+            # of the work — never lose it to a defensive hole in the teardown).
+            self._thread.join(timeout=1)
         # Only clear if we actually drew — a sub-grace-period run wrote nothing to clear.
         if self._drew:
             sys.stderr.write("\r\033[K")
@@ -170,9 +175,9 @@ def _version_display(raw: str) -> str:
 # by spelling. Every registered command must appear in exactly one group; a stray command not
 # listed here still shows up under "Other" (a loud signal to add it), so nothing is ever hidden.
 _COMMAND_GROUPS = (
-    ("Set up", ("guide", "init", "discover", "agent", "ci")),
+    ("Set up", ("guide", "init", "discover", "agent", "sdd", "ci")),
     ("Read the map (do this before grepping source)", ("list", "describe", "overview", "where", "impact")),
-    ("Catch drift", ("validate", "preflight", "calibrate")),
+    ("Catch drift", ("validate", "preflight", "calibrate", "coverage", "fix-coverage")),
     ("Maintain", ("edit", "cache", "upgrade", "upgrade-check")),
 )
 
@@ -183,6 +188,9 @@ _HELP_EPILOG = (
     "New here? Run 'bounds guide' for a state-aware setup checklist.\n"
     "Quick start:\n"
     "  bounds init --root  ·  bounds discover --apply  ·  bounds agent --sync\n"
+    "\n"
+    "Already set up? 'bounds guide' also shows optional features (SDD, agent invocation)\n"
+    "with their current state and the exact command to change each one.\n"
     "\n"
     "Output is JSON by default; add -H/--human for a readable view of the same data.\n"
     "AI agents: read AGENTS.md, then use 'bounds list' and 'bounds describe <name>'."
@@ -971,8 +979,180 @@ def calibrate_cmd(subsystem: str | None, do_apply: bool, dry_run: bool,
 
 
 # ===========================================================================
-# edit
+# coverage
 # ===========================================================================
+@main.command("coverage", short_help="Mapping coverage report (no full walk on --quick)")
+@click.option("--why", "why_path", default=None, metavar="PATH",
+              help="Trace a single file: which rule excluded it, why it is unowned, and the recommended fix.")
+@click.option("--summary", "summary", is_flag=True, default=False,
+              help="Show only the headline counts (no per-file samples).")
+@_human
+def coverage_cmd(why_path: str | None, summary: bool, human: bool) -> None:
+    """Report full mapping coverage or explain one path. Read-only."""
+
+    def go() -> None:
+        root = _require_root()
+        _rootm, subs, _schema_issues = manifest_loader.load_all(root)
+        with _progress("computing coverage..."):
+            payload = coverage_mod.run_coverage(
+                root,
+                subs,
+                why=why_path,
+                summary_only=summary,
+            )
+        output.emit(payload, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
+# fix-coverage
+# ===========================================================================
+@main.command("fix-coverage", short_help="Diagnose and resolve the mapping-coverage gap")
+@click.option("--explain", "explain_path", default=None, metavar="PATH",
+              help="Trace a single file: which rule excluded it, why it is unowned, and the recommended fix. (Same shape as `bounds coverage --why`.)")
+@click.option("--auto", "do_auto", is_flag=True, default=False,
+              help="Preview exact .boundsignore rules for deterministic algorithm misses.")
+@click.option("--apply", "apply", is_flag=True, default=False,
+              help="With --auto, write the previewed exact paths to the root .boundsignore.")
+@_human
+def fix_coverage_cmd(explain_path: str | None, do_auto: bool, apply: bool, human: bool) -> None:
+    """Diagnose coverage gaps; preview before applying deterministic fixes."""
+    human = _interactive_human(human)
+
+    def go() -> None:
+        if apply and not do_auto:
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                "--apply requires --auto",
+                fix="preview with `bounds fix-coverage --auto`, then add `--apply`",
+            )
+        root = _require_root()
+        _rootm, subs, _schema_issues = manifest_loader.load_all(root)
+        with _progress("computing coverage..."):
+            payload = coverage_mod.run_fix_coverage(
+                root,
+                subs,
+                explain_path=explain_path,
+                auto=do_auto,
+                apply=apply,
+            )
+        output.emit(payload, human)
+
+    _run(human, go)
+
+
+# ===========================================================================
+# sdd
+# ===========================================================================
+@main.command("sdd", short_help="Optional SDD phase map and configuration")
+@click.option("--status", "do_status", is_flag=True, default=False,
+              help="Print configured phases and their deterministic Bounds commands (default).")
+@click.option("--phase", "phase_name", default=None, metavar="PHASE",
+              help="Print the Bounds command for one SDD phase (specify|clarify|plan|tasks|analyze|implement|verify).")
+@click.option("--doctor", "do_doctor", is_flag=True, default=False,
+              help="Check SDD configuration and architecture-gate readiness.")
+@click.option("--enable", "do_enable", is_flag=True, default=False,
+              help="Enable SDD in .bounds/root.yaml.")
+@click.option("--disable", "do_disable", is_flag=True, default=False,
+              help="Disable SDD in .bounds/root.yaml.")
+@click.option("--phases", "phases_str", default=None, metavar="PHASES",
+              help="Comma-separated phase subset to configure (used with --enable). "
+                   "Example: --phases specify,implement,verify")
+@click.option("--add-phase", "add_phase", default=None, metavar="PHASE",
+              help="Add one phase to the configured list.")
+@click.option("--remove-phase", "remove_phase", default=None, metavar="PHASE",
+              help="Remove one phase from the configured list.")
+@_human
+def sdd_cmd(
+    do_status: bool, phase_name: str | None, do_doctor: bool,
+    do_enable: bool, do_disable: bool, phases_str: str | None,
+    add_phase: str | None, remove_phase: str | None, human: bool,
+) -> None:
+    """Map SDD phases to deterministic Bounds commands; configure optional SDD tracking."""
+    _is_write = do_enable or do_disable or bool(add_phase) or bool(remove_phase)
+    if _is_write:
+        human = _interactive_human(human)
+
+    def go() -> None:
+        read_chosen = [n for n, on in (
+            ("--status", do_status), ("--phase", bool(phase_name)), ("--doctor", do_doctor),
+        ) if on]
+        write_chosen = [n for n, on in (
+            ("--enable", do_enable), ("--disable", do_disable),
+            ("--add-phase", bool(add_phase)), ("--remove-phase", bool(remove_phase)),
+        ) if on]
+
+        if len(read_chosen) > 1:
+            raise errors.BoundsError(
+                errors.E_USAGE, "pass at most one of --status, --phase, --doctor",
+                fix="run 'bounds sdd' for status, 'bounds sdd --phase implement' for one phase, "
+                    "or 'bounds sdd --doctor' to self-check",
+            )
+        if len(write_chosen) > 1:
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                f"pass at most one of --enable, --disable, --add-phase, --remove-phase; "
+                f"got {' and '.join(write_chosen)}",
+                fix="use --add-phase / --remove-phase for targeted updates, "
+                    "or --enable --phases x,y to replace the full list",
+            )
+        if read_chosen and write_chosen:
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                f"cannot combine {read_chosen[0]} (read) with {write_chosen[0]} (write)",
+                fix="omit the read flag to configure, or omit the write flag to inspect",
+            )
+        if phases_str and not do_enable:
+            raise errors.BoundsError(
+                errors.E_USAGE, "--phases is only valid with --enable",
+                fix="use --enable --phases x,y,z, or --add-phase / --remove-phase for targeted edits",
+            )
+
+        root = _require_root()
+
+        if write_chosen:
+            # Parse and validate --phases when provided.
+            parsed_phases: list[str] | None = None
+            if phases_str:
+                parsed_phases = [p.strip() for p in phases_str.split(",") if p.strip()]
+                invalid = [p for p in parsed_phases if p not in config.SDD_PHASES]
+                if invalid:
+                    raise errors.BoundsError(
+                        errors.E_USAGE, f"unknown phase(s): {', '.join(invalid)}",
+                        fix=f"valid phases: {', '.join(config.SDD_PHASES)}",
+                    )
+            # Validate --add-phase / --remove-phase values.
+            for flag, val in (("--add-phase", add_phase), ("--remove-phase", remove_phase)):
+                if val and val not in config.SDD_PHASES:
+                    raise errors.BoundsError(
+                        errors.E_USAGE, f"unknown SDD phase '{val}' for {flag}",
+                        fix=f"valid phases: {', '.join(config.SDD_PHASES)}",
+                    )
+            payload = sdd_mod.write_sdd_config(
+                root,
+                enable=True if do_enable else (False if do_disable else None),
+                phases=parsed_phases,
+                add_phase=add_phase,
+                remove_phase=remove_phase,
+            )
+        else:
+            rootm, subs, _schema_issues = manifest_loader.load_all(root)
+            if do_doctor:
+                with _progress("checking SDD readiness..."):
+                    payload = sdd_mod.run_sdd(root, rootm, subs, doctor=True)
+            else:
+                payload = sdd_mod.run_sdd(root, rootm, subs, phase_name=phase_name)
+            if payload is None:
+                raise errors.BoundsError(
+                    errors.E_USAGE, f"unknown SDD phase '{phase_name}'",
+                    fix=f"valid phases: {', '.join(config.SDD_PHASES)}",
+                )
+        output.emit(payload, human)
+
+    _run(human, go)
+
+
 @main.command("edit", short_help="Safely update subsystem metadata")
 @click.argument("subsystem")
 @click.option("--description", default=None,
@@ -1196,19 +1376,23 @@ def agent_hook_cmd() -> None:
     stdout, or nothing for a no-op). It deliberately does NOT use the normal ``_run`` wrapper or the
     JSON-first error contract: a hook must NEVER break the agent's turn, so this always exits 0 and
     emits hook-protocol JSON only — any error degrades to an empty (allow / no-op) response.
-    """
-    import json
 
-    try:
-        raw = sys.stdin.read()
-        payload = json.loads(raw) if raw.strip() else {}
-    except (ValueError, OSError):
-        payload = {}
+    The stdin read is **bounded by a wall-clock timeout** (:func:`bounds._io.read_stdin_json`).
+    A bare ``sys.stdin.read()`` would block forever on the harness's open pipe (EOF never
+    arrives) and pin the Claude Code process until the harness's own 30s kill — a real hang,
+    not a wait. A 5s cap keeps the hook inside its perf budget AND exits cleanly with a
+    stderr hint if something is genuinely wrong.
+    """
+    from ._io import emit_loud, read_stdin_json
+
+    payload = read_stdin_json() or {}
     try:
         result = agenthook.run_hook(payload if isinstance(payload, dict) else {})
-    except Exception:  # noqa: BLE001 - defense in depth; run_hook already fails open.
+    except Exception as exc:  # noqa: BLE001 - hook must fail open
+        emit_loud(f"agent hook failed open ({type(exc).__name__}: {exc})")
         result = {}
     if result:
+        import json
         sys.stdout.write(json.dumps(result))
     sys.exit(config.EXIT_OK)
 

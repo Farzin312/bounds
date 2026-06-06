@@ -11,6 +11,9 @@ is exactly the adoption failure this feature exists to prevent.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 from click.testing import CliRunner
@@ -443,11 +446,50 @@ def test_cli_agent_hook_empty_stdin_is_silent_exit_0(tmp_path, monkeypatch):
 
 
 def test_cli_agent_hook_garbage_stdin_never_errors(tmp_path, monkeypatch):
-    """Garbage stdin to the hidden hook fails open with no output and exit 0."""
+    """Garbage stdin fails open on stdout but reports the degraded read on stderr."""
     proj = _mk_project(tmp_path, "nudge")
     res = _invoke(monkeypatch, proj, ["agent-hook"], stdin="}{not json")
     assert res.exit_code == 0
-    assert res.output == ""
+    assert res.stdout == ""
+    assert "bounds: stdin was not valid JSON" in res.stderr
+
+
+def test_cli_agent_hook_real_pipe_does_not_wait_for_eof(tmp_path):
+    """A complete hook event exits while the parent intentionally keeps the stdin pipe open."""
+    proj = _mk_project(tmp_path, "nudge")
+    read_fd, write_fd = os.pipe()
+    env = dict(os.environ)
+    env["BOUNDS_HOOK_STATE_DIR"] = str(tmp_path / "_pipe_state")
+    process = subprocess.Popen(
+        [sys.executable, "-c", "from bounds.cli import main; main()", "agent-hook"],
+        cwd=proj,
+        env=env,
+        stdin=read_fd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    os.close(read_fd)
+    payload = json.dumps(
+        {
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "what depends on auth?",
+            "session_id": "pipe",
+            "cwd": str(proj),
+        }
+    )
+    os.write(write_fd, payload.encode("utf-8"))
+    try:
+        stdout, stderr = process.communicate(timeout=2)
+    finally:
+        os.close(write_fd)
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+    assert process.returncode == 0
+    assert "additionalContext" in stdout
+    assert stderr == ""
 
 
 def test_cli_agent_invocation_sets_root_yaml_and_syncs(tmp_path, monkeypatch):

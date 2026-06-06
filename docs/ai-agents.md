@@ -92,10 +92,14 @@ or removing the hook) in one step:
 
 ```bash
 bounds agent --invocation off       # advisory files only (the pre-hook behavior)
-bounds agent --invocation nudge      # gentle reminder hook (default)
-bounds agent --invocation strict     # pause before a broad search Bounds can answer
-bounds agent                          # bare detect also prints the current level
+bounds agent --invocation nudge     # gentle reminder hook (default)
+bounds agent --invocation strict    # pause before a broad search Bounds can answer
+bounds agent                        # bare detect also prints the current level
 ```
+
+`bounds guide` (once all 5 setup steps are done) shows the current invocation level in the
+**optional features** section — `[nudge]`, `[strict]`, or `[off]` — so you always have a one-line
+reminder of what's active and the exact command to change it.
 
 | Level | What it does |
 |-------|--------------|
@@ -254,6 +258,10 @@ happened:
 - `left alone (you edited the bounds block)` — a managed block whose body you hand-edited since the
   last sync; Bounds won't overwrite your changes.
 
+`bounds agent --check` follows the same ownership rule: an unmarked authored memory file that already
+contains deliberate Bounds guidance is accepted, because re-running sync intentionally will not
+replace it. An unrelated markerless file or an outdated managed block is still reported as stale.
+
 ## Native commands & skills (not just a pointer)
 
 The `AGENTS.md` contract and the per-agent pointer files are the **instruction** layer: they tell a
@@ -316,8 +324,9 @@ Do not read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/root.yaml`, or
 `.bounds/manifests/*.yaml` directly. The CLI is the API: raw manifests bypass tree-sitter
 verification, and the cache is a binary implementation detail.
 
-If commands like `impact`, `discover`, or `agent` are missing, the installed CLI is stale. Refresh
-with `bounds upgrade` or, from a local clone, `bounds upgrade --local .`.
+If commands like `impact`, `coverage`, `sdd`, or `agent` are missing, the installed CLI is stale.
+Refresh with `bounds upgrade` or, when the current directory is a Bounds clone,
+`bounds upgrade --local .`.
 ```
 
 ## Roadmap: MCP server

@@ -63,6 +63,9 @@ _HUMAN_RENDERERS = (
     (_has("current", "checked", "outdated"), lambda p: _render_upgrade_check_human(p)),
     (_has("command", "dry_run", "source"), lambda p: _render_upgrade_human(p)),
     (lambda p: p.get("mode") == "guide", lambda p: _render_guide_human(p)),
+    (lambda p: str(p.get("mode", "")).startswith("coverage"), lambda p: _render_coverage_human(p)),
+    (_has("path", "status", "command"), lambda p: _render_coverage_human(p)),
+    (lambda p: str(p.get("mode", "")).startswith("sdd-"), lambda p: _render_sdd_human(p)),
     (lambda p: p.get("mode") == "discover", lambda p: _render_discover_human(p)),
     (lambda p: p.get("mode") in ("calibrate-check", "calibrate-baseline"), lambda p: _render_drift_human(p)),
     (_has("health", "edges"), lambda p: _render_overview_human(p)),
@@ -478,6 +481,14 @@ def _render_guide_human(payload: dict) -> str:
     if payload.get("complete"):
         head += "  ✓ all set"
     lines = [head, ""]
+    manifest_error = payload.get("manifest_error")
+    if manifest_error:
+        message = manifest_error.get("message", "") if isinstance(manifest_error, dict) else manifest_error
+        fix = manifest_error.get("fix", "") if isinstance(manifest_error, dict) else ""
+        lines.append(f"manifest error: {message}")
+        if fix:
+            lines.append(f"  fix: {fix}")
+        lines.append("")
     nxt = payload.get("next")
     for i, step in enumerate(steps, 1):
         box = "x" if step.get("done") else " "
@@ -505,6 +516,110 @@ def _render_guide_human(payload: dict) -> str:
         freshness = sdd.get("freshness") or {}
         if freshness:
             lines.append(f"  freshness: {freshness.get('contract', '')}")
+    optional = payload.get("optional") or []
+    if optional:
+        lines.append("")
+        lines.append("optional features:")
+        for feat in optional:
+            current = feat.get("current", "on" if feat.get("enabled") else "off")
+            lines.append(f"  {feat.get('title', ''):<28}  [{current}]  {feat.get('use', '')}")
+            lines.append(f"    configure: {feat.get('configure', feat.get('command', ''))}")
+    return "\n".join(lines)
+
+
+def _render_coverage_human(payload: dict) -> str:
+    """Render coverage reports around decisions, automated fixes, and next action."""
+    mode = payload.get("mode")
+    if mode == "coverage-auto-fix":
+        verb = "added" if payload.get("applied") else "would add"
+        proposed = payload.get("added") if payload.get("applied") else payload.get("proposed")
+        lines = [f"coverage auto-fix: {verb} {len(proposed or [])} exact path(s)"]
+        lines.extend(f"  - {path}" for path in proposed or [])
+        lines.append(f"next: {payload.get('next_step', '')}")
+        return "\n".join(lines)
+    if mode == "coverage-diagnose":
+        decisions = payload.get("user_decision_needed", {})
+        misses = payload.get("algorithm_miss", {})
+        dark = payload.get("unsupported_dark", {})
+        return "\n".join(
+            [
+                f"coverage: {payload.get('mapped_pct', 0.0)}% supported source",
+                f"  needs ownership decision: {decisions.get('count', 0)}",
+                f"  deterministic algorithm miss: {misses.get('count', 0)}",
+                f"  dark unsupported source: {dark.get('count', 0)}",
+                f"next: {payload.get('next_step', '')}",
+            ]
+        )
+    if mode == "coverage-summary":
+        return "\n".join(
+            [
+                f"coverage: {payload.get('mapped_pct', 0.0)}% "
+                f"({payload.get('supported_mapped', 0)}/{payload.get('supported_total', 0)} supported files)",
+                f"  needs ownership decision: {payload.get('user_decision_needed', 0)}",
+                f"  deterministic algorithm miss: {payload.get('algorithm_miss', 0)}",
+                f"  dark unsupported source: {payload.get('unsupported_dark', 0)}",
+                f"next: {payload.get('next_step', '')}",
+            ]
+        )
+    if mode == "coverage":
+        supported = payload.get("supported", {})
+        breakdown = supported.get("unowned_breakdown", {})
+        return "\n".join(
+            [
+                f"coverage: {payload.get('mapped_pct', 0.0)}% "
+                f"({supported.get('mapped', 0)}/{supported.get('total', 0)} supported files)",
+                f"  needs ownership decision: "
+                f"{breakdown.get('user_decision_needed', {}).get('count', 0)}",
+                f"  deterministic algorithm miss: {breakdown.get('algorithm_miss', {}).get('count', 0)}",
+                f"  dark unsupported source: {payload.get('unsupported', {}).get('dark', 0)}",
+                f"next: {payload.get('next_step', '')}",
+            ]
+        )
+    if "status" in payload and "path" in payload:
+        return "\n".join(
+            [
+                f"{payload.get('path')}: {payload.get('status')}",
+                f"  {payload.get('reason', '')}",
+                f"next: {payload.get('command', '')}",
+            ]
+        )
+    return _render_generic_human(payload)
+
+
+def _render_sdd_human(payload: dict) -> str:
+    """Render SDD as a command map, readiness report, or configure confirmation."""
+    mode = payload.get("mode")
+    if mode == "sdd-phase":
+        configured = "configured" if payload.get("configured") else "not configured"
+        return "\n".join(
+            [
+                f"sdd {payload.get('phase')}: {configured}",
+                f"  {payload.get('command', '')}",
+                f"  {payload.get('use', '')}",
+            ]
+        )
+    if mode == "sdd-doctor":
+        lines = [f"sdd doctor: {'ready' if payload.get('ok') else 'needs attention'}"]
+        for check in payload.get("checks", []) or []:
+            lines.append(f"  [{'x' if check.get('ok') else ' '}] {check.get('name')}: {check.get('detail')}")
+        lines.append(f"next: {payload.get('next_step', '')}")
+        return "\n".join(lines)
+    if mode == "sdd-configure":
+        status = "enabled" if payload.get("enabled") else "disabled"
+        lines = [f"sdd configure: {status} ({payload.get('agent', 'generic')})"]
+        phases = payload.get("phases", [])
+        lines.append(f"  phases: {', '.join(phases) if phases else '(none)'}")
+        lines.append(f"  written: {payload.get('written', '')}")
+        lines.append(f"next: {payload.get('next_step', '')}")
+        return "\n".join(lines)
+    lines = [f"sdd: {'enabled' if payload.get('enabled') else 'disabled'} ({payload.get('agent', 'generic')})"]
+    for step in payload.get("steps", []) or []:
+        lines.append(f"  {step.get('phase', ''):<9} {step.get('command', '')}")
+    lines.append(payload.get("note", ""))
+    lines.append(f"next: {payload.get('next_step', '')}")
+    cfg = payload.get("configure") or {}
+    if cfg:
+        lines.append("configure: bounds sdd --enable / --disable · --phases x,y · --add-phase/--remove-phase <phase>")
     return "\n".join(lines)
 
 
