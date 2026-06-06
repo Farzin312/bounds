@@ -38,6 +38,8 @@ exposes:
   kind: function
 - name: run_sdd
   kind: function
+- name: write_sdd_config
+  kind: function
 consumes:
 - subsystem: manifest
   via: loader
