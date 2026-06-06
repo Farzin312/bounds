@@ -5,8 +5,8 @@ extracted, counted in supported coverage, and their exposes verified like any ot
 """
 from __future__ import annotations
 
-from bounds.extract import get_adapter, supported_extensions
-from bounds.extract.shell import ShellAdapter
+from bounds.core.extract import get_adapter, supported_extensions
+from bounds.core.extract.shell import ShellAdapter
 
 
 def _extract(src: str):

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import config, errors
-from .models import RootManifest, SubsystemCompact
+from ..shared import config, errors
+from ..shared.models import RootManifest, SubsystemCompact
 from .validate import engine as validate_engine
 
 __all__ = ["phase_steps", "resolve_config", "run_sdd", "write_sdd_config"]

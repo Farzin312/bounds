@@ -673,7 +673,7 @@ def test_init_root_gitignore_idempotent(tmp_path, monkeypatch):
 
 def test_ensure_gitignore_creates_with_all_entries_when_absent(tmp_path):
     """Absent .bounds/.gitignore -> created from the template with all required entries, returns True."""
-    from bounds import config
+    from bounds.shared import config
 
     bounds_dir = tmp_path / config.BOUNDS_DIR
     assert config.ensure_bounds_gitignore(bounds_dir) is True
@@ -686,7 +686,7 @@ def test_ensure_gitignore_creates_with_all_entries_when_absent(tmp_path):
 
 def test_ensure_gitignore_appends_to_unrelated_content_without_rewriting(tmp_path):
     """Existing user content (a comment + *.log) is preserved byte-for-byte while the 3 entries are appended, no dupes."""
-    from bounds import config
+    from bounds.shared import config
 
     bounds_dir = tmp_path / config.BOUNDS_DIR
     bounds_dir.mkdir(parents=True)
@@ -707,7 +707,7 @@ def test_ensure_gitignore_appends_to_unrelated_content_without_rewriting(tmp_pat
 
 def test_ensure_gitignore_noop_when_all_entries_present(tmp_path):
     """A file already containing all 3 entries -> returns False and is byte-unchanged (no dupes)."""
-    from bounds import config
+    from bounds.shared import config
 
     bounds_dir = tmp_path / config.BOUNDS_DIR
     bounds_dir.mkdir(parents=True)
@@ -721,7 +721,7 @@ def test_ensure_gitignore_noop_when_all_entries_present(tmp_path):
 
 def test_ensure_gitignore_commented_entry_does_not_count_as_present(tmp_path):
     """Only cache.db present (others absent, one as a comment) -> the missing entries are appended, cache.db not duplicated, returns True."""
-    from bounds import config
+    from bounds.shared import config
 
     bounds_dir = tmp_path / config.BOUNDS_DIR
     bounds_dir.mkdir(parents=True)
@@ -738,7 +738,7 @@ def test_ensure_gitignore_commented_entry_does_not_count_as_present(tmp_path):
 
 def test_ensure_gitignore_idempotent_second_call_is_noop(tmp_path):
     """Two consecutive calls on a pre-existing file: second returns False and leaves the file unchanged from after the first."""
-    from bounds import config
+    from bounds.shared import config
 
     bounds_dir = tmp_path / config.BOUNDS_DIR
     bounds_dir.mkdir(parents=True)

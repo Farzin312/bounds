@@ -22,8 +22,8 @@ from collections.abc import Iterable
 
 import json
 
-from .. import errors
-from ..models import ExtractResult, ImportRef, Issue, Symbol
+from ...shared import errors
+from ...shared.models import ExtractResult, ImportRef, Issue, Symbol
 
 __all__ = ["content_hash"]
 

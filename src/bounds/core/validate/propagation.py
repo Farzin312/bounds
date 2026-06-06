@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from collections import deque
 
-from .. import config
-from ..models import SubsystemCompact
+from ...shared import config
+from ...shared.models import SubsystemCompact
 
 __all__ = ["build_consumer_index", "transitive_consumers"]
 

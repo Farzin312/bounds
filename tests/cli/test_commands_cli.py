@@ -6,7 +6,7 @@ import json
 
 from click.testing import CliRunner
 
-from bounds import output
+from bounds.shared import output
 from bounds.cli import main
 
 
@@ -434,7 +434,7 @@ def test_discover_cli_runs(monkeypatch, py_project):
 # ---------------------------------------------------------------------------
 def test_oversized_owned_file_is_skipped_loudly(monkeypatch, py_project):
     """Fail-soft, report-hard: an oversized owned file becomes an E_EXTRACTION_FAILED Issue (citing MAX_FILE_BYTES) counted in coverage, never a crash."""
-    import bounds.config as cfg
+    from bounds.shared import config as cfg
     monkeypatch.setattr(cfg, "MAX_FILE_BYTES", 5)  # tiny: every real source file is "oversized"
     data = json.loads(_invoke(monkeypatch, py_project, ["validate"]).output)
     assert any(
@@ -447,7 +447,7 @@ def test_oversized_owned_file_is_skipped_loudly(monkeypatch, py_project):
 
 def test_describe_reports_unparsed_owned_file(monkeypatch, py_project):
     """An unreadable owned file lists in describe.unparsed_files and its export stays verified=false — couldn't read it, so not silently reported as 'absent from source'."""
-    import bounds.config as cfg
+    from bounds.shared import config as cfg
     monkeypatch.setattr(cfg, "MAX_FILE_BYTES", 5)
     data = json.loads(_invoke(monkeypatch, py_project, ["describe", "models"]).output)
     assert "src/models/thing.py" in data.get("unparsed_files", [])
@@ -692,7 +692,7 @@ def test_quick_flags_oversized_unchanged_file(monkeypatch, py_project, git_init)
     """--quick must still run the oversized guard BEFORE the cache hit, so an unchanged-but-now-oversized file flags E_EXTRACTION_FAILED instead of being served from a stale cache record."""
     # PR fix: the oversized guard runs BEFORE the quick-mode cache hit, so an unchanged-but-
     # oversized owned file is flagged loudly, never silently served from a stale cache record.
-    import bounds.config as cfg
+    from bounds.shared import config as cfg
     git_init(py_project)
     _invoke(monkeypatch, py_project, ["validate"])  # warm the cache at normal size
     monkeypatch.setattr(cfg, "MAX_FILE_BYTES", 5)   # now every file is "oversized"

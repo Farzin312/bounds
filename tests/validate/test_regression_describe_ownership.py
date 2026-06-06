@@ -16,9 +16,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bounds import describe, errors
-from bounds.ignore import IgnoreMatcher
-from bounds.manifest import loader
+from bounds.core import describe
+from bounds.shared import errors
+from bounds.shared.ignore import IgnoreMatcher
+from bounds.core.manifest import loader
 
 
 def _nested_project(tmp_path: Path) -> Path:
@@ -83,7 +84,7 @@ def test_describe_file_count_does_not_double_count_nested_child(tmp_path):
 
 def test_describe_agrees_with_resolve_owners(tmp_path):
     """BOUNDS-006: describe's file roster equals scan.resolve_owners' assignment for the subsystem."""
-    from bounds.extract import scan
+    from bounds.core.extract import scan
 
     _nested_project(tmp_path)
     _root, subs, _ = loader.load_all(tmp_path)
@@ -151,7 +152,7 @@ def test_describe_files_json_human_parity(tmp_path):
     JSON-first invariant: the human renderer lists the roster only when payload['files'] is present,
     so the JSON must carry it under the same gate (never render a list the JSON omitted).
     """
-    from bounds import output
+    from bounds.shared import output
 
     _nested_project(tmp_path)
     default = _describe(tmp_path, "alpha", full=False)
@@ -190,7 +191,7 @@ def _project_with_docs_tests(tmp_path: Path) -> Path:
 def test_describe_docs_tests_gated_under_full(tmp_path):
     """BOUNDS-010 parity: describe surfaces linked docs/tests (explicit + convention) only under
     --full, in BOTH the JSON and the human view — a default describe stays token-lean."""
-    from bounds import output
+    from bounds.shared import output
 
     _project_with_docs_tests(tmp_path)
     default = _describe(tmp_path, "auth", full=False)

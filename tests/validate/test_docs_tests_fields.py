@@ -6,9 +6,9 @@ to_dict/from_dict, emitting each only when non-empty (lean default). See models.
 """
 from __future__ import annotations
 
-from bounds import errors
-from bounds.manifest import schema
-from bounds.models import SubsystemCompact
+from bounds.shared import errors
+from bounds.core.manifest import schema
+from bounds.shared.models import SubsystemCompact
 
 
 def test_schema_accepts_valid_docs_and_tests_lists():

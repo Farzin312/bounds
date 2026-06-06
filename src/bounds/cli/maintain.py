@@ -11,42 +11,70 @@ from . import util
 from ..shared import config, errors, output
 from ..maintenance import update as update_mod, upgrade as upgrade_mod
 from ..shared.cache import store as cache_store
+from ..core.manifest import loader as manifest_loader
 
-def edit_cmd(human: bool) -> None:
-    """Open the local Bounds configuration in the system editor."""
+def edit_cmd(subsystem: str, description: str | None, human: bool) -> None:
+    """Update subsystem metadata through the CLI."""
     human = util.interactive_human(human)
 
     def go() -> None:
-        root = util.require_root()
-        root_yaml = root / config.BOUNDS_DIR / config.ROOT_FILE
-        if not root_yaml.is_file():
+        chosen = [name for name, val in (("--description", description),) if val is not None]
+        if len(chosen) != 1:
             raise errors.BoundsError(
-                errors.E_MANIFEST_NOT_FOUND,
-                f"root manifest not found at {root_yaml.relative_to(root)}",
-                fix="run 'bounds init --root' to initialize",
+                errors.E_USAGE,
+                "pass exactly one metadata field to update",
+                fix="example: bounds edit logging --description 'Structured operational logging'",
             )
-        import os
-        import subprocess
-        editor = os.environ.get("EDITOR", "vi")
-        subprocess.call([editor, str(root_yaml)])
-        output.emit({"mode": "edit", "path": root_yaml.relative_to(root).as_posix()}, human)
+        root = util.require_root()
+        _rootm, subs, _schema_issues = manifest_loader.load_all(root)
+        sub = subs.get(subsystem)
+        if sub is None:
+            raise errors.BoundsError(
+                errors.E_SUBSYSTEM_NOT_FOUND, f"unknown subsystem {subsystem!r}",
+                fix="run 'bounds list' to see available subsystems"
+            )
+
+        import yaml
+        manifest_path = root / sub.source_path
+        text = manifest_path.read_text(encoding="utf-8")
+        data = yaml.safe_load(text) or {}
+        
+        if description is not None:
+            data["description"] = description
+
+        manifest_path.write_text(
+            yaml.safe_dump(data, sort_keys=False, default_flow_style=False),
+            encoding="utf-8"
+        )
+        output.emit({
+            "mode": "edit",
+            "subsystem": subsystem,
+            "updated": chosen,
+            "description": data.get("description"),
+        }, human)
 
     util.run_wrapped(human, go)
 
-def cache_cmd(do_clear: bool, do_inspect: bool, human: bool) -> None:
-    """Inspect or clear the local boundary cache."""
+def cache_cmd(do_migrate: bool, do_prune: bool, do_inspect: bool, human: bool) -> None:
+    """Manage the binary extraction cache (.bounds/cache.db)."""
     human = util.interactive_human(human)
 
     def go() -> None:
-        if do_clear and do_inspect:
-            raise errors.BoundsError(errors.E_USAGE, "pass at most one of --clear, --inspect")
-
+        selected = [f for f, on in
+                    (("migrate", do_migrate), ("prune", do_prune), ("inspect", do_inspect)) if on]
+        if len(selected) != 1:
+            raise errors.BoundsError(
+                errors.E_USAGE,
+                "pass exactly one of --migrate, --prune, --inspect",
+                fix="e.g. 'bounds cache --inspect' to summarize, '--migrate' to convert state.json",
+            )
         root = util.require_root()
-        if do_clear:
-            cache_store.clear_cache(root)
-            payload = {"mode": "cache-clear", "cleared": True}
+        if do_migrate:
+            payload = cache_store.migrate_json_to_sqlite(root)
+        elif do_prune:
+            payload = cache_store.prune_missing(root)
         else:
-            payload = cache_store.cache_status(root)
+            payload = cache_store.inspect(root)
         output.emit(payload, human)
 
     util.run_wrapped(human, go)
@@ -57,9 +85,13 @@ def upgrade_cmd(do_check: bool, force: bool, dry_run: bool, human: bool) -> None
 
     def go() -> None:
         if do_check:
-            payload = update_mod.check(force=force)
+            payload = update_mod.check()
         else:
-            payload = upgrade_mod.run_upgrade(force=force, dry_run=dry_run)
+            with util.progress("upgrading bounds...") if not dry_run else util.nullcontext():
+                payload = upgrade_mod.run_upgrade(dry_run=dry_run)
         output.emit(payload, human)
+        if not do_check:
+            import sys
+            sys.exit(config.EXIT_OK if payload.get("ok") else config.EXIT_BLOCKED)
 
     util.run_wrapped(human, go)

@@ -136,10 +136,11 @@ def init(root_flag: bool, subsystem: str | None, namespace: str | None,
 def discover(do_apply, dry_run, namespace, merge_into, human):
     cli_setup.discover_cmd(do_apply, dry_run, namespace, merge_into, human)
 
+
 @main.command("agent", short_help="Wire AI coding agents to Bounds")
-@click.option("--sync", "mode", flag_value="sync", help="Write AGENTS.md + pointer files.")
-@click.option("--detect", "mode", flag_value="detect", help="List detected agents.")
-@click.option("--check", "mode", flag_value="check", help="Verify wiring is current.")
+@click.option("--sync", "do_sync", is_flag=True, default=False, help="Write AGENTS.md + pointer files.")
+@click.option("--detect", "do_detect", is_flag=True, default=False, help="List detected agents.")
+@click.option("--check", "do_check", is_flag=True, default=False, help="Verify wiring is current.")
 @click.option("--invocation", type=click.Choice(["off", "nudge", "strict"]),
               help="Set how hard agents push toward Bounds first.")
 @click.option("--all", "want_all", is_flag=True, default=False, help="Sync all tools, skip prompt.")
@@ -153,11 +154,8 @@ def discover(do_apply, dry_run, namespace, merge_into, human):
 @click.option("--cursor", is_flag=True, help="Sync Cursor config.")
 @click.option("--aider", is_flag=True, help="Sync Aider config.")
 @click.option("--windsurf", is_flag=True, help="Sync Windsurf config.")
-def agent(mode, invocation, want_all, human, **selectors):
+def agent(do_sync, do_detect, do_check, invocation, want_all, human, **selectors):
     """Teach coding agents (Claude, Codex, Gemini, Cursor, …) to query Bounds first."""
-    do_sync = mode == "sync"
-    do_check = mode == "check"
-    do_detect = mode == "detect" or (mode is None and invocation is None)
     cli_setup.agent_cmd(
         do_sync, do_detect, do_check, invocation, want_all, human,
         cli_setup.prompt_agent_selection, **selectors
@@ -171,12 +169,13 @@ def agent_hook():
 @main.command("ci", short_help="Install drift/boundary gates in CI")
 @click.option("--install", "do_install", is_flag=True, default=False)
 @click.option("--github", is_flag=True)
+@click.option("--action", "want_action_alias", is_flag=True, default=False, hidden=True)
 @click.option("--gitlab", is_flag=True)
 @click.option("--precommit", is_flag=True)
 @click.option("--all", "want_all", is_flag=True)
 @_human
-def ci(do_install, github, gitlab, precommit, want_all, human):
-    cli_setup.ci_cmd(do_install, github, gitlab, precommit, want_all, human)
+def ci(do_install, github, want_action_alias, gitlab, precommit, want_all, human):
+    cli_setup.ci_cmd(do_install, github, want_action_alias, gitlab, precommit, want_all, human)
 
 @main.command("sdd", short_help="Optional SDD phase map and configuration")
 @click.option("--status", "do_status", is_flag=True, default=False)
@@ -188,8 +187,8 @@ def ci(do_install, github, gitlab, precommit, want_all, human):
 @click.option("--add-phase", "add_phase")
 @click.option("--remove-phase", "remove_phase")
 @_human
-def sdd(status, phase_name, doctor, enable, disable, phases, add_phase, remove_phase, human):
-    cli_setup.sdd_cmd(status, phase_name, doctor, enable, disable, phases, add_phase, remove_phase, human)
+def sdd(do_status, phase_name, do_doctor, do_enable, do_disable, phases_str, add_phase, remove_phase, human):
+    cli_setup.sdd_cmd(do_status, phase_name, do_doctor, do_enable, do_disable, phases_str, add_phase, remove_phase, human)
 
 # ---- Read Commands ----
 @main.command("list", short_help="Show the subsystem map (read before grepping source)")
@@ -221,19 +220,19 @@ def where(symbol: str, prefix: bool, human: bool) -> None:
 
 @main.command("impact", short_help="Blast radius of a subsystem/interface change")
 @click.argument("name")
-@click.option("--verify", is_flag=True, default=False, help="Cross-check against actual import graph.")
-@click.option("--include-raw", is_flag=True, default=False, help="Include heuristic raw-SQL consumers.")
+@click.option("--verify", "verify", is_flag=True, default=False, help="Cross-check against actual import graph.")
+@click.option("--include-raw-queries", "include_raw", is_flag=True, default=False, help="Include heuristic raw-SQL consumers.")
 @_human
-def impact(name: str, verify: bool, include_raw: bool, human: bool) -> None:
+def impact(name, verify, include_raw, human):
     cli_read.impact_cmd(name, verify, include_raw, human)
 
 # ---- Drift Commands ----
 @main.command("validate", short_help="Run architecture checks (drift, boundary, cycles)")
-@click.option("--quick", is_flag=True, default=False, help="Skip schema extraction and coverage.")
-@click.option("--include-ignored", is_flag=True, default=False, help="Include .boundsignore in denominator.")
-@click.option("--include-gitignored", is_flag=True, default=False, help="Include .gitignore in denominator.")
-@click.option("--follow-symlinks", is_flag=True, default=False, help="Traverse directory symlinks.")
-@click.option("--fail-on-unowned", is_flag=True, default=False, help="Block on unmapped supported source.")
+@click.option("--quick", "quick", is_flag=True, default=False, help="Skip schema extraction and coverage.")
+@click.option("--include-ignored", "include_ignored", is_flag=True, default=False, help="Include .boundsignore in denominator.")
+@click.option("--include-gitignored", "include_gitignored", is_flag=True, default=False, help="Include .gitignore in denominator.")
+@click.option("--follow-symlinks", "follow_symlinks", is_flag=True, default=False, help="Traverse directory symlinks.")
+@click.option("--fail-on-unowned", "fail_on_unowned", is_flag=True, default=False, help="Block on unmapped supported source.")
 @click.option("--ci", "is_ci", is_flag=True, default=False, help="Output tab-delimited CI status.")
 @_human
 def validate(quick, include_ignored, include_gitignored, follow_symlinks, fail_on_unowned, is_ci, human):
@@ -242,10 +241,10 @@ def validate(quick, include_ignored, include_gitignored, follow_symlinks, fail_o
 
 @main.command("preflight", short_help="Architecture gate (validate + coverage)")
 @click.option("--ci", "is_ci", is_flag=True, help="Output tab-delimited CI status.")
-@click.option("--include-ignored", is_flag=True, default=False)
-@click.option("--include-gitignored", is_flag=True, default=False)
-@click.option("--follow-symlinks", is_flag=True, default=False)
-@click.option("--fail-on-unowned", is_flag=True, default=False)
+@click.option("--include-ignored", "include_ignored", is_flag=True, default=False)
+@click.option("--include-gitignored", "include_gitignored", is_flag=True, default=False)
+@click.option("--follow-symlinks", "follow_symlinks", is_flag=True, default=False)
+@click.option("--fail-on-unowned", "fail_on_unowned", is_flag=True, default=False)
 @_human
 def preflight(is_ci, include_ignored, include_gitignored, follow_symlinks, fail_on_unowned, human):
     cli_drift.preflight_cmd(is_ci, include_ignored, include_gitignored,
@@ -254,13 +253,13 @@ def preflight(is_ci, include_ignored, include_gitignored, follow_symlinks, fail_
 @main.command("calibrate", short_help="Realign contracts with source after code changes")
 @click.option("--subsystem", default=None)
 @click.option("--apply", "do_apply", is_flag=True, default=False)
-@click.option("--dry-run", is_flag=True, default=False)
+@click.option("--dry-run", "dry_run", is_flag=True, default=False)
 @click.option("--check", "do_check", is_flag=True, default=False)
 @click.option("--dump-baseline", "do_dump", is_flag=True, default=False)
 @click.option("--prune-unknown", "do_prune", is_flag=True, default=False)
-@click.option("--prune-missing-exports", is_flag=True, default=False)
-@click.option("--track-interfaces", is_flag=True, default=False)
-@click.option("--coarsen-interfaces", is_flag=True, default=False)
+@click.option("--prune-missing-exports", "prune_missing_exports", is_flag=True, default=False)
+@click.option("--track-interfaces", "track_interfaces", is_flag=True, default=False)
+@click.option("--coarsen-interfaces", "coarsen_interfaces", is_flag=True, default=False)
 @_human
 def calibrate(subsystem, do_apply, dry_run, do_check, do_dump, do_prune,
               prune_missing_exports, track_interfaces, coarsen_interfaces, human):
@@ -279,29 +278,32 @@ def coverage(why_path: str | None, summary: bool, human: bool) -> None:
 @click.option("--auto", "do_auto", is_flag=True, default=False)
 @click.option("--apply", "apply", is_flag=True, default=False)
 @_human
-def fix_coverage(explain_path: str | None, auto: bool, apply: bool, human: bool) -> None:
-    cli_drift.fix_coverage_cmd(explain_path, auto, apply, human)
+def fix_coverage(explain_path, do_auto, apply, human):
+    cli_drift.fix_coverage_cmd(explain_path, do_auto, apply, human)
 
 # ---- Maintain Commands ----
-@main.command("edit", short_help="Open Bounds config in your editor")
+@main.command("edit", short_help="Safely update subsystem metadata")
+@click.argument("subsystem")
+@click.option("--description", default=None)
 @_human
-def edit(human: bool) -> None:
-    cli_maintain.edit_cmd(human)
+def edit(subsystem, description, human):
+    cli_maintain.edit_cmd(subsystem, description, human)
 
-@main.command("cache", short_help="Inspect or clear the context-armor extraction cache")
-@click.option("--clear", "do_clear", is_flag=True, default=False)
+@main.command("cache", short_help="Manage the binary extraction cache (.bounds/cache.db)")
+@click.option("--migrate", "do_migrate", is_flag=True, default=False)
+@click.option("--prune", "do_prune", is_flag=True, default=False)
 @click.option("--inspect", "do_inspect", is_flag=True, default=False)
 @_human
-def cache(clear, inspect, human):
-    cli_maintain.cache_cmd(clear, inspect, human)
+def cache(do_migrate, do_prune, do_inspect, human):
+    cli_maintain.cache_cmd(do_migrate, do_prune, do_inspect, human)
 
 @main.command("upgrade", short_help="Update or check for Bounds CLI releases")
 @click.option("--check", "do_check", is_flag=True, default=False)
 @click.option("--force", "force", is_flag=True, default=False)
 @click.option("--dry-run", "dry_run", is_flag=True, default=False)
 @_human
-def upgrade(check, force, dry_run, human):
-    cli_maintain.upgrade_cmd(check, force, dry_run, human)
+def upgrade(do_check, force, dry_run, human):
+    cli_maintain.upgrade_cmd(do_check, force, dry_run, human)
 
 @main.command("upgrade-check", hidden=True)
 @click.option("--force", is_flag=True)

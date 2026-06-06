@@ -45,7 +45,7 @@ except Exception as exc:  # pragma: no cover - exercised only when the wheel is 
     tssql = None  # type: ignore[assignment]
     _IMPORT_ERROR = str(exc)
 
-from ..models import ExtractResult, Issue, Symbol
+from ...shared.models import ExtractResult, Issue, Symbol
 from .base import LanguageAdapter, canonical_columns, make_result
 
 __all__ = []

@@ -9,8 +9,8 @@ and the type shapes of the collection fields.
 
 from __future__ import annotations
 
-from .. import config, errors
-from ..models import Issue
+from ...shared import config, errors
+from ...shared.models import Issue
 
 __all__ = []
 

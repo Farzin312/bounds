@@ -250,7 +250,7 @@ def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, invocation: str | 
             )
         mode = modes[0] if modes else "detect"
         only = None if want_all else ({k for k in agentsync.AGENT_KEYS if selectors.get(k)} or None)
-        root = util.require_root() if mode != "detect" else (manifest_loader.find_root(Path.cwd()) or Path.cwd())
+        root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
         
         if mode == "sync" and only is None and not want_all and sys.stdout.isatty():
             detected = set(agentsync.run_agent(root, mode="detect").get("detected", []))
@@ -299,7 +299,7 @@ def _apply_invocation_level(level: str) -> None:
     
     root_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
-def ci_cmd(do_install: bool, want_github: bool, want_gitlab: bool,
+def ci_cmd(do_install: bool, want_github: bool, want_action_alias: bool, want_gitlab: bool,
            want_precommit: bool, want_all: bool, human: bool) -> None:
     human = util.interactive_human(human)
 
@@ -310,11 +310,39 @@ def ci_cmd(do_install: bool, want_github: bool, want_gitlab: bool,
                 "nothing to install",
                 fix="run 'bounds ci --install' to generate CI config",
             )
-        root = util.require_root()
-        payload = ciconfig.run_install(
-            root, github=want_github, gitlab=want_gitlab,
-            precommit=want_precommit, all_targets=want_all,
-        )
+        
+        want_github_eff = want_github or want_action_alias
+        root = manifest_loader.find_root(Path.cwd()) or Path.cwd()
+        
+        targets: set[str] = set()
+        detected: list[str] = []
+        if want_all:
+            targets = set(ciconfig.ALL_TARGETS)
+        else:
+            if want_github_eff:
+                targets.add("action")
+            if want_gitlab:
+                targets.add("gitlab")
+            if want_precommit:
+                targets.add("precommit")
+            
+            no_provider_chosen = not (want_github_eff or want_gitlab)
+            if no_provider_chosen and not want_precommit:
+                found = ciconfig.detect_ci_provider(root)
+                if len(found) == 1:
+                    targets |= found
+                    detected = sorted(found)
+                else:
+                    # Ambiguous or no provider detected.
+                    raise errors.BoundsError(
+                        errors.E_USAGE,
+                        "ambiguous or no CI host detected; please specify a provider",
+                        fix="pass one or more: --github, --gitlab (add --precommit or --all)",
+                    )
+        
+        payload = ciconfig.run_ci_install(root, targets=targets)
+        if detected:
+            payload["detected"] = detected
         output.emit(payload, human)
 
     util.run_wrapped(human, go)
@@ -394,8 +422,6 @@ def sdd_cmd(
             if do_doctor:
                 with util.progress("checking SDD readiness..."):
                     payload = sdd_mod.run_sdd(root, rootm, subs, doctor=True)
-                output.emit(payload, human)
-                sys.exit(config.EXIT_OK if payload["ok"] else config.EXIT_BLOCKED)
             else:
                 payload = sdd_mod.run_sdd(root, rootm, subs, phase_name=phase_name)
             if payload is None:

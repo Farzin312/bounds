@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from bounds import config
-from bounds.manifest import schema
-from bounds.models import RootManifest
-from bounds.validate.propagation import propagate
-from bounds.models import SubsystemCompact, Consumes
+from bounds.shared import config
+from bounds.core.manifest import schema
+from bounds.shared.models import RootManifest
+from bounds.core.validate.propagation import propagate
+from bounds.shared.models import SubsystemCompact, Consumes
 
 
 # ---------------------------------------------------------------------------

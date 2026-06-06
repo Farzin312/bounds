@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 
-from ..models import ExtractResult, Issue, Symbol
+from ...shared.models import ExtractResult, Issue, Symbol
 from .base import LanguageAdapter, canonical_columns, make_result
 
 __all__ = []

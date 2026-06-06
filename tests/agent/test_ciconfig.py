@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from bounds import ciconfig, errors
+from bounds.core import ciconfig
+from bounds.shared import errors
 
 
 def _read(path):

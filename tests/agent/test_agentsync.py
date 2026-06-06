@@ -13,8 +13,9 @@ import re
 
 import pytest
 
-from bounds import agentsync, errors
-from bounds.agentsync import _looks_bounds_authored
+from bounds.agents import sync as agentsync
+from bounds.shared import errors
+from bounds.agents.sync import _looks_bounds_authored
 
 
 def _mk_root(tmp_path):

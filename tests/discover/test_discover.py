@@ -8,8 +8,8 @@ import subprocess
 import pytest
 import yaml
 
-from bounds import config, errors
-from bounds.discover import run_discover
+from bounds.shared import config, errors
+from bounds.core.discover import run_discover
 
 
 def _git_init(path) -> None:
@@ -514,7 +514,7 @@ def test_schema_classification_falls_back_to_extension_when_extraction_fails(tmp
     # A .sql/.prisma file missing from `extracts` (e.g. oversized/unreadable/unparsable, which
     # yields no extract) must still count as schema via its extension — otherwise a real
     # migration dir could be misclassified and dropped, breaking the always-keep guarantee.
-    from bounds.discover import _is_schema_candidate
+    from bounds.core.discover import _is_schema_candidate
 
     # No extracts at all: extension fallback recognizes the migration set as schema.
     assert _is_schema_candidate(["db/migrations/001.sql", "db/migrations/002.sql"], {}) is True

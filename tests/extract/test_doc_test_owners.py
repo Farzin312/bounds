@@ -7,8 +7,8 @@ docs/coverage.md and `scan.resolve_test_owners`/`scan.resolve_doc_owners`.
 """
 from __future__ import annotations
 
-from bounds.extract import scan
-from bounds.models import SubsystemCompact
+from bounds.core.extract import scan
+from bounds.shared.models import SubsystemCompact
 
 
 def _sub(name, paths=None, tests=None, docs=None, files=None):

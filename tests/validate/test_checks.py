@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from bounds import errors
-from bounds.models import (
+from bounds.shared import errors
+from bounds.shared.models import (
     Consumes,
     ExtractResult,
     ImportRef,
     Interface,
     Symbol,
 )
-from bounds.models import SubsystemCompact as Sub
-from bounds.validate.checks import (
+from bounds.shared.models import SubsystemCompact as Sub
+from bounds.core.validate.checks import (
     _find_cycles,
     check_boundary,
     check_contract,

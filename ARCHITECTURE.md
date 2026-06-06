@@ -37,50 +37,50 @@ bounds/
 │   └── cache.db                   # binary SQLite extraction cache (gitignored; context armor)
 ├── src/
 │   └── bounds/
-│       ├── __init__.py            # dynamic __version__ (importlib.metadata)
-│       ├── cli.py                 # click registration, option parsing, output/exit dispatch
-│       ├── _io.py                 # bounded one-value stdin JSON + stderr-only loud warnings
-│       ├── coverage.py            # reusable coverage/explain/fix command services
-│       ├── sdd.py                 # deterministic SDD phase map + readiness services
-│       ├── describe.py            # Tier-1+2 `describe` assembly (reuses extract/scan + validate engine)
-│       ├── locate.py              # backs `where` + `impact` (symbol/table location + blast radius)
-│       ├── config.py              # constants: dir names, schema version, defaults, role/criticality registries
-│       ├── errors.py              # BoundsError + stable error-code registry
-│       ├── models.py              # all dataclasses (the data model)
-│       ├── output.py              # JSON / human / CI emit + exit-code mapping
-│       ├── gitutil.py             # git repo detection + changed-file diff + tracked/gitignored queries
-│       ├── ignore.py              # .boundsignore matcher + @generated-marker detection
-│       ├── discover.py            # bootstrap discovery: auto-propose manifests from source
-│       ├── calibrate.py           # manifest↔source reconciliation
-│       ├── guide.py               # read-only state-aware setup checklist (`bounds guide`)
-│       ├── agentsync.py           # cross-agent config generation
-│       ├── tsconfig.py            # tolerant tsconfig.json path-alias loader (baseUrl + paths)
-│       ├── ciconfig.py            # CI config generation
-│       ├── update_check.py        # GitHub-release check for a newer Bounds version
-│       ├── upgrade.py             # `pipx` self-upgrade of a stale Bounds CLI
-│       ├── manifest/
+│       ├── __init__.py            # Tier-2 public API (re-exports) + dynamic __version__
+│       ├── __main__.py           # Support for `python -m bounds`
+│       ├── shared/                # Foundational tier (No internal dependencies)
 │       │   ├── __init__.py
-│       │   ├── loader.py          # discover .bounds/, load root + subsystems, fill consumed_by
-│       │   └── schema.py          # validate manifest dicts → list[Issue] (role/criticality registries)
-│       ├── extract/
+│       │   ├── config.py          # Constants, layout, and defaults
+│       │   ├── errors.py          # BoundsError + stable error-code registry
+│       │   ├── models.py          # Primary data model (dataclasses)
+│       │   ├── io.py              # Stdin/stderr I/O helpers
+│       │   ├── output.py          # JSON/human/CI rendering + exit codes
+│       │   ├── gitutil.py         # Git repository interactions
+│       │   ├── ignore.py          # .boundsignore and @generated matching
+│       │   ├── tsconfig.py        # TypeScript path-alias resolution
+│       │   ├── surface.py         # Static surface fact registry
+│       │   └── cache/             # Extraction cache sub-package
+│       ├── core/                  # Business logic tier (Depends on shared/)
 │       │   ├── __init__.py
-│       │   ├── base.py            # LanguageAdapter ABC + hashing helpers
-│       │   ├── registry.py        # extension/lang → adapter resolution
-│       │   ├── scan.py            # shared filesystem→extraction helpers (discover/calibrate)
-│       │   ├── python.py          # PythonAdapter (+ SQLAlchemy/Django ORM table recognition)
-│       │   ├── sql.py             # SqlAdapter (.sql DDL: tables/cols/functions/views/indexes/triggers/types + RLS, per-statement fail-soft)
-│       │   ├── prisma.py          # PrismaAdapter (.prisma model blocks → tables)
-│       │   ├── rawquery.py        # opt-in advisory raw-SQL string table refs (never blocking)
-│       │   └── typescript.py      # TypeScriptAdapter (.ts/.tsx/.js/.jsx; + Drizzle/TypeORM tables)
-│       ├── cache/
+│       │   ├── discover.py        # Bootstrap discovery engine
+│       │   ├── calibrate.py       # Reconciliation and drift engines
+│       │   ├── coverage.py        # Mapping coverage services
+│       │   ├── describe.py        # Subsystem contract assembly
+│       │   ├── locate.py          # Symbol location and impact analysis
+│       │   ├── sdd.py             # Spec-driven development integration
+│       │   ├── guide.py           # Setup guide logic
+│       │   ├── ciconfig.py        # CI gate generator
+│       │   ├── extract/           # Language-specific AST extraction
+│       │   ├── manifest/          # YAML manifest loading and schema
+│       │   └── validate/          # Multi-mode validation engine
+│       ├── agents/                # AI integration tier (Depends on core/ + shared/)
 │       │   ├── __init__.py
-│       │   └── store.py           # State + FileRecord + binary SQLite cache.db (migrate/prune/inspect)
-│       └── validate/
+│       │   ├── sync.py            # Cross-agent configuration protocols
+│       │   ├── hook.py            # Harness-run runtime hooks (Claude)
+│       │   └── content.py         # Large static contract string constants
+│       ├── maintenance/           # Lifecycle tier (Depends on shared/)
+│       │   ├── __init__.py
+│       │   ├── update.py          # GitHub-release check
+│       │   └── upgrade.py         # pipx self-upgrade logic
+│       └── cli/                   # Entry point tier (Depends on all tiers)
 │           ├── __init__.py
-│           ├── engine.py          # mode dispatch + orchestration
-│           ├── propagation.py     # reference propagation (consumers of changed providers) + transitive_consumers
-│           ├── schema.py          # deterministic per-subsystem SQL/Prisma schema fold
-│           └── checks.py          # the 8 checks + import resolution
+│           ├── main.py            # Click group and routing
+│           ├── read.py            # Map navigation commands (list, describe, etc.)
+│           ├── drift.py           # Gating commands (validate, preflight, etc.)
+│           ├── setup.py           # Project lifecycle (init, discover, agent)
+│           ├── maintain.py        # System commands (edit, cache, upgrade)
+│           └── util.py            # Shared CLI spinners and error wrappers
 └── tests/                         # the full suite (CI reports the live count)
     ├── conftest.py
     ├── test_extract.py

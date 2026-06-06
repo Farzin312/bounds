@@ -6,6 +6,7 @@ from __future__ import annotations
 import itertools
 import sys
 import threading
+from contextlib import nullcontext
 from pathlib import Path, PurePosixPath
 
 from ..shared import config, errors, output

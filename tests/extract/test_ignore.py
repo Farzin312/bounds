@@ -8,7 +8,7 @@ is the false-positive guard, deliberately not widened).
 
 from __future__ import annotations
 
-from bounds.ignore import has_generated_marker, is_generated
+from bounds.shared.ignore import has_generated_marker, is_generated
 
 
 def test_protobuf_go_header_is_generated():

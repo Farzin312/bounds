@@ -18,8 +18,8 @@ from pathlib import Path
 
 import yaml
 
-from .. import config, errors
-from ..models import Issue, RootManifest, SubsystemCompact
+from ...shared import config, errors
+from ...shared.models import Issue, RootManifest, SubsystemCompact
 from . import schema
 
 __all__ = ["find_root", "load_all", "load_root"]

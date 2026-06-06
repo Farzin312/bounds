@@ -12,7 +12,8 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from bounds import config, update_check, upgrade
+from bounds.shared import config
+from bounds.maintenance import update as update_check, upgrade
 from bounds import cli as cli_mod
 from bounds.cli import main
 
@@ -453,6 +454,6 @@ def test_importing_bounds_makes_no_network_call(monkeypatch):
 
     import bounds  # noqa: F401
     import bounds.cli  # noqa: F401
-    import bounds.validate.engine  # noqa: F401
+    import bounds.core.validate.engine  # noqa: F401
 
     assert opened == [], "no network connection should be opened during import"

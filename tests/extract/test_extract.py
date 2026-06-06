@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bounds.extract import (
+from bounds.core.extract import (
     content_hash,
     get_adapter,
     supported_extensions,

@@ -7,7 +7,7 @@ TS/JS. Conflating the two silently drops edges in large TS backends.
 
 from __future__ import annotations
 
-from bounds.validate.checks import resolve_import
+from bounds.core.validate.checks import resolve_import
 
 
 # ===========================================================================
@@ -138,7 +138,7 @@ def test_py_and_ts_same_dotted_segment_resolve_differently():
 # ---- SQL & Prisma: no import edges (linkage is schema-level, tested in test_extract.py) ----
 def test_sql_and_prisma_emit_no_import_edges():
     """Schema languages record zero imports, so cross-subsystem coupling comes from the folded schema catalog, never from resolve_import."""
-    from bounds.extract import get_adapter
+    from bounds.core.extract import get_adapter
 
     sql = get_adapter("001_init.sql").extract("001_init.sql", b"CREATE TABLE t (id int);\n")
     prisma = get_adapter("schema.prisma").extract("schema.prisma", b"model T {\n  id Int @id\n}\n")

@@ -6,7 +6,7 @@ import json
 
 from click.testing import CliRunner
 
-from bounds import guide
+from bounds.core import guide
 from bounds.cli import main
 
 _ROOT_YAML = ('version: "1"\nproject: x\nlanguages: [python]\n'
@@ -178,7 +178,7 @@ def _complete_project(tmp_path, agentsync_mod):
 
 def test_guide_complete_includes_optional_features(tmp_path, monkeypatch):
     """When all 5 required steps are done, guide includes an 'optional' section listing SDD and agent invocation."""
-    from bounds import agentsync
+    from bounds.agents import sync as agentsync
     monkeypatch.chdir(tmp_path)
     _complete_project(tmp_path, agentsync)
 
@@ -193,7 +193,7 @@ def test_guide_complete_includes_optional_features(tmp_path, monkeypatch):
 
 def test_guide_complete_optional_sdd_shows_enable_command_when_disabled(tmp_path, monkeypatch):
     """When SDD is disabled, the optional SDD entry points at `bounds sdd --enable` and current='disabled'."""
-    from bounds import agentsync
+    from bounds.agents import sync as agentsync
     monkeypatch.chdir(tmp_path)
     _complete_project(tmp_path, agentsync)
 
@@ -207,7 +207,7 @@ def test_guide_complete_optional_sdd_shows_enable_command_when_disabled(tmp_path
 
 def test_guide_complete_optional_sdd_shows_doctor_when_enabled(tmp_path, monkeypatch):
     """When SDD is enabled, the optional SDD entry points at `bounds sdd --doctor`."""
-    from bounds import agentsync
+    from bounds.agents import sync as agentsync
     monkeypatch.chdir(tmp_path)
     _complete_project(tmp_path, agentsync)
     # Enable SDD in root.yaml.
@@ -221,16 +221,19 @@ def test_guide_complete_optional_sdd_shows_doctor_when_enabled(tmp_path, monkeyp
     assert "bounds sdd --doctor" in sdd_entry["command"]
 
 
-def test_guide_incomplete_does_not_include_optional(tmp_path):
-    """Optional features are only shown when setup is complete — not before."""
+def test_guide_incomplete_includes_optional(tmp_path):
+    """Optional features are now always shown, even before setup is complete, to improve discoverability."""
     payload = guide.run_guide(tmp_path)  # no .bounds/ → not complete
     assert payload["complete"] is False
-    assert "optional" not in payload
+    assert "optional" in payload
+    # Check that SDD is listed as disabled (default).
+    sdd = next(o for o in payload["optional"] if o["id"] == "sdd")
+    assert sdd["enabled"] is False
 
 
 def test_guide_human_output_shows_optional_section(tmp_path, monkeypatch):
     """The human view shows the 'optional features' block when setup is complete."""
-    from bounds import agentsync
+    from bounds.agents import sync as agentsync
     from click.testing import CliRunner
     monkeypatch.chdir(tmp_path)
     _complete_project(tmp_path, agentsync)
@@ -245,7 +248,7 @@ def test_guide_human_output_shows_optional_section(tmp_path, monkeypatch):
 
 def test_sdd_status_payload_includes_configure_hints():
     """The bounds sdd status payload carries a 'configure' key with the CLI commands for all write ops."""
-    from bounds import sdd as sdd_mod
+    from bounds.core import sdd as sdd_mod
     payload = sdd_mod._status(None)
     assert "configure" in payload
     cfg = payload["configure"]

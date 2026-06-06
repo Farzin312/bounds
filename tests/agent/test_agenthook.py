@@ -18,10 +18,11 @@ import sys
 import pytest
 from click.testing import CliRunner
 
-from bounds import agenthook, agentsync, config
+from bounds.agents import hook as agenthook, sync as agentsync
+from bounds.shared import config
 from bounds.cli import main
-from bounds.manifest import schema
-from bounds.models import RootManifest
+from bounds.core.manifest import schema
+from bounds.shared.models import RootManifest
 
 
 # ---------------------------------------------------------------------------

@@ -14,9 +14,9 @@ import subprocess
 
 import pytest
 
-from bounds import errors
-from bounds.discover import run_discover
-from bounds.validate import engine
+from bounds.shared import errors
+from bounds.core.discover import run_discover
+from bounds.core.validate import engine
 
 requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 

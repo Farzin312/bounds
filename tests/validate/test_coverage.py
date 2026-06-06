@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import subprocess
 
-from bounds import config, errors
-from bounds.extract import scan
-from bounds.models import SubsystemCompact
-from bounds.validate import engine
+from bounds.shared import config, errors
+from bounds.core.extract import scan
+from bounds.shared.models import SubsystemCompact
+from bounds.core.validate import engine
 
 
 def _git_init(path):

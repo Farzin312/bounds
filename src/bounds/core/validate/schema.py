@@ -17,8 +17,8 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from .. import errors
-from ..models import ExtractResult
+from ...shared import errors
+from ...shared.models import ExtractResult
 
 __all__ = [
     "SCHEMA_LANGUAGES",

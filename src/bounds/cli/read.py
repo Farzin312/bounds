@@ -46,12 +46,12 @@ def describe_cmd(name: str | None, namespace: str | None, full: bool, deep: bool
         
         if namespace:
             payload = describe_mod.run_describe_namespace(subs, namespace, root, rootm, full=full, deep=deep)
+            if payload is None:
+                payload = {"mode": "describe", "namespace": namespace, "subsystems": []}
         else:
             payload = describe_mod.run_describe(subs, name, root, rootm, full=full, deep=deep)
             
         if payload is None:
-            if namespace:
-                raise errors.BoundsError(errors.E_USAGE, f"no subsystems found in namespace {namespace!r}")
             raise errors.BoundsError(
                 errors.E_SUBSYSTEM_NOT_FOUND, f"unknown subsystem {name!r}",
                 fix="run 'bounds list' to see available subsystems"

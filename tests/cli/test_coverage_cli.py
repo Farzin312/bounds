@@ -7,9 +7,9 @@ import subprocess
 
 from click.testing import CliRunner
 
-from bounds import coverage
+from bounds.core import coverage
 from bounds.cli import main
-from bounds.models import SubsystemCompact
+from bounds.shared.models import SubsystemCompact
 
 
 def _project(root):

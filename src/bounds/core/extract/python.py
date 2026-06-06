@@ -17,7 +17,7 @@ from __future__ import annotations
 import tree_sitter as ts
 import tree_sitter_python as tspy
 
-from ..models import ExtractResult, ImportRef, Symbol
+from ...shared.models import ExtractResult, ImportRef, Symbol
 from .base import LanguageAdapter, make_result
 
 __all__ = []

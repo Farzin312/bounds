@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import subprocess
 
-from bounds import config, errors, surface
-from bounds.calibrate import dump_baseline
-from bounds.validate import engine
+from bounds.shared import config, errors, surface
+from bounds.core.calibrate import dump_baseline
+from bounds.core.validate import engine
 
 
 def _git_init(path):

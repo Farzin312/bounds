@@ -8,8 +8,8 @@ identifiers, the deterministic schema hash, and Prisma model folding.
 
 from __future__ import annotations
 
-from bounds.extract import get_adapter
-from bounds.validate.schema import (
+from bounds.core.extract import get_adapter
+from bounds.core.validate.schema import (
     order_migrations,
     schema_catalog,
     schema_diagnostics,
