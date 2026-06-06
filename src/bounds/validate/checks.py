@@ -528,8 +528,16 @@ def check_cycles(ctx: CheckContext) -> list[Issue]:
         name: sorted({c.subsystem for c in sub.consumes if c.subsystem in ctx.subsystems})
         for name, sub in ctx.subsystems.items()
     }
+    all_cycles = _find_cycles(graph)
+    if not all_cycles:
+        return []
+
     issues: list[Issue] = []
-    for cycle in _find_cycles(graph):
+    # If the graph is a bowl of spaghetti, reporting 1,000 individual cycles is a flood, not
+    # helpful context. Report the shortest 10, then roll the rest into a summary that names
+    # the most frequent bottleneck edges (the ones whose removal breaks the most cycles).
+    reported_cycles = all_cycles[:10]
+    for cycle in reported_cycles:
         chain = " -> ".join(cycle + [cycle[0]])
         issues.append(
             _issue(
@@ -539,6 +547,27 @@ def check_cycles(ctx: CheckContext) -> list[Issue]:
                 fix="break the cycle via an interface/inversion, or move shared code into a library subsystem",
             )
         )
+
+    if len(all_cycles) > 10:
+        edge_counts: dict[tuple[str, str], int] = {}
+        for cyc in all_cycles:
+            for i in range(len(cyc)):
+                u, v = cyc[i], cyc[(i + 1) % len(cyc)]
+                edge_counts[(u, v)] = edge_counts.get((u, v), 0) + 1
+
+        # Take the top 3 bottleneck edges
+        bottlenecks = sorted(edge_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+        bottleneck_text = ", ".join(f"'{u}->{v}' ({count})" for (u, v), count in bottlenecks)
+
+        issues.append(
+            _issue(
+                errors.E_CYCLE_DETECTED,
+                f"... and {len(all_cycles) - 10} more cycles; top bottlenecks: {bottleneck_text}",
+                count=len(all_cycles) - 10,
+                fix="Break a bottleneck edge to resolve many cycles at once; see docs/troubleshooting-ci.md",
+            )
+        )
+
     return issues
 
 

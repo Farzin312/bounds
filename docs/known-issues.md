@@ -266,6 +266,15 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Fix:** `supported.unowned_breakdown` separates `user_decision_needed` from `algorithm_miss` while preserving legacy totals. `bounds coverage`/`--why` and `bounds fix-coverage` share one classifier; auto-fix previews exact repo-relative `.boundsignore` rules and requires explicit `--apply`. Quick mode reports `coverage_summary.complete: null`.
 - **Test:** `tests/validate/test_coverage.py`, `tests/cli/test_coverage_cli.py`.
 
+### BOUNDS-027 — cycle detector can produce an overwhelming number of issues (cycle explosion)
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-06 via user report on a large repository with 259 detected cycles.
+- **Affected:** `validate`, `preflight`, `overview` on graphs with many path permutations through "god-node" subsystems.
+- **Symptom:** a red build with hundreds of `E_CYCLE_DETECTED` issues, making it difficult to identify the root cause or bottleneck edges.
+- **Root cause:** `_find_cycles` enumerates elementary cycles encountered during DFS. In dense graphs or those with central hubs, the number of such cycles can explode.
+- **Fix:** `fix/ci-cycles-and-docs` — `check_cycles` now limits individual cycle reports to the 10 shortest cycles and rolls up the remainder into a summary issue. The summary identifies the top 3 "bottleneck" edges (those appearing in the most cycles) and points to a new `docs/troubleshooting-ci.md` guide.
+- **Test:** `tests/validate/test_cycle_explosion.py`.
+
 ---
 
 See also: [coverage.md](coverage.md) (the mapping-coverage metric + how to close a gap),

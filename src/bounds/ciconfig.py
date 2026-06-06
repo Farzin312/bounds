@@ -123,6 +123,8 @@ jobs:
       # Non-blocking by default (|| true) until you commit a baseline and trust the signal;
       # drop the `|| true` to make new drift fail the build.
       - run: bounds calibrate --check || true
+      # The preflight gate: fails on drift, boundary violations, and dependency cycles.
+      # See https://github.com/Farzin312/bounds/blob/main/docs/troubleshooting-ci.md for fix guidance.
       - run: bounds preflight --ci
 """
 
@@ -162,6 +164,8 @@ _GITLAB_JOB = {
         "script": [
             'pip install "git+https://github.com/Farzin312/bounds.git"',
             "bounds calibrate --check || true",  # freshness gate; drop `|| true` to enforce
+            # The preflight gate: fails on drift, boundary violations, and dependency cycles.
+            # See https://github.com/Farzin312/bounds/blob/main/docs/troubleshooting-ci.md for fix guidance.
             "bounds preflight --ci",
         ],
     }

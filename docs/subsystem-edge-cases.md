@@ -2,7 +2,7 @@
 
 *Known subsystem and manifest edge cases Bounds covers, with the command that should guide the fix.*
 
-[Docs index](./README.md) | [Testing guide](./testing.md) | [Team workflow](./team-workflow.md)
+[Docs index](./README.md) | [Testing guide](./testing.md) | [Team workflow](./team-workflow.md) | [Troubleshooting CI](./troubleshooting-ci.md)
 
 ---
 
