@@ -12,6 +12,7 @@ Everything here is zero-LLM and deterministic: posix paths, sorted output.
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 from ..shared import errors, gitutil
@@ -19,6 +20,7 @@ from ..shared.ignore import IgnoreMatcher, load_matcher
 from ..shared.models import Issue, RootManifest, SubsystemCompact, ValidationReport
 from .extract import scan, supported_extensions
 from .extract.scan import coverage_has_gap
+from .validate.checks import CheckContext, check_cycles
 from .manifest import loader as manifest_loader
 from .validate import engine as validate_engine
 from .validate.schema import (
@@ -414,9 +416,6 @@ def run_describe_namespace(subs: dict, namespace: str, root: Path, rootm: RootMa
         "subsystems": payloads,
     }
 
-
-from collections import Counter
-from .validate.checks import CheckContext, check_cycles
 
 def run_overview(root: Path, rootm: RootManifest, subs: dict, schema_issues: list) -> dict:
     """Return project health, coverage, and trust signals. Read-only."""

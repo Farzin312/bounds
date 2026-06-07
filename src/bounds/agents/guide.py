@@ -50,7 +50,6 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict:
     coverage = _coverage(base, subs) if n_subsystems > 0 else None
 
     agent_check = agentsync.run_agent(base, mode="check")
-    detected = agent_check.get("detected", [])
     configured = agent_check.get("configured", [])
     # Done if at least one detected agent is configured.
     agents_done = bool(configured)

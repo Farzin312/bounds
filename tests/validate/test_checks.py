@@ -21,6 +21,7 @@ from bounds.core.validate.checks import (
     check_orphans,
     check_structural_drift,
 )
+from _validate_helpers import _ctx  # sibling module (pytest adds tests/validate/ to sys.path)
 
 
 def test_private_exports_do_not_create_structural_drift(py_project):
@@ -42,9 +43,6 @@ def test_private_exports_do_not_create_structural_drift(py_project):
         and ("_helper" in issue.message or "__version__" in issue.message)
     ]
     assert private_drift == []
-
-from _validate_helpers import _ctx  # sibling module (pytest adds tests/validate/ to sys.path)
-
 
 # ===========================================================================
 # Check 1 — structural drift
