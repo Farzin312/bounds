@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from bounds import config, errors
-from bounds.manifest import loader
-from bounds.validate import engine
+from bounds.shared import config, errors
+from bounds.core.manifest import loader
+from bounds.core.validate import engine
 
 
 # ===========================================================================

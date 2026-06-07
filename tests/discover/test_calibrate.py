@@ -6,9 +6,9 @@ import io
 
 import yaml
 
-from bounds import config
-from bounds import output
-from bounds.calibrate import check_drift, dump_baseline, run_calibrate
+from bounds.shared import config
+from bounds.shared import output
+from bounds.core.calibrate import check_drift, dump_baseline, run_calibrate
 
 
 def _build(tmp_path):
@@ -451,11 +451,11 @@ def test_calibrate_pure_supported_subsystem_still_removes_stale_expose(tmp_path)
 def test_calibrate_unsupported_exposes_surfaced_as_needs_review(tmp_path):
     """The protected exposes are not silently dropped — they surface as needs_review so a human can
     confirm them, exactly like a consumed-but-vanished contract."""
-    from bounds.calibrate import _calibrate_one
-    from bounds.extract.scan import extract_project, subsystems_with_unsupported_source
-    from bounds.ignore import load_matcher
-    from bounds.manifest import loader as ml
-    from bounds.validate.checks import index_extracts
+    from bounds.core.calibrate import _calibrate_one
+    from bounds.core.extract.scan import extract_project, subsystems_with_unsupported_source
+    from bounds.shared.ignore import load_matcher
+    from bounds.core.manifest import loader as ml
+    from bounds.core.validate.checks import index_extracts
 
     _build_unsupported(tmp_path)
     _r, subs, _ = ml.load_all(tmp_path)

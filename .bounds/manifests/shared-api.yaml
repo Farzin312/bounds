@@ -1,0 +1,12 @@
+name: shared-api
+role: library
+criticality: leaf
+description: Foundational package metadata and lightweight shared-tier initialization.
+paths:
+- src/bounds/shared/__init__.py
+- src/bounds/shared/version.py
+exposes:
+- name: installed_version
+  kind: function
+- name: VERSION
+  kind: const

@@ -5,7 +5,7 @@ description: "Global constants, defaults, enumerations, and config-directory res
   \ \u2014 depends on nothing but the stdlib so every module can import it without\
   \ a cycle."
 paths:
-- src/bounds/config.py
+- src/bounds/shared/config.py
 exposes:
 - name: BOUNDS_DIR
   kind: const

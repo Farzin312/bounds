@@ -1,7 +1,7 @@
 version: '1'
 project: bounds
 sdd:
-  enabled: false
+  enabled: true
   agent: generic
   phases:
   - specify
@@ -16,24 +16,33 @@ languages:
 enforce: 'off'
 entry_points: []
 subsystems:
-- agenthook
-- cache
-- cli
-- config
-- describe
-- errors
-- extract
-- gitutil
-- guide
-- ignore
-- locate
-- manifest
-- models
-- output
-- surface
-- tsconfig
-- update_check
-- upgrade
-- validate
+  - agenthook
+  - agentsync
+  - cache
+  - calibrate
+  - ciconfig
+  - cli
+  - config
+  - core-api
+  - coverage
+  - describe
+  - discover
+  - errors
+  - extract
+  - gitutil
+  - guide
+  - ignore
+  - locate
+  - manifest
+  - models
+  - output
+  - public-api
+  - sdd
+  - shared-api
+  - surface
+  - tsconfig
+  - update_check
+  - upgrade
+  - validate
 agentsync:
   invocation: strict

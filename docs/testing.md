@@ -59,8 +59,10 @@ from individual test files.
   manifests) and run the real code against it. See `tests/discover/test_discover.py::_project` and
   `tests/validate/test_regression_nested_paths.py::_nested_project` for the pattern. `git`-init the fixture
   (`_git_init`) when the code under test consults `.gitignore`; or pass `include_gitignored=True`.
-- **Call the in-process entry points, not the CLI**, where you can: `bounds.discover.run_discover`,
-  `bounds.validate.engine.run(root, mode="full")`, `bounds.describe.*`. Reserve `subprocess` for
+- **Call the in-process entry points, not the CLI**, where you can:
+  `bounds.core.discover.run_discover`, `bounds.core.validate.engine.run(root, mode="full")`,
+  `bounds.core.describe.*`. The pre-refactor module paths remain compatibility aliases, but new
+  code should use the canonical layered imports. Reserve `subprocess` for
   things that genuinely need the binary (exit codes, `git`).
 - **Assert on the data, not the rendering.** Compare the JSON/dataclass fields. Never assert on a
   `--human` string unless the test is specifically about human rendering.

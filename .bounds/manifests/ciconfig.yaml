@@ -1,0 +1,11 @@
+name: ciconfig
+role: library
+criticality: leaf
+description: CI workflow and pre-commit gate generation.
+paths:
+- src/bounds/core/ciconfig.py
+exposes:
+- name: run_ci_install
+  kind: function
+consumes:
+- subsystem: shared-api

@@ -7,8 +7,8 @@ bare imports declared in tsconfig.json.
 
 from __future__ import annotations
 
-from bounds import tsconfig
-from bounds.validate.checks import resolve_import
+from bounds.shared import tsconfig
+from bounds.core.validate.checks import resolve_import
 
 
 def _write(tmp_path, name, text):

@@ -50,7 +50,7 @@ Changelog = "https://github.com/Farzin312/bounds/blob/main/CHANGELOG.md"
 Issues = "https://github.com/Farzin312/bounds/issues"
 
 [project.scripts]
-bounds = "bounds.cli:main"
+bounds = "bounds.cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

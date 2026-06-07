@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bounds.models import RootManifest
-from bounds.validate.checks import CheckContext
+from bounds.shared.models import RootManifest
+from bounds.core.validate.checks import CheckContext
 
 
 def _ctx(subsystems, extracts=None, file_owner=None, dirty=None, propagated=None,

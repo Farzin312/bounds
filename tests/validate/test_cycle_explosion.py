@@ -1,8 +1,8 @@
 
 import pytest
 from pathlib import Path
-from bounds.models import SubsystemCompact, Consumes, RootManifest
-from bounds.validate.checks import check_cycles, CheckContext
+from bounds.shared.models import SubsystemCompact, Consumes, RootManifest
+from bounds.core.validate.checks import check_cycles, CheckContext
 
 def test_cycle_explosion_reporting():
     # god -> {a1..a10} -> {b1..b10} -> god = 100 cycles

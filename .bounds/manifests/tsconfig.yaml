@@ -1,12 +1,16 @@
 name: tsconfig
 role: library
 criticality: leaf
-description: TypeScript tsconfig.json path-alias resolution (baseUrl + paths, JSONC + extends chain) feeding extension-less stems into the import resolver — pure stdlib, fail-soft, deterministic.
+description: "TypeScript tsconfig.json path-alias resolution (baseUrl + paths, JSONC\
+  \ + extends chain) feeding extension-less stems into the import resolver \u2014\
+  \ pure stdlib, fail-soft, deterministic."
 paths:
-  - src/bounds/tsconfig.py
+- src/bounds/shared/tsconfig.py
 exposes:
-  - { name: TsAliases, kind: class }
-  - { name: load, kind: function }
+- name: TsAliases
+  kind: class
+- name: load
+  kind: function
 consumes: []
 tests:
-  - tests/extract/test_tsconfig.py
+- tests/extract/test_tsconfig.py

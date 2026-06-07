@@ -7,7 +7,7 @@ subsystem plus every symbol the file defines, while leaving symbol lookups uncha
 """
 from __future__ import annotations
 
-from bounds import locate
+from bounds.core import locate
 
 
 def test_where_symbol_query_unchanged(py_project):
@@ -89,7 +89,7 @@ def test_where_prefix_miss_omits_broaden(py_project):
 
 def test_where_miss_human_render_includes_suggestions(py_project):
     """Parity: the --human view of a miss re-renders the suggestion block, not just '(no matches)'."""
-    from bounds import output
+    from bounds.shared import output
 
     result = locate.run_where(py_project, "hing")
     rendered = output._render_where_human(result)
@@ -101,7 +101,7 @@ def test_impact_miss_fix_has_where_hint(py_project):
     """An unknown `impact` target raises with a fix that points at `bounds where` (symbol→owner chain)."""
     import pytest
 
-    from bounds import errors
+    from bounds.shared import errors
 
     with pytest.raises(errors.BoundsError) as exc:
         locate.run_impact(py_project, "Zzzznotreal")  # neither a subsystem nor an interface
@@ -111,7 +111,7 @@ def test_impact_miss_fix_has_where_hint(py_project):
 
 def test_where_path_human_render_is_distinct_from_symbol(py_project):
     """BOUNDS-007 JSON-first: the file-query payload renders cleanly in --human (file → owner + syms)."""
-    from bounds import output
+    from bounds.shared import output
 
     result = locate.run_where(py_project, "src/svc/main.py")
     # The dispatch table must route a file-query payload to the file renderer, not the generic dump.

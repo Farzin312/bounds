@@ -1,14 +1,24 @@
 name: manifest
 role: library
 criticality: connector
-description: Discovery, loading, and schema validation of root.yaml and subsystem manifest files.
+description: Discovery, loading, and schema validation of root.yaml and subsystem
+  manifest files.
 paths:
-  - src/bounds/manifest
+- src/bounds/core/manifest
 exposes:
-  - { name: find_root, kind: function }
-  - { name: load_all, kind: function }
-  - { name: load_root, kind: function }
+- name: find_root
+  kind: function
+- name: load_all
+  kind: function
+- name: load_root
+  kind: function
 consumes:
-  - { subsystem: models, via: models, interfaces: [RootManifest, SubsystemCompact, Issue] }
+- subsystem: models
+  via: models
+  interfaces:
+  - RootManifest
+  - SubsystemCompact
+  - Issue
+- subsystem: shared-api
 tests:
-  - tests/validate/test_loader.py
+- tests/validate/test_loader.py

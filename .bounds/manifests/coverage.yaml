@@ -1,0 +1,16 @@
+name: coverage
+role: library
+criticality: leaf
+description: Mapping coverage diagnosis and deterministic coverage repairs.
+paths:
+- src/bounds/core/coverage.py
+exposes:
+- name: run_coverage
+  kind: function
+- name: run_fix_coverage
+  kind: function
+consumes:
+- subsystem: extract
+- subsystem: ignore
+- subsystem: models
+- subsystem: shared-api

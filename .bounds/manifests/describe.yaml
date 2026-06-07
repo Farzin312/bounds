@@ -6,7 +6,7 @@ description: "Tier-1 + Tier-2 `describe` assembly \u2014 merges the declared man
   \ so an agent reads a subsystem's contract instead of source. Extracted from cli.py;\
   \ reuses the shared owned-file walk and single-file extractor."
 paths:
-- src/bounds/describe.py
+- src/bounds/core/describe.py
 exposes:
 - name: describe_one
   kind: function
@@ -20,10 +20,20 @@ exposes:
   kind: function
 - name: subsystem_status
   kind: function
+- name: run_describe
+  kind: function
+- name: run_describe_namespace
+  kind: function
+- name: run_list
+  kind: function
+- name: run_overview
+  kind: function
 consumes:
 - subsystem: validate
   via: schema
   interfaces:
+  - CheckContext
+  - check_cycles
   - fold_subsystem_objects
   - hash_schema_catalog
   - schema_catalog
@@ -32,6 +42,7 @@ consumes:
   - schema_rls_posture
 - subsystem: extract
   interfaces:
+  - coverage_has_gap
   - supported_extensions
 - subsystem: ignore
   interfaces:
@@ -41,5 +52,7 @@ consumes:
 - subsystem: models
   interfaces:
   - Issue
+  - RootManifest
   - SubsystemCompact
   - ValidationReport
+- subsystem: shared-api

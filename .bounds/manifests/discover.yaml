@@ -1,0 +1,14 @@
+name: discover
+role: library
+criticality: leaf
+description: Initial subsystem discovery and draft contract generation.
+paths:
+- src/bounds/core/discover.py
+exposes: []
+consumes:
+- subsystem: extract
+- subsystem: ignore
+- subsystem: manifest
+- subsystem: models
+- subsystem: validate
+- subsystem: shared-api

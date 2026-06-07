@@ -7,10 +7,10 @@ directly to verify the contract logic in isolation.
 
 from __future__ import annotations
 
-from bounds import errors
-from bounds.extract.prisma import PrismaAdapter
-from bounds.extract.sql import SqlAdapter
-from bounds.models import ExtractResult, Issue, Symbol
+from bounds.shared import errors
+from bounds.core.extract.prisma import PrismaAdapter
+from bounds.core.extract.sql import SqlAdapter
+from bounds.shared.models import ExtractResult, Issue, Symbol
 
 
 # ===========================================================================
@@ -195,7 +195,7 @@ def test_adapter_contracts_dispatched_in_every_checking_mode():
     (quick/full/preflight/audit) — never silently dropped. ``hotfix`` runs none by design.
     Guards the regression where ``quick`` omitted it while ARCHITECTURE §7 claimed it ran there.
     """
-    from bounds.validate.checks import CHECKS_BY_MODE, check_adapter_contracts
+    from bounds.core.validate.checks import CHECKS_BY_MODE, check_adapter_contracts
 
     for mode in ("quick", "full", "preflight", "audit"):
         assert check_adapter_contracts in CHECKS_BY_MODE[mode], f"missing in {mode!r}"
@@ -216,8 +216,8 @@ def test_adapter_contract_surfaces_through_validate(sample_project, monkeypatch)
     from click.testing import CliRunner
 
     from bounds.cli import main
-    from bounds.extract.base import make_result
-    from bounds.extract.sql import SqlAdapter
+    from bounds.core.extract.base import make_result
+    from bounds.core.extract.sql import SqlAdapter
 
     masked_rel = "src/database/9999_masked.sql"
     masked = sample_project / "src" / "database" / "9999_masked.sql"

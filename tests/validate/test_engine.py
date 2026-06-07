@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from bounds import errors
-from bounds.cache import store
-from bounds.models import ExtractResult, ImportRef, Issue, Symbol
-from bounds.models import SubsystemCompact as Sub
-from bounds.models import Consumes
-from bounds.validate import engine
-from bounds.validate.propagation import build_consumer_index, propagate
+from bounds.shared import errors
+from bounds.shared.cache import store
+from bounds.shared.models import ExtractResult, ImportRef, Issue, Symbol
+from bounds.shared.models import SubsystemCompact as Sub
+from bounds.shared.models import Consumes
+from bounds.core.validate import engine
+from bounds.core.validate.propagation import build_consumer_index, propagate
 
 
 # ===========================================================================

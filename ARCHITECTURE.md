@@ -18,6 +18,7 @@
 6. **Forward-compatible.** `version` on every manifest + a `PRAGMA user_version` on the cache; unknown fields preserved/ignored, never fatal.
 7. **Context-armored cache.** The extraction cache is a **binary SQLite file** (`.bounds/cache.db`), not human-parseable JSON. An agent that naively `cat`s it gets gibberish rather than a large token blob dumped into its context — the structural defense against accidental context burn. Human-editable manifests stay YAML; only the *derived* cache is binary.
 8. **GitHub is the Source of Truth.** This repository uses dynamic versioning (`setuptools-scm`). The version is derived from git tags and commit history. **Never** use a static version string in code or configuration.
+9. **Layered dependency DAG.** Internal imports flow `shared` → `core` → `agents`/`maintenance` → `cli`. Same-tier imports are allowed; a lower tier must never import a higher tier. `tests/meta/test_layering.py` enforces this statically.
 
 ---
 
@@ -37,50 +38,53 @@ bounds/
 │   └── cache.db                   # binary SQLite extraction cache (gitignored; context armor)
 ├── src/
 │   └── bounds/
-│       ├── __init__.py            # dynamic __version__ (importlib.metadata)
-│       ├── cli.py                 # click registration, option parsing, output/exit dispatch
-│       ├── _io.py                 # bounded one-value stdin JSON + stderr-only loud warnings
-│       ├── coverage.py            # reusable coverage/explain/fix command services
-│       ├── sdd.py                 # deterministic SDD phase map + readiness services
-│       ├── describe.py            # Tier-1+2 `describe` assembly (reuses extract/scan + validate engine)
-│       ├── locate.py              # backs `where` + `impact` (symbol/table location + blast radius)
-│       ├── config.py              # constants: dir names, schema version, defaults, role/criticality registries
-│       ├── errors.py              # BoundsError + stable error-code registry
-│       ├── models.py              # all dataclasses (the data model)
-│       ├── output.py              # JSON / human / CI emit + exit-code mapping
-│       ├── gitutil.py             # git repo detection + changed-file diff + tracked/gitignored queries
-│       ├── ignore.py              # .boundsignore matcher + @generated-marker detection
-│       ├── discover.py            # bootstrap discovery: auto-propose manifests from source
-│       ├── calibrate.py           # manifest↔source reconciliation
-│       ├── guide.py               # read-only state-aware setup checklist (`bounds guide`)
-│       ├── agentsync.py           # cross-agent config generation
-│       ├── tsconfig.py            # tolerant tsconfig.json path-alias loader (baseUrl + paths)
-│       ├── ciconfig.py            # CI config generation
-│       ├── update_check.py        # GitHub-release check for a newer Bounds version
-│       ├── upgrade.py             # `pipx` self-upgrade of a stale Bounds CLI
-│       ├── manifest/
+│       ├── __init__.py            # Tier-2 public API (re-exports) + dynamic __version__
+│       ├── __main__.py            # Support for `python -m bounds`
+│       ├── shared/                # Foundational tier (No internal dependencies)
 │       │   ├── __init__.py
-│       │   ├── loader.py          # discover .bounds/, load root + subsystems, fill consumed_by
-│       │   └── schema.py          # validate manifest dicts → list[Issue] (role/criticality registries)
-│       ├── extract/
+│       │   ├── config.py          # Constants, layout, and defaults
+│       │   ├── errors.py          # BoundsError + stable error-code registry
+│       │   ├── models.py          # Primary data model (dataclasses)
+│       │   ├── io.py              # Stdin/stderr I/O helpers
+│       │   ├── output.py          # JSON/human/CI rendering + exit codes
+│       │   ├── gitutil.py         # Git repository interactions
+│       │   ├── ignore.py          # .boundsignore and @generated matching
+│       │   ├── tsconfig.py        # TypeScript path-alias resolution
+│       │   ├── surface.py         # Static surface fact registry
+│       │   └── cache/             # Extraction cache sub-package
+│       ├── core/                  # Business logic tier (Depends on shared/)
 │       │   ├── __init__.py
-│       │   ├── base.py            # LanguageAdapter ABC + hashing helpers
-│       │   ├── registry.py        # extension/lang → adapter resolution
-│       │   ├── scan.py            # shared filesystem→extraction helpers (discover/calibrate)
-│       │   ├── python.py          # PythonAdapter (+ SQLAlchemy/Django ORM table recognition)
-│       │   ├── sql.py             # SqlAdapter (.sql DDL: tables/cols/functions/views/indexes/triggers/types + RLS, per-statement fail-soft)
-│       │   ├── prisma.py          # PrismaAdapter (.prisma model blocks → tables)
-│       │   ├── rawquery.py        # opt-in advisory raw-SQL string table refs (never blocking)
-│       │   └── typescript.py      # TypeScriptAdapter (.ts/.tsx/.js/.jsx; + Drizzle/TypeORM tables)
-│       ├── cache/
+│       │   ├── discover.py        # Bootstrap discovery engine
+│       │   ├── calibrate.py       # Reconciliation and drift engines
+│       │   ├── coverage.py        # Mapping coverage services
+│       │   ├── describe.py        # Subsystem contract assembly
+│       │   ├── locate.py          # Symbol location and impact analysis
+│       │   ├── sdd.py             # Spec-driven development integration
+│       │   ├── ciconfig.py        # CI gate generator
+│       │   ├── extract/           # Language-specific AST extraction
+│       │   ├── manifest/          # YAML manifest loading and schema
+│       │   └── validate/          # Multi-mode validation engine
+│       ├── agents/                # AI integration tier (Depends on core/ + shared/)
 │       │   ├── __init__.py
-│       │   └── store.py           # State + FileRecord + binary SQLite cache.db (migrate/prune/inspect)
-│       └── validate/
+│       │   ├── guide.py           # Setup workflow (core facts + agent status)
+│       │   ├── sync.py            # Sync orchestration and public run_agent API
+│       │   ├── protocol.py        # Expected generated bodies from project config
+│       │   ├── files.py           # Managed-block stamping and non-destructive writes
+│       │   ├── status.py          # Agent detection and wiring verification
+│       │   ├── hook.py            # Harness-run runtime hooks (Claude)
+│       │   └── content.py         # Large static contract string constants
+│       ├── maintenance/           # Lifecycle tier (Depends on shared/)
+│       │   ├── __init__.py
+│       │   ├── update.py          # GitHub-release check
+│       │   └── upgrade.py         # pipx self-upgrade logic
+│       └── cli/                   # Entry point tier (Depends on all tiers)
 │           ├── __init__.py
-│           ├── engine.py          # mode dispatch + orchestration
-│           ├── propagation.py     # reference propagation (consumers of changed providers) + transitive_consumers
-│           ├── schema.py          # deterministic per-subsystem SQL/Prisma schema fold
-│           └── checks.py          # the 8 checks + import resolution
+│           ├── main.py            # Click group and routing
+│           ├── read.py            # Map navigation commands (list, describe, etc.)
+│           ├── drift.py           # Gating commands (validate, preflight, etc.)
+│           ├── setup.py           # Project lifecycle (init, discover, agent)
+│           ├── maintain.py        # System commands (edit, cache, upgrade)
+│           └── util.py            # Shared CLI spinners and error wrappers
 └── tests/                         # the full suite (CI reports the live count)
     ├── conftest.py
     ├── test_extract.py
@@ -545,7 +549,7 @@ def describe_one(root, sub, deep, report, entry_matcher, full=False) -> dict
 def status_report(root) -> ValidationReport | None   # one shared read-only quick run backing status
 def subsystem_status(report, name) -> str            # fresh|stale|unresolved, scoped to one subsystem
 def project_status(report) -> str                    # the project-wide status rollup
-# Kept out of cli.py so command modules stay arg-parse + one go() closure (no business logic).
+# Kept out of cli/ so command modules stay orchestration-only.
 ```
 
 ### `validate/schema.py` — deterministic schema fold (SQL + Prisma)
@@ -611,7 +615,7 @@ def run_impact(project_root, name, verify=False, include_raw=False) -> dict
     # Raises E_SUBSYSTEM_NOT_FOUND when neither exists.
 def run_where(project_root, symbol, prefix=False) -> dict
     # locate a symbol's definition(s) + owning subsystem (fresh extraction; Python + TS).
-# Kept out of cli.py (same reason as describe.py); reuses scan.extract_project + the one resolver.
+# Kept out of cli/ (same reason as describe.py); reuses scan.extract_project + the one resolver.
 ```
 
 ### `discover.py` — bootstrap discovery
@@ -652,7 +656,7 @@ def check_drift(project_root, *, subsystem=None) -> dict
     #    new_count, resolved_count, baseline_count, current_count, note}
 ```
 
-### `guide.py` — read-only setup checklist (`bounds guide`)
+### `agents/guide.py` — read-only setup checklist (`bounds guide`)
 ```python
 def run_guide(project_root: Path, *, sdd: bool = False) -> dict
     # State-aware setup walkthrough; pure detection, never mutates and never raises on a
@@ -661,14 +665,14 @@ def run_guide(project_root: Path, *, sdd: bool = False) -> dict
     #    next:<next undone command or null>, complete:bool, sdd?:{enabled,agent,phases,forced,
     #    steps:[{phase,command,use}], freshness:{...}},
     #    optional?:[{id,title,enabled,current,command,use,configure}]}
-    #   setup step ids (ordered): init / discover / coverage / agents / ci. The optional SDD
-    #   block appears when root.yaml has sdd.enabled=true or the caller passes sdd=True
-    #   (`bounds guide --sdd`). When complete=true, optional[] surfaces SDD and agent-invocation
-    #   with their current values (current="disabled"/"enabled"; current="off"/"nudge"/"strict")
-    #   and one-command configure paths. Human view renders only this same payload.
+    #   setup step ids (ordered): init / discover / coverage / agents / ci. The SDD phase track
+    #   appears when root.yaml has sdd.enabled=true or the caller passes sdd=True
+    #   (`bounds guide --sdd`). optional[] is always present so advanced settings are discoverable
+    #   during setup, with current values and one-command configure paths. Human view renders only
+    #   this same payload.
 ```
 
-### `agentsync.py` — cross-agent config generation
+### `agents/` — cross-agent config generation
 ```python
 AGENT_KEYS = ("claude","codex","opencode","gemini","copilot","cursor","aider","windsurf")
 def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
@@ -687,7 +691,7 @@ def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
     # Invocation (root.yaml agentsync.invocation = off|nudge|strict, default nudge): at nudge/strict
     #   every always-read file gets an imperative "use Bounds first" directive folded in, AND (claude
     #   only) a harness hook is written to .claude/settings.json via agenthook.sync_claude_hooks.
-    #   `invocation` is reported by sync + detect. See agenthook.py.
+    #   `invocation` is reported by sync + detect. See agents/hook.py.
     # Native artifacts per agent (in addition to the AGENTS.md pointer):
     #   claude   → .claude/skills/bounds/SKILL.md (auto-trigger) + .claude/commands/bounds.md
     #   codex    → .agents/skills/bounds/SKILL.md (auto-trigger; shared open Agent Skills spec)
@@ -698,12 +702,16 @@ def run_agent(project_root, *, mode: str, only: set[str] | None = None) -> dict
     #   windsurf → .windsurf/workflows/bounds.md
     #   aider    → NONE (no committable command mechanism — never faked)
     # mode "detect" → {detected:[agent keys with a native footprint]}
-    # mode "check"  → {ok, missing, stale, configured} over detected-and-selected agents
+    # mode "check"  → {ok, detected, missing, stale, configured, invocation} over
+    #                 detected-and-selected agents
     #                 (+ fix when missing/stale)
     # Raises E_USAGE for an unknown mode or agent key.
 ```
 
-### `agenthook.py` — agent-invocation hook (runtime + .claude/settings.json wiring)
+`sync.py` owns orchestration, `protocol.py` owns expected generated bodies, `files.py` owns
+managed-block I/O, `status.py` owns detect/check, and `content.py` owns static templates.
+
+### `agents/hook.py` — agent-invocation hook (runtime + .claude/settings.json wiring)
 ```python
 def run_hook(payload: dict, start: Path | None = None) -> dict
     # Body of the hidden `bounds agent-hook` command. Reads one Claude Code hook event
@@ -718,7 +726,7 @@ def run_hook(payload: dict, start: Path | None = None) -> dict
 def sync_claude_hooks(root: Path, level: str) -> str  # create|updated|unchanged|skipped_malformed
     # Merge/refresh/remove Bounds-owned hook entries (command == "bounds agent-hook") in
     # .claude/settings.json for `level`; preserves the user's own hooks/keys; never clobbers a
-    # malformed file. Called from agentsync._sync when claude is selected.
+    # malformed file. Called from agents.sync when claude is selected.
 def merge_settings_hooks(settings: dict, level: str) -> tuple[dict, bool]  # pure, testable
 HOOK_COMMAND = "bounds agent-hook"   # written into settings.json; also the ownership signature
 # Session markers (once-per-session nudge + "already consulted" breadcrumb) live in a transient temp
@@ -804,7 +812,7 @@ sdd:
 # which gates validation). off = advisory files only; nudge = + a one-line reminder hook
 # (Claude UserPromptSubmit) and an imperative directive in every always-read file; strict = + a
 # Claude PreToolUse gate that pauses (asks) before a broad search Bounds can answer. Fail-open:
-# a Bounds miss never blocks the agent. Set via `bounds agent --invocation <level>`. See agenthook.py.
+# a Bounds miss never blocks the agent. Set via `bounds agent --invocation <level>`. See agents/hook.py.
 agentsync:
   invocation: nudge                          # off | nudge | strict
 ```
@@ -898,7 +906,7 @@ Codes are a public contract — never renumber, rename, or repurpose; only add. 
 
 ---
 
-## 9. CLI commands (`cli.py`) — contract
+## 9. CLI commands (`cli/`) — contract
 
 All commands accept `--human/-H` (default JSON) and resolve the project root via `find_root(Path.cwd())`.
 The scan-bearing commands (`validate`, `preflight`) also accept `--include-ignored`, `--include-gitignored`,
@@ -913,8 +921,8 @@ bounds guide [--sdd]               → {mode:"guide", steps:[{id,title,command,w
                                        # {enabled,agent,phases,forced,steps:[{phase,command,use}],
                                        #  freshness:{contract,during_implementation,ci_gate,
                                        #             intentional_change}}
-                                       # optional? appears only when complete=true — surfaces SDD and
-                                       # agent-invocation: [{id,title,enabled,current,command,use,configure}]
+                                       # optional is always present — surfaces SDD and agent-invocation:
+                                       # [{id,title,enabled,current,command,use,configure}]
                                        # current="disabled"/"enabled" (SDD), "off"/"nudge"/"strict" (invocation)
 bounds list [--namespace NS]       → {project, subsystems:[{name, role, criticality, namespace?,
                                        description, exposes:int, consumes:int, consumed_by:[...]}]}

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from bounds import errors
-from bounds.manifest import schema
+from bounds.shared import errors
+from bounds.core.manifest import schema
 
 
 # ===========================================================================

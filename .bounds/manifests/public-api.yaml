@@ -1,0 +1,7 @@
+name: public-api
+role: library
+criticality: leaf
+description: Stable top-level programmatic API and legacy import compatibility facade.
+paths:
+- src/bounds/__init__.py
+exposes: []

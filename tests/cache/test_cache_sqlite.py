@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from bounds import config
-from bounds.cache import store
-from bounds.models import ExtractResult, ImportRef, Symbol
+from bounds.shared import config
+from bounds.shared.cache import store
+from bounds.shared.models import ExtractResult, ImportRef, Symbol
 
 
 def _result(path: str, *, generated: bool = False) -> ExtractResult:

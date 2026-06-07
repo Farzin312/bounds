@@ -12,7 +12,8 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from bounds import config, update_check, upgrade
+from bounds.shared import config
+from bounds.maintenance import update as update_check, upgrade
 from bounds import cli as cli_mod
 from bounds.cli import main
 
@@ -428,31 +429,32 @@ def test_structural_command_makes_no_network_call(monkeypatch, py_project):
     assert res.exit_code in (0, 1)
 
 
-def test_importing_bounds_makes_no_network_call(monkeypatch):
+def test_importing_bounds_makes_no_network_call():
     """Importing the package / structural modules must not open any network connection.
 
-    Guards at the socket layer (not just ``urllib``) so a future switch to a different transport
-    can't slip a network call into the import path unnoticed, and drops the cached modules first
-    so the imports genuinely re-execute their top-level code.
+    Run the cold-import check in a subprocess. Deleting live ``bounds`` modules from this
+    test process invalidates references collected by other tests and makes later monkeypatches
+    target stale module objects.
     """
-    import socket
+    import subprocess
     import sys
 
-    opened = []
+    code = """
+import socket
 
-    def boom(*args, **kwargs):  # pragma: no cover - only runs on a regression
-        opened.append(args)
-        raise AssertionError("import path opened a network connection")
+def boom(*args, **kwargs):
+    raise AssertionError("import path opened a network connection")
 
-    # The lowest common seam: any outbound socket (urllib, http.client, requests, …) lands here.
-    monkeypatch.setattr(socket.socket, "connect", boom)
+socket.socket.connect = boom
+import bounds
+import bounds.cli
+import bounds.core.validate.engine
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
-    # Drop cached bounds modules so the imports below truly re-run their module-level code.
-    for name in [n for n in sys.modules if n == "bounds" or n.startswith("bounds.")]:
-        del sys.modules[name]
-
-    import bounds  # noqa: F401
-    import bounds.cli  # noqa: F401
-    import bounds.validate.engine  # noqa: F401
-
-    assert opened == [], "no network connection should be opened during import"
+    assert result.returncode == 0, result.stderr

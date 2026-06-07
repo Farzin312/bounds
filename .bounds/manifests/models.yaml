@@ -4,7 +4,7 @@ criticality: core
 description: "The Bounds data model \u2014 manifest, extraction, and validation dataclasses\
   \ shared everywhere."
 paths:
-- src/bounds/models.py
+- src/bounds/shared/models.py
 exposes:
 - name: SubsystemCompact
   kind: class
@@ -20,4 +20,5 @@ exposes:
   kind: class
 - name: ValidationReport
   kind: class
-consumes: []
+consumes:
+- subsystem: shared-api

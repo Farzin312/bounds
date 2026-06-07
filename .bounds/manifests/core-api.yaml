@@ -1,0 +1,9 @@
+name: core-api
+role: library
+criticality: leaf
+description: Lightweight core-tier package initialization; business engines remain
+  explicit submodules.
+paths:
+- src/bounds/core/__init__.py
+exposes: []
+consumes: []

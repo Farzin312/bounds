@@ -1,0 +1,104 @@
+name: agentsync
+role: library
+criticality: leaf
+description: Cross-agent configuration orchestration, generated content, managed-file
+  updates, and wiring status.
+paths:
+- src/bounds/agents/__init__.py
+- src/bounds/agents/content.py
+- src/bounds/agents/files.py
+- src/bounds/agents/protocol.py
+- src/bounds/agents/status.py
+- src/bounds/agents/sync.py
+exposes:
+- name: AGENT_KEYS
+  kind: const
+- name: AGENT_POINTER_BODY
+  kind: const
+- name: Buckets
+  kind: class
+- name: CANONICAL_BODY
+  kind: const
+- name: CANONICAL_NAME
+  kind: const
+- name: CLAUDE_COMMAND_BODY
+  kind: const
+- name: COPILOT_PROMPT_BODY
+  kind: const
+- name: CURSOR_CMD_BODY
+  kind: const
+- name: GEMINI_TOML_BODY
+  kind: const
+- name: INVOCATION_DIRECTIVE
+  kind: const
+- name: OPENCODE_CMD_BODY
+  kind: const
+- name: SDD_BODY_INTRO
+  kind: const
+- name: SKILL_BODY
+  kind: const
+- name: SKILL_TRIGGER
+  kind: const
+- name: WINDSURF_WORKFLOW_BODY
+  kind: const
+- name: append_invocation
+  kind: function
+- name: append_sdd
+  kind: function
+- name: body_hash
+  kind: function
+- name: build_block
+  kind: function
+- name: check
+  kind: function
+- name: config_status
+  kind: function
+- name: dedicated_body
+  kind: function
+- name: detect
+  kind: function
+- name: ensure_front_matter
+  kind: function
+- name: expected_body
+  kind: function
+- name: extract_inner
+  kind: function
+- name: footprint_present
+  kind: function
+- name: front_matter
+  kind: function
+- name: has_front_matter
+  kind: function
+- name: invocation_level
+  kind: function
+- name: is_hand_edited
+  kind: function
+- name: leading_front_matter
+  kind: function
+- name: looks_bounds_authored
+  kind: function
+- name: pointer_body
+  kind: function
+- name: read_text
+  kind: function
+- name: replace_block
+  kind: function
+- name: run_agent
+  kind: function
+- name: sdd_body
+  kind: function
+- name: sdd_config
+  kind: function
+- name: split_stamp
+  kind: function
+- name: target_status
+  kind: function
+- name: upsert_block
+  kind: function
+- name: write_text
+  kind: function
+consumes:
+- subsystem: agenthook
+- subsystem: manifest
+- subsystem: core-api
+- subsystem: shared-api

@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from bounds import agentsync
+from bounds.agents import sync as agentsync
 
 
 def _mk_root(tmp_path):

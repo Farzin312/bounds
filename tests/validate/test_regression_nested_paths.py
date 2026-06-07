@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import subprocess
 
-from bounds import config, errors
-from bounds.extract import scan
-from bounds.validate import engine
+from bounds.shared import config, errors
+from bounds.core.extract import scan
+from bounds.core.validate import engine
 
 
 def _git_init(path) -> None:
@@ -70,7 +70,7 @@ def test_nested_child_keeps_its_own_exports(tmp_path):
 def test_resolve_owners_most_specific_path_wins(tmp_path):
     """The deepest declared path owns a file even when its subsystem sorts after the parent's."""
     _nested_project(tmp_path)
-    from bounds.manifest import loader
+    from bounds.core.manifest import loader
     _root, subs, _issues = loader.load_all(tmp_path)
     owners = scan.resolve_owners(tmp_path, subs, {".py"})
     assert owners["src/alpha/beta/mod.py"][0] == "beta"   # child, not the alphabetically-first alpha
@@ -105,7 +105,7 @@ def test_explicit_files_declaration_outranks_sibling_directory_path(tmp_path):
     (pkg / "special.py").write_text("def s():\n    pass\n")
     (pkg / "other.py").write_text("def o():\n    pass\n")
     _git_init(tmp_path)
-    from bounds.manifest import loader
+    from bounds.core.manifest import loader
     _root, subs, _issues = loader.load_all(tmp_path)
     owners = scan.resolve_owners(tmp_path, subs, {".py"})
     assert owners["pkg/special.py"][0] == "special"   # explicit files: beats the dir paths:

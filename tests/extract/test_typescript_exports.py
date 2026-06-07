@@ -6,7 +6,7 @@ must re-detect every name as exported), causing false ``E_STRUCTURAL_DRIFT`` on 
 modules. The contract under test is the extractor's per-symbol ``(name, kind, exported, file)``.
 """
 
-from bounds.extract.registry import get_adapter
+from bounds.core.extract.registry import get_adapter
 
 # One module exercising every export form BOUNDS-008 covers.
 TS_ALL_FORMS = b"""\

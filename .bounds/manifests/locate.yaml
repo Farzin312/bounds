@@ -6,7 +6,7 @@ description: "Symbol- and dependency-location queries backing `bounds where` and
   \ verification, and file/symbol lookup. Zero LLM, fresh extraction (never a stale\
   \ cache), sorted output."
 paths:
-- src/bounds/locate.py
+- src/bounds/core/locate.py
 exposes:
 - name: run_impact
   kind: function
@@ -22,5 +22,6 @@ consumes:
   interfaces:
   - index_extracts
   - resolve_import
+- subsystem: shared-api
 tests:
 - tests/cli/test_where_path_arg.py

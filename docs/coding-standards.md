@@ -8,8 +8,9 @@ These rules are not bureaucracy — they are the invariants that make Bounds *Bo
 zero-LLM on the structural path, token-lean, and honest. Bounds exists to keep a codebase from
 drifting from its declared intent; this file keeps *Bounds itself* from drifting from its own.
 
-> **How to use this in review.** For a structural change (anything under `extract/`, `validate/`,
-> `cache/`, `manifest/`, `cli.py`, `output.py`, `models.py`), confirm every **(blocking)** section.
+> **How to use this in review.** For a structural change (anything under `core/extract/`,
+> `core/validate/`, `shared/cache/`, `core/manifest/`, `cli/`, `shared/output.py`, or
+> `shared/models.py`), confirm every **(blocking)** section.
 > For docs-only changes, the Output-contract honesty rules still apply. New behavior without a test
 > is a blocking failure on its own.
 
@@ -24,7 +25,7 @@ Same inputs → byte-identical output, every run, every machine.
       exception, and it is excluded from golden comparisons.)
 - [ ] No reliance on `set` iteration order or `dict` insertion order in serialized output. **Sort at
       the serialization boundary** — including `stats` keys (`models.ValidationReport.to_dict`) and
-      `overview.edges` (`cli.py`). Collections inside payloads are sorted by their producer.
+      `overview.edges` (`core/describe.py`). Collections inside payloads are sorted by their producer.
 - [ ] The cache `updated_at` column is always written empty (no timestamp ever reaches an artifact).
 - [ ] A change touching any command's JSON ships (or is covered by) a **golden / byte-stability**
       test asserting two runs are identical (minus `duration_ms`).
@@ -90,8 +91,13 @@ A bad *file* degrades to an `Issue`; only a bad *project* aborts.
 
 The thing Bounds preaches, applied to Bounds. **Do not define the same function/class/walk twice.**
 
-- [ ] No business logic in `cli.py` beyond arg-parse + a single `go()` closure per command. Tier-1/2
-      assembly lives in `describe.py`; validation in `validate/`; extraction in `extract/`.
+- [ ] No business logic in `cli/main.py`; it owns Click registration and delegates to
+      `cli/{read,setup,drift,maintain}.py`. Tier-1/2 assembly lives in `core/describe.py`;
+      validation in `core/validate/`; extraction in `core/extract/`.
+- [ ] Internal imports obey the downward DAG (`shared` → `core` → `agents`/`maintenance` → `cli`).
+      Run `tests/meta/test_layering.py`; never waive an upward import as a convenience.
+- [ ] CLI and agent orchestration modules stay under 500 lines. For algorithm-heavy modules, treat
+      500 lines as a review signal and split by responsibility, not by arbitrary chunks.
 - [ ] The filesystem→extraction primitives have **one home, `extract/scan.py`**, reused everywhere —
       never copied:
       - `walk_supported` — the recursive source walk (symlink-safe).

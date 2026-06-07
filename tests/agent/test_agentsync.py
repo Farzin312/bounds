@@ -13,8 +13,9 @@ import re
 
 import pytest
 
-from bounds import agentsync, errors
-from bounds.agentsync import _looks_bounds_authored
+from bounds.agents import sync as agentsync
+from bounds.agents.files import looks_bounds_authored as _looks_bounds_authored
+from bounds.shared import errors
 
 
 def _mk_root(tmp_path):
@@ -510,7 +511,12 @@ def test_check_shape_when_nothing_detected(tmp_path):
     # No fix key when there's nothing to fix; the resolved invocation level is reported (default
     # nudge) so the gate result shows which contract "up to date" was measured against.
     assert agentsync.run_agent(root, mode="check") == {
-        "ok": True, "missing": [], "stale": [], "configured": [], "invocation": "nudge",
+        "ok": True,
+        "detected": [],
+        "missing": [],
+        "stale": [],
+        "configured": [],
+        "invocation": "nudge",
     }
 
 
@@ -520,6 +526,7 @@ def test_check_reports_missing_for_detected_unconfigured_agent(tmp_path):
     (root / ".claude").mkdir()  # detected, not yet synced
     result = agentsync.run_agent(root, mode="check")
     assert result["ok"] is False
+    assert result["detected"] == ["claude"]
     assert "claude" in result["missing"]
 
 
@@ -589,7 +596,9 @@ def test_check_ignores_version_drift_when_body_matches(monkeypatch, tmp_path):
 
     # Simulate a CLI upgrade: the installed version moves past the stamp on disk, but the contract
     # body is unchanged — the file is still up to date.
-    monkeypatch.setattr(agentsync, "_version", lambda: "99.99.99")
+    from bounds.agents import files
+
+    monkeypatch.setattr(files, "_version", lambda: "99.99.99")
     result = agentsync.run_agent(root, mode="check")
     assert result["ok"] is True
     assert "claude" in result["configured"]
@@ -701,3 +710,38 @@ def test_agent_check_stays_json_when_not_a_tty(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     out = CliRunner().invoke(main, ["agent", "--check"]).output
     assert "configured" in json.loads(out)  # valid JSON gate result, not prose
+
+
+def test_agent_check_human_renders_wiring_breakdown(monkeypatch, tmp_path):
+    """A check payload that includes detected agents must use the check renderer."""
+    from click.testing import CliRunner
+
+    from bounds.cli import main
+
+    (tmp_path / ".bounds").mkdir()
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    assert runner.invoke(main, ["agent", "--sync", "--codex"]).exit_code == 0
+
+    result = runner.invoke(main, ["agent", "--check", "--human"])
+
+    assert result.exit_code == 0
+    assert "agent wiring: up to date" in result.output
+    assert "configured: codex" in result.output
+    assert "agents detected:" not in result.output
+
+
+def test_agent_check_human_explains_empty_detection(monkeypatch, tmp_path):
+    """An empty check is vacuously healthy but should not imply that agents are wired."""
+    from click.testing import CliRunner
+
+    from bounds.cli import main
+
+    (tmp_path / ".bounds").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["agent", "--check", "--human"])
+
+    assert result.exit_code == 0
+    assert "agent wiring: no agents detected" in result.output
+    assert "next: bounds agent --sync" in result.output
