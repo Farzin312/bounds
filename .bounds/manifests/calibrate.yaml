@@ -1,0 +1,15 @@
+name: calibrate
+role: library
+criticality: leaf
+description: Manifest-to-source reconciliation and accepted drift baseline management.
+paths:
+- src/bounds/core/calibrate.py
+exposes:
+- name: run_calibrate
+  kind: function
+consumes:
+- subsystem: extract
+- subsystem: ignore
+- subsystem: manifest
+- subsystem: validate
+- subsystem: shared-api

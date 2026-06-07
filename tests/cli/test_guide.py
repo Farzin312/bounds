@@ -6,7 +6,7 @@ import json
 
 from click.testing import CliRunner
 
-from bounds.core import guide
+from bounds.agents import guide
 from bounds.cli import main
 
 _ROOT_YAML = ('version: "1"\nproject: x\nlanguages: [python]\n'
@@ -156,7 +156,7 @@ def test_guide_sdd_empty_phase_list_is_respected(tmp_path):
     assert payload["sdd"]["steps"] == []
 
 
-def _complete_project(tmp_path, agentsync_mod):
+def _complete_project(tmp_path, monkeypatch, agentsync_mod):
     """Scaffold a fully-wired project and stub out agent detection so all 5 steps are done."""
     cfg = tmp_path / ".bounds"
     (cfg / "manifests").mkdir(parents=True)
@@ -173,14 +173,24 @@ def _complete_project(tmp_path, agentsync_mod):
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "bounds.yml").write_text("name: bounds\n", encoding="utf-8")
     # Stub the agent check so the agents step reads as done without needing a wired AGENTS.md.
-    agentsync_mod.run_agent = lambda *a, **kw: {"ok": True, "configured": ["codex"]}
+    monkeypatch.setattr(
+        agentsync_mod,
+        "run_agent",
+        lambda *a, **kw: {
+            "ok": True,
+            "detected": ["codex"],
+            "configured": ["codex"],
+            "missing": [],
+            "stale": [],
+        },
+    )
 
 
 def test_guide_complete_includes_optional_features(tmp_path, monkeypatch):
     """When all 5 required steps are done, guide includes an 'optional' section listing SDD and agent invocation."""
     from bounds.agents import sync as agentsync
     monkeypatch.chdir(tmp_path)
-    _complete_project(tmp_path, agentsync)
+    _complete_project(tmp_path, monkeypatch, agentsync)
 
     payload = guide.run_guide(tmp_path)
 
@@ -195,7 +205,7 @@ def test_guide_complete_optional_sdd_shows_enable_command_when_disabled(tmp_path
     """When SDD is disabled, the optional SDD entry points at `bounds sdd --enable` and current='disabled'."""
     from bounds.agents import sync as agentsync
     monkeypatch.chdir(tmp_path)
-    _complete_project(tmp_path, agentsync)
+    _complete_project(tmp_path, monkeypatch, agentsync)
 
     payload = guide.run_guide(tmp_path)
 
@@ -209,7 +219,7 @@ def test_guide_complete_optional_sdd_shows_doctor_when_enabled(tmp_path, monkeyp
     """When SDD is enabled, the optional SDD entry points at `bounds sdd --doctor`."""
     from bounds.agents import sync as agentsync
     monkeypatch.chdir(tmp_path)
-    _complete_project(tmp_path, agentsync)
+    _complete_project(tmp_path, monkeypatch, agentsync)
     # Enable SDD in root.yaml.
     root = tmp_path / ".bounds" / "root.yaml"
     root.write_text(root.read_text() + "sdd:\n  enabled: true\n", encoding="utf-8")
@@ -231,12 +241,33 @@ def test_guide_incomplete_includes_optional(tmp_path):
     assert sdd["enabled"] is False
 
 
+def test_guide_agent_step_reports_partial_wiring(tmp_path, monkeypatch):
+    """One configured detected agent completes the step while still naming missing peers."""
+    monkeypatch.setattr(
+        guide.agentsync,
+        "run_agent",
+        lambda *a, **kw: {
+            "ok": False,
+            "detected": ["claude", "codex"],
+            "configured": ["codex"],
+            "missing": ["claude"],
+            "stale": [],
+        },
+    )
+
+    step = next(s for s in guide.run_guide(tmp_path)["steps"] if s["id"] == "agents")
+
+    assert step["done"] is True
+    assert "configured: codex" in step["why"]
+    assert "missing: claude" in step["why"]
+
+
 def test_guide_human_output_shows_optional_section(tmp_path, monkeypatch):
     """The human view shows the 'optional features' block when setup is complete."""
     from bounds.agents import sync as agentsync
     from click.testing import CliRunner
     monkeypatch.chdir(tmp_path)
-    _complete_project(tmp_path, agentsync)
+    _complete_project(tmp_path, monkeypatch, agentsync)
 
     result = CliRunner().invoke(main, ["guide", "--human"])
 

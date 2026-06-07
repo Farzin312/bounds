@@ -504,10 +504,26 @@ def test_cli_agent_invocation_sets_root_yaml_and_syncs(tmp_path, monkeypatch):
 
 
 def test_cli_agent_invocation_rejects_combo_with_check(tmp_path, monkeypatch):
-    """Changing invocation and checking wiring are mutually exclusive CLI modes."""
+    """An invalid invocation/check combination fails before mutating root.yaml."""
     proj = _mk_project(tmp_path, None)
+    root_file = proj / ".bounds/root.yaml"
+    before = root_file.read_text(encoding="utf-8")
     res = _invoke(monkeypatch, proj, ["agent", "--invocation", "nudge", "--check"])
     assert res.exit_code == config.EXIT_FATAL
+    assert root_file.read_text(encoding="utf-8") == before
+
+
+def test_cli_agent_invocation_does_not_overwrite_malformed_root(tmp_path, monkeypatch):
+    """A parse failure is reported instead of replacing the user's root manifest."""
+    proj = _mk_project(tmp_path, None)
+    root_file = proj / ".bounds/root.yaml"
+    root_file.write_text("project: [broken\n", encoding="utf-8")
+    before = root_file.read_text(encoding="utf-8")
+
+    res = _invoke(monkeypatch, proj, ["agent", "--invocation", "strict"])
+
+    assert res.exit_code == config.EXIT_FATAL
+    assert root_file.read_text(encoding="utf-8") == before
 
 
 def test_cli_agent_invocation_without_bounds_errors(tmp_path, monkeypatch):

@@ -1,0 +1,19 @@
+name: sdd
+role: library
+criticality: leaf
+description: Deterministic Spec-Driven Development phase mapping and readiness checks.
+paths:
+- src/bounds/core/sdd.py
+exposes:
+- name: phase_steps
+  kind: function
+- name: resolve_config
+  kind: function
+- name: run_sdd
+  kind: function
+- name: write_sdd_config
+  kind: function
+consumes:
+- subsystem: models
+- subsystem: validate
+- subsystem: shared-api

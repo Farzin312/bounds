@@ -5,40 +5,62 @@ description: Click command-line entry point and reusable command services, inclu
   architecture queries, validation, coverage diagnosis and repair, agent sync, CI
   setup, and deterministic SDD guidance.
 paths:
-- src/bounds/cli.py
-- src/bounds/discover.py
-- src/bounds/calibrate.py
-- src/bounds/agentsync.py
-- src/bounds/ciconfig.py
-- src/bounds/_io.py
-- src/bounds/coverage.py
-- src/bounds/sdd.py
+- src/bounds/cli
+- src/bounds/__main__.py
 exposes:
 - name: main
   kind: function
-- name: run_discover
+- name: agent_cmd
   kind: function
-- name: run_calibrate
+- name: cache_cmd
   kind: function
-- name: run_agent
+- name: calibrate_cmd
   kind: function
-- name: run_ci_install
+- name: ci_cmd
   kind: function
-- name: emit_loud
+- name: clean_manifest_path
   kind: function
-- name: phase_steps
+- name: coverage_cmd
   kind: function
-- name: read_stdin_json
+- name: describe_cmd
   kind: function
-- name: resolve_config
+- name: discover_cmd
   kind: function
-- name: run_coverage
+- name: edit_cmd
   kind: function
-- name: run_fix_coverage
+- name: fix_coverage_cmd
   kind: function
-- name: run_sdd
+- name: guide_cmd
   kind: function
-- name: write_sdd_config
+- name: impact_cmd
+  kind: function
+- name: init_cmd
+  kind: function
+- name: interactive_human
+  kind: function
+- name: list_cmd
+  kind: function
+- name: overview_cmd
+  kind: function
+- name: preflight_cmd
+  kind: function
+- name: progress
+  kind: function
+- name: prompt_agent_selection
+  kind: function
+- name: require_root
+  kind: function
+- name: run_wrapped
+  kind: function
+- name: sdd_cmd
+  kind: function
+- name: upgrade_check_cmd
+  kind: function
+- name: upgrade_cmd
+  kind: function
+- name: validate_cmd
+  kind: function
+- name: where_cmd
   kind: function
 consumes:
 - subsystem: manifest
@@ -59,26 +81,6 @@ consumes:
   - index_extracts
   - schema_catalog
   - SCHEMA_LANGUAGES
-- subsystem: extract
-  via: scan
-  interfaces:
-  - adapter_for_language
-  - coverage_has_gap
-  - extract_file
-  - extract_project
-  - get_adapter
-  - is_config_file
-  - is_framework_entry_file
-  - is_test_file
-  - is_test_symbol
-  - iter_repo_source
-  - mapping_coverage
-  - resolve_doc_owners
-  - resolve_test_owners
-  - strip_ext
-  - subsystems_with_unsupported_source
-  - supported_extensions
-  - unsupported_surface_files
 - subsystem: cache
   via: store
   interfaces:
@@ -89,14 +91,11 @@ consumes:
   via: output
   interfaces:
   - emit
-- subsystem: ignore
-  interfaces:
-  - IgnoreMatcher
-  - load_matcher
-- subsystem: models
-  interfaces:
-  - RootManifest
-  - SubsystemCompact
+  - emit_loud
+- subsystem: agentsync
+- subsystem: update_check
+- subsystem: core-api
+- subsystem: shared-api
 tests:
 - tests/cli
 - tests/agent

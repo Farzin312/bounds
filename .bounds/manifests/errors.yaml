@@ -5,7 +5,7 @@ description: "Stable error-code registry, the BoundsError exception, and the per
   \ severity map \u2014 a public contract (codes are never renumbered or repurposed,\
   \ only added)."
 paths:
-- src/bounds/errors.py
+- src/bounds/shared/errors.py
 exposes:
 - name: BoundsError
   kind: class

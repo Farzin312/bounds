@@ -1,12 +1,19 @@
 name: upgrade
 role: library
 criticality: leaf
-description: Opt-in self-upgrade helper for `bounds upgrade` — shells out to pipx only on the explicit command, with a uninstall+reinstall fallback and a stable machine-readable failure-class report. Deliberately outside every structural path.
+description: "Opt-in self-upgrade helper for `bounds upgrade` \u2014 shells out to\
+  \ pipx only on the explicit command, with a uninstall+reinstall fallback and a stable\
+  \ machine-readable failure-class report. Deliberately outside every structural path."
 paths:
-  - src/bounds/upgrade.py
+- src/bounds/maintenance/upgrade.py
 exposes:
-  - { name: command_for, kind: function }
-  - { name: fallback_commands, kind: function }
-  - { name: refresh_command, kind: function }
-  - { name: run_upgrade, kind: function }
-consumes: []
+- name: command_for
+  kind: function
+- name: fallback_commands
+  kind: function
+- name: refresh_command
+  kind: function
+- name: run_upgrade
+  kind: function
+consumes:
+- subsystem: shared-api

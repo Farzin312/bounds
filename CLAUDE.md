@@ -11,7 +11,7 @@ Working guide for agents and contributors in this repo. **This is not the produc
 
 Bounds is a zero-LLM CLI that extracts a codebase's structural surface (exported symbols + imports)
 with tree-sitter and validates it against human-declared subsystem manifests in `.bounds/`. Python,
-`src/` layout, package `bounds`, console entry `bounds = bounds.cli:main`.
+`src/` layout, package `bounds`, console entry `bounds = bounds.cli.main:main`.
 
 ## Python environment
 
@@ -85,16 +85,17 @@ types + **policies/RLS** (create/alter/drop, enable/disable/force net out), `sch
 `extract/sql.py` is the one SQL extractor — grammar-native DDL descends into transaction blocks,
 Postgres RLS is recovered by comment/string/body-masked regex, table refs canonicalise to the bare
 name; bump `config.STATE_VERSION` whenever extraction output changes for unchanged source) ·
-`describe.py` Tier-1+2
-describe assembly · `locate.py` backs `where`+`impact` · `cli.py` command wiring (arg-parse + one
-`go()` per command, no business logic; `_progress(msg)` = the one loading-spinner seam — wrap compute
-only, never `output.emit`) · `discover.py` · `calibrate.py` · `agentsync.py` ·
-`surface.py` committed unsupported-language surface baseline (`.bounds/surface-baseline.json`,
+`core/describe.py` Tier-1+2 describe assembly · `core/locate.py` backs `where`+`impact` ·
+`cli/main.py` Click wiring with implementations in `cli/{read,setup,drift,maintain}.py`
+(`cli/util.py::progress` is the one loading-spinner seam — wrap compute only, never `output.emit`) ·
+`core/discover.py` · `core/calibrate.py` · `agents/` · `shared/surface.py` committed
+unsupported-language surface baseline (`.bounds/surface-baseline.json`,
 written by `calibrate --dump-baseline`) → `validate` emits `E_UNSUPPORTED_SURFACE_STALE` when a
 hand-authored expose's file changes (digests come from `scan.unsupported_surface_files`; depends only
-on `config`, no import cycle) · `ciconfig.py` · `gitutil.py` git detection + changed-file diff (backs `--quick`) ·
-`ignore.py` `.boundsignore` + generated-code detection ·
-`update_check.py`/`upgrade.py` GitHub-release check + `pipx` self-upgrade · `output.py` JSON/human emit.
+on `shared/config.py`, no import cycle) · `core/ciconfig.py` · `shared/gitutil.py` git detection +
+changed-file diff (backs `--quick`) · `shared/ignore.py` `.boundsignore` + generated-code detection ·
+`maintenance/{update,upgrade}.py` release check + `pipx` self-upgrade · `shared/output.py`
+JSON/human emit.
 
 Commands: `guide` · `list` · `describe` · `validate` · `preflight` · `overview` · `init` · `impact` ·
 `where` · `discover` · `calibrate` · `agent` · `ci` · `cache` · `upgrade` · `upgrade-check`.

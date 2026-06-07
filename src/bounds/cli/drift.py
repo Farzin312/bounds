@@ -12,13 +12,16 @@ from . import util
 from ..core import (
     calibrate as calibrate_mod,
     coverage as coverage_mod,
-    validate as validate_mod,
 )
+from ..core.validate import engine as validate_engine
 from ..shared import config, errors, output
 from ..core.manifest import loader as manifest_loader
 
 def validate_cmd(
     quick: bool,
+    mode: str | None,
+    enforce: str | None,
+    base: str,
     include_ignored: bool,
     include_gitignored: bool,
     follow_symlinks: bool,
@@ -27,27 +30,23 @@ def validate_cmd(
     human: bool,
 ) -> None:
     """Run architecture checks; catch drift, violations, and cycles."""
-    # --ci defaults to JSON; interactive validate defaults to human.
-    human = human if is_ci else util.interactive_human(human)
 
     def go() -> None:
         root = util.require_root()
-        # validate --quick skips schema loading + coverage; only checks drift
-        if quick:
-            with util.progress("checking for drift..."):
-                payload = validate_mod.run_validate_quick(root)
-        else:
-            with util.progress("validating architecture..."):
-                payload = validate_mod.run_validate(
-                    root,
-                    include_ignored=include_ignored,
-                    include_gitignored=include_gitignored,
-                    follow_symlinks=follow_symlinks,
-                    fail_on_unowned=fail_on_unowned,
-                )
-        output.emit(payload, human, ci=is_ci)
-        if not payload.get("ok", True):
-            sys.exit(config.EXIT_BLOCKED)
+        selected = "quick" if quick else (mode or "full")
+        with util.progress("validating..."):
+            report = validate_engine.run(
+                root,
+                mode=selected,
+                base=base,
+                enforce=enforce,
+                include_ignored=include_ignored,
+                include_gitignored=include_gitignored,
+                follow_symlinks=follow_symlinks,
+                fail_on_unowned=fail_on_unowned,
+            )
+        output.emit(report.to_dict(), human, ci=is_ci)
+        sys.exit(config.EXIT_OK if report.ok else config.EXIT_BLOCKED)
 
     util.run_wrapped(human, go, ci=is_ci)
 
@@ -61,22 +60,34 @@ def preflight_cmd(
     human: bool,
 ) -> None:
     """Production-ready architecture gate (validates + coverage check)."""
-    # preflight --ci defaults to JSON; interactive preflight defaults to human.
-    human = human if is_ci else util.interactive_human(human)
 
     def go() -> None:
         root = util.require_root()
         with util.progress("running preflight checks..."):
-            payload = validate_mod.run_preflight(
+            report = validate_engine.run(
                 root,
+                mode="preflight",
                 include_ignored=include_ignored,
                 include_gitignored=include_gitignored,
                 follow_symlinks=follow_symlinks,
                 fail_on_unowned=fail_on_unowned,
             )
+        from collections import Counter
+
+        counts = Counter()
+        for issue in report.issues:
+            counts[issue.code] += issue.count
+        payload = report.to_dict()
+        payload["checks"] = {
+            "structural_drift": counts.get(errors.E_STRUCTURAL_DRIFT, 0),
+            "boundary_compliance": counts.get(errors.E_BOUNDARY_VIOLATION, 0),
+            "contract_compliance": counts.get(errors.E_CONTRACT_MISSING_EXPORT, 0),
+            "cross_subsystem_impact": counts.get(errors.E_STALE_INTERFACE, 0),
+            "cycle_detection": counts.get(errors.E_CYCLE_DETECTED, 0),
+            "orphan_detection": counts.get(errors.E_ORPHAN_EXPORT, 0),
+        }
         output.emit(payload, human, ci=is_ci)
-        if not payload.get("ok", True):
-            sys.exit(config.EXIT_BLOCKED)
+        sys.exit(config.EXIT_OK if report.ok else config.EXIT_BLOCKED)
 
     util.run_wrapped(human, go, ci=is_ci)
 
@@ -137,7 +148,6 @@ def calibrate_cmd(
 
 def coverage_cmd(why_path: str | None, summary: bool, human: bool) -> None:
     """Report full mapping coverage or explain one path. Read-only."""
-    human = util.interactive_human(human)
 
     def go() -> None:
         root = util.require_root()

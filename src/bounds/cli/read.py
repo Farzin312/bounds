@@ -15,7 +15,6 @@ from ..core.manifest import loader as manifest_loader
 
 def list_cmd(namespace: str | None, human: bool) -> None:
     """List all subsystems in the project map. Read-only."""
-    human = util.interactive_human(human)
 
     def go() -> None:
         root = util.require_root()
@@ -27,7 +26,6 @@ def list_cmd(namespace: str | None, human: bool) -> None:
 
 def describe_cmd(name: str | None, namespace: str | None, full: bool, deep: bool, human: bool) -> None:
     """Show one subsystem's verified public surface and tables. Read-only."""
-    human = util.interactive_human(human)
 
     def go() -> None:
         if name and namespace:
@@ -70,7 +68,6 @@ def describe_cmd(name: str | None, namespace: str | None, full: bool, deep: bool
 
 def overview_cmd(human: bool) -> None:
     """Show project health, coverage, and trust guidance at a glance. Read-only."""
-    human = util.interactive_human(human)
 
     def go() -> None:
         root = util.require_root()
@@ -83,7 +80,6 @@ def overview_cmd(human: bool) -> None:
 
 def where_cmd(symbol: str, prefix: bool, human: bool) -> None:
     """Locate the subsystem and file owning a symbol or table. Read-only."""
-    human = util.interactive_human(human)
 
     def go() -> None:
         root = util.require_root()
@@ -95,7 +91,6 @@ def where_cmd(symbol: str, prefix: bool, human: bool) -> None:
 
 def impact_cmd(name: str, verify: bool, include_raw: bool, human: bool) -> None:
     """transitive blast radius of changing a subsystem or table. Read-only."""
-    human = util.interactive_human(human)
 
     def go() -> None:
         root = util.require_root()

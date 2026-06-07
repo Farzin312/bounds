@@ -97,9 +97,9 @@ bounds agent --invocation strict    # pause before a broad search Bounds can ans
 bounds agent                        # bare detect also prints the current level
 ```
 
-`bounds guide` (once all 5 setup steps are done) shows the current invocation level in the
-**optional features** section — `[nudge]`, `[strict]`, or `[off]` — so you always have a one-line
-reminder of what's active and the exact command to change it.
+`bounds guide` always shows the current invocation level in the **optional features** section —
+`[nudge]`, `[strict]`, or `[off]` — so setup never hides what is active or the exact command to
+change it.
 
 | Level | What it does |
 |-------|--------------|

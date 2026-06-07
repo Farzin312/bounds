@@ -11,6 +11,7 @@ from bounds.shared.models import (
     Symbol,
 )
 from bounds.shared.models import SubsystemCompact as Sub
+from bounds.core.validate import engine
 from bounds.core.validate.checks import (
     _find_cycles,
     check_boundary,
@@ -20,6 +21,27 @@ from bounds.core.validate.checks import (
     check_orphans,
     check_structural_drift,
 )
+
+
+def test_private_exports_do_not_create_structural_drift(py_project):
+    """Validation and calibration agree that underscore-prefixed symbols are private."""
+    source = py_project / "src" / "models" / "thing.py"
+    source.write_text(
+        "class Thing:\n    pass\n\n"
+        "def _helper():\n    pass\n\n"
+        "__version__ = 'test'\n",
+        encoding="utf-8",
+    )
+
+    report = engine.run(py_project, mode="full", persist=False)
+
+    private_drift = [
+        issue
+        for issue in report.issues
+        if issue.code == errors.E_STRUCTURAL_DRIFT
+        and ("_helper" in issue.message or "__version__" in issue.message)
+    ]
+    assert private_drift == []
 
 from _validate_helpers import _ctx  # sibling module (pytest adds tests/validate/ to sys.path)
 

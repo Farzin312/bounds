@@ -310,6 +310,36 @@ def test_edit_description_cli_updates_subsystem_metadata(monkeypatch, py_project
     assert described["description"] == desc
 
 
+def test_edit_paths_cli_replaces_obsolete_subsystem_paths(monkeypatch, py_project):
+    """`bounds edit --path` supports refactors without opening raw manifests."""
+    res = _invoke(
+        monkeypatch,
+        py_project,
+        ["edit", "svc", "--path", "src/service", "--path", "src/service/jobs.py"],
+    )
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["paths"] == ["src/service", "src/service/jobs.py"]
+
+    described = json.loads(_invoke(monkeypatch, py_project, ["describe", "svc"]).output)
+    assert described["paths"] == ["src/service", "src/service/jobs.py"]
+
+
+def test_edit_role_and_criticality_cli_updates_contract_metadata(monkeypatch, py_project):
+    """Role and criticality changes have a supported CLI path."""
+    role = _invoke(monkeypatch, py_project, ["edit", "svc", "--role", "service"])
+    assert role.exit_code == 0
+    assert json.loads(role.output)["role"] == "service"
+
+    criticality = _invoke(
+        monkeypatch,
+        py_project,
+        ["edit", "svc", "--criticality", "connector"],
+    )
+    assert criticality.exit_code == 0
+    assert json.loads(criticality.output)["criticality"] == "connector"
+
+
 def test_agent_sync_cli(monkeypatch, py_project):
     """agent --sync --claude writes the canonical AGENTS.md plus the per-agent .claude/commands/bounds.md so the CLI is wired into the agent."""
     res = _invoke(monkeypatch, py_project, ["agent", "--sync", "--claude"])

@@ -380,6 +380,7 @@ def test_overview_health_clean_when_no_drift(py_project, monkeypatch):
     assert health["ok"] is True
     assert health["validation"]["ok"] is True
     assert "bounds list" in health["validation"]["next_steps"][0]
+    assert health["validation"]["mapped_pct"] == 100.0
     # A well-formed project (fixture now carries descriptions) reports full description coverage
     # and does NOT raise the concept-discovery nudge.
     described = health["validation"]["described"]

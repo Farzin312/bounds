@@ -1,16 +1,7 @@
-"""Shared foundational utilities and data models for Bounds.
+"""Foundational utilities and data models.
+
+Submodules are intentionally loaded on demand so importing one shared primitive does
+not initialize the entire foundational tier.
 """
 
-from . import config, errors, models, output, gitutil, ignore, tsconfig, surface, cache
-
-__all__ = [
-    "config",
-    "errors",
-    "models",
-    "output",
-    "gitutil",
-    "ignore",
-    "tsconfig",
-    "surface",
-    "cache",
-]
+__all__: list[str] = []

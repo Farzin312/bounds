@@ -1,18 +1,32 @@
 name: cache
 role: library
 criticality: connector
-description: Content-addressable per-file extraction cache persisted as binary SQLite (.bounds/cache.db); context armor + per-subsystem partial reads.
+description: Content-addressable per-file extraction cache persisted as binary SQLite
+  (.bounds/cache.db); context armor + per-subsystem partial reads.
 paths:
-  - src/bounds/cache
+- src/bounds/shared/cache
 exposes:
-  - { name: load_state, kind: function }
-  - { name: save_state, kind: function }
-  - { name: migrate_json_to_sqlite, kind: function }
-  - { name: prune_missing, kind: function }
-  - { name: inspect, kind: function }
-  - { name: State, kind: class }
-  - { name: FileRecord, kind: class }
+- name: load_state
+  kind: function
+- name: save_state
+  kind: function
+- name: migrate_json_to_sqlite
+  kind: function
+- name: prune_missing
+  kind: function
+- name: inspect
+  kind: function
+- name: State
+  kind: class
+- name: FileRecord
+  kind: class
 consumes:
-  - { subsystem: models, via: models, interfaces: [ExtractResult, Symbol, ImportRef] }
+- subsystem: models
+  via: models
+  interfaces:
+  - ExtractResult
+  - Symbol
+  - ImportRef
+- subsystem: shared-api
 tests:
-  - tests/cache
+- tests/cache

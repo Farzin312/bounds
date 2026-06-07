@@ -49,21 +49,13 @@ bounds --help
 bounds/
 ├── .github/workflows/      # CI/CD workflows
 ├── src/bounds/
-│   ├── cache/              # Binary SQLite extraction cache (cache.db)
-│   ├── extract/            # Tree-sitter language adapters (+ scan.py shared helpers)
-│   ├── manifest/           # Manifest loader + schema validation
-│   ├── validate/           # Validation engine + checks + propagation
-│   ├── cli.py              # Click CLI entry point (all commands)
-│   ├── config.py           # Global constants + role/criticality registries
-│   ├── errors.py           # Error codes
-│   ├── gitutil.py          # Git helpers
-│   ├── ignore.py           # .boundsignore matcher + @generated detection
-│   ├── models.py           # Data model dataclasses
-│   ├── output.py           # JSON / human / CI rendering
-│   ├── discover.py         # Bootstrap discovery
-│   ├── calibrate.py        # Manifest↔source reconciliation
-│   ├── agentsync.py        # Cross-agent config generation
-│   └── ciconfig.py         # CI config generation
+│   ├── shared/             # Models, config, errors, output, cache, stateless utilities
+│   ├── core/               # Discovery, validation, extraction, manifests, coverage, SDD
+│   ├── agents/             # Agent sync, generated content, checks, hooks, setup guide
+│   ├── maintenance/        # Release checks and self-upgrade
+│   ├── cli/                # Click routing plus read/setup/drift/maintenance commands
+│   ├── __init__.py         # Stable Tier-2 API + legacy module aliases
+│   └── __main__.py         # `python -m bounds`
 ├── tests/                  # Pytest suite, grouped by area: extract/ validate/ discover/ cli/ agent/ cache/ meta/
 ├── docs/                   # Deep-dive documentation (linked from the README entrance)
 ├── ARCHITECTURE.md         # Engineering contract
@@ -79,15 +71,12 @@ fixed in the same PR, not deferred.
 
 **1. One module, one concern.** Each file under `src/bounds/` owns a single responsibility and is
 declared as (or part of) a subsystem in `.bounds/manifests/`. New functionality is a new module with
-a clear boundary — not a grab-bag appended to `cli.py` or `engine.py`. `cli.py` is wiring only;
-command logic lives in its own module (see `discover.py`, `calibrate.py`, `agentsync.py`,
-`ciconfig.py`). Cross-cutting subpackages already exist where a concern has several pieces:
-`extract/`, `validate/`, `manifest/`, `cache/`. If you can't name the subsystem a file belongs to, it
-isn't scoped yet. **Split to scale:** when a single-concern file outgrows its boundary (roughly
-~800+ lines of *distinct* sub-concerns, not just length), promote it to a subpackage with a
-re-exporting `__init__.py` so the public API is unchanged — current candidates are `agentsync.py`
-(registry vs templates vs sync/detect) and `output.py` (per-command renderers). Do that as its own
-focused PR, never mixed with a behavior change.
+a clear boundary, not a grab-bag appended to CLI or engine code. `cli/main.py` is Click routing;
+command implementations live in `cli/{read,setup,drift,maintain}.py`. Cross-cutting concerns use
+focused subpackages (`core/extract`, `core/validate`, `core/manifest`, `shared/cache`, `agents`).
+If you cannot name the subsystem a file belongs to, it is not scoped yet. A 500-line orchestration
+module is a mandatory review signal: split it when it mixes responsibilities. Cohesive algorithm
+modules may be longer; line count is not a substitute for a real ownership boundary.
 
 **2. The repo dogfoods itself — keep it green.** Bounds models its own architecture in `.bounds/`.
 After any change to `src/bounds/**`, run `bounds validate` (and `bounds calibrate` to see what
@@ -96,7 +85,7 @@ that leaves the project's own manifests stale will not be merged. New cross-subs
 reflected as `exposes`/`consumes` edges — that's the architecture staying honest.
 
 **3. One source of truth — no drift.** Every fact lives in exactly one place. Agent-config text lives
-in `agentsync.py` (the generator), never also in a `templates/` copy. The architecture map lives in
+in `agents/content.py` (the generator source), never also in a `templates/` copy. The architecture map lives in
 the manifests (queried via `bounds describe`), mirrored as prose in `ARCHITECTURE.md`. Scope/status
 lives in the README "Roadmap" section + GitHub Milestones. If you find the same fact in two files,
 collapse it to one and link.

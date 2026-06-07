@@ -44,7 +44,7 @@ denominator and tracked separately.
 
 ## Token economics
 
-Subsystem profiled: `models` (source: `src/bounds/models.py`).
+Subsystem profiled: `models` (source: `src/bounds/shared/models.py`).
 The real saving is TARGETED retrieval (`describe`/`impact`) vs reading the source; the
 whole-map `bounds list` figure is the cheap-orientation bound, not the per-`describe`
 number. Cite the range, not a single flat %.

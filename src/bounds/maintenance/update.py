@@ -23,8 +23,10 @@ import json
 import urllib.error
 import urllib.request
 
-from .. import __version__
 from ..shared import config
+from ..shared.version import VERSION
+
+__version__ = VERSION
 
 # GitHub Releases API for the canonical repository. The "latest" endpoint returns
 # the most recent non-draft, non-prerelease release.

@@ -13,10 +13,10 @@ from pathlib import Path
 
 import click
 
-from .. import __version__
 from ..agents import hook as agenthook, sync as agentsync
 from ..core import ciconfig
 from ..shared import config, errors, output
+from ..shared.version import VERSION
 from . import util
 from ..core.manifest import loader as manifest_loader
 
@@ -26,6 +26,7 @@ from . import read as cli_read, drift as cli_drift, maintain as cli_maintain, se
 # Internal attributes mocked by tests — kept for backward compatibility.
 _AGENT_FLAGS = agentsync.AGENT_KEYS
 _prompt_agent_selection = cli_setup.prompt_agent_selection
+__version__ = VERSION
 
 __all__ = ["main"]
 
@@ -81,11 +82,12 @@ class _BoundsGroup(click.Group):
             if rows:
                 sections.append((title, rows))
         # Safety net: a registered command we forgot to group still shows, never silently dropped.
-        rest = [
-            (name, self.get_command(ctx, name).get_short_help_str(limit=formatter.width))
-            for name in self.list_commands(ctx)
-            if name not in listed and self.get_command(ctx, name) is not None
-        ]
+        rest = []
+        for name in self.list_commands(ctx):
+            command = self.get_command(ctx, name)
+            if name in listed or command is None or getattr(command, "hidden", False):
+                continue
+            rest.append((name, command.get_short_help_str(limit=formatter.width)))
         if rest:
             sections.append(("Other", rest))
         for title, rows in sections:
@@ -228,15 +230,23 @@ def impact(name, verify, include_raw, human):
 
 # ---- Drift Commands ----
 @main.command("validate", short_help="Run architecture checks (drift, boundary, cycles)")
-@click.option("--quick", "quick", is_flag=True, default=False, help="Skip schema extraction and coverage.")
+@click.option("--quick", "quick", is_flag=True, default=False,
+              help="Git-diff incremental validation; skips full architecture checks.")
+@click.option("--mode", type=click.Choice(sorted(config.VALID_MODES)), default=None,
+              help="Explicit validation mode (default: full).")
+@click.option("--enforce", type=click.Choice(sorted(config.VALID_ENFORCE)), default=None,
+              help="Override root.yaml enforce setting.")
+@click.option("--base", default="HEAD", show_default=True,
+              help="Git ref to diff against in quick mode.")
 @click.option("--include-ignored", "include_ignored", is_flag=True, default=False, help="Include .boundsignore in denominator.")
 @click.option("--include-gitignored", "include_gitignored", is_flag=True, default=False, help="Include .gitignore in denominator.")
 @click.option("--follow-symlinks", "follow_symlinks", is_flag=True, default=False, help="Traverse directory symlinks.")
 @click.option("--fail-on-unowned", "fail_on_unowned", is_flag=True, default=False, help="Block on unmapped supported source.")
 @click.option("--ci", "is_ci", is_flag=True, default=False, help="Output tab-delimited CI status.")
 @_human
-def validate(quick, include_ignored, include_gitignored, follow_symlinks, fail_on_unowned, is_ci, human):
-    cli_drift.validate_cmd(quick, include_ignored, include_gitignored,
+def validate(quick, mode, enforce, base, include_ignored, include_gitignored,
+             follow_symlinks, fail_on_unowned, is_ci, human):
+    cli_drift.validate_cmd(quick, mode, enforce, base, include_ignored, include_gitignored,
                            follow_symlinks, fail_on_unowned, is_ci, human)
 
 @main.command("preflight", short_help="Architecture gate (validate + coverage)")
@@ -285,9 +295,17 @@ def fix_coverage(explain_path, do_auto, apply, human):
 @main.command("edit", short_help="Safely update subsystem metadata")
 @click.argument("subsystem")
 @click.option("--description", default=None)
+@click.option("--path", "paths", multiple=True,
+              help="Replace owned paths with these repo-relative paths. Repeat as needed.")
+@click.option("--role", type=click.Choice(sorted(config.VALID_ROLES)), default=None)
+@click.option(
+    "--criticality",
+    type=click.Choice(sorted(config.VALID_CRITICALITY)),
+    default=None,
+)
 @_human
-def edit(subsystem, description, human):
-    cli_maintain.edit_cmd(subsystem, description, human)
+def edit(subsystem, description, paths, role, criticality, human):
+    cli_maintain.edit_cmd(subsystem, description, paths, role, criticality, human)
 
 @main.command("cache", short_help="Manage the binary extraction cache (.bounds/cache.db)")
 @click.option("--migrate", "do_migrate", is_flag=True, default=False)
@@ -297,19 +315,20 @@ def edit(subsystem, description, human):
 def cache(do_migrate, do_prune, do_inspect, human):
     cli_maintain.cache_cmd(do_migrate, do_prune, do_inspect, human)
 
-@main.command("upgrade", short_help="Update or check for Bounds CLI releases")
-@click.option("--check", "do_check", is_flag=True, default=False)
-@click.option("--force", "force", is_flag=True, default=False)
+@main.command("upgrade", short_help="Upgrade a stale Bounds CLI via pipx")
+@click.option("--ref", default="main", show_default=True,
+              help="Git ref to install from when upgrading from GitHub.")
+@click.option("--local", type=click.Path(path_type=Path, file_okay=False, dir_okay=True, exists=True),
+              default=None, help="Install editable from a local Bounds clone instead of GitHub.")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False)
 @_human
-def upgrade(do_check, force, dry_run, human):
-    cli_maintain.upgrade_cmd(do_check, force, dry_run, human)
+def upgrade(ref, local, dry_run, human):
+    cli_maintain.upgrade_cmd(ref, local, dry_run, human)
 
-@main.command("upgrade-check", hidden=True)
-@click.option("--force", is_flag=True)
+@main.command("upgrade-check", short_help="Check for a newer Bounds release")
 @_human
-def upgrade_check(force: bool, human: bool) -> None:
-    cli_maintain.upgrade_cmd(True, force, False, human)
+def upgrade_check(human: bool) -> None:
+    cli_maintain.upgrade_check_cmd(human)
 
 if __name__ == "__main__":
     main()

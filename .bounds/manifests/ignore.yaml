@@ -4,7 +4,7 @@ criticality: connector
 description: "Project-specific exclusion (.boundsignore) loading/matching plus @generated-code\
   \ detection \u2014 pure pathlib + re, deterministic, zero LLM."
 paths:
-- src/bounds/ignore.py
+- src/bounds/shared/ignore.py
 exposes:
 - name: IgnoreMatcher
   kind: class
@@ -12,4 +12,5 @@ exposes:
   kind: function
 - name: load_matcher
   kind: function
-consumes: []
+consumes:
+- subsystem: shared-api

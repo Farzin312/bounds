@@ -385,7 +385,7 @@ def check_structural_drift(ctx: CheckContext) -> list[Issue]:
                 for extra in sorted(
                     actual - declared - test_case_exports - framework_exports - generated_exports
                 )
-                if extra not in declared_table_parents
+                if extra not in declared_table_parents and not extra.startswith("_")
             ]
             # Roll the per-symbol undeclared-export drift into ONE info issue per subsystem: on a large
             # repo this is the dominant agent-context bloat (one issue per symbol = thousands of tokens

@@ -1,10 +1,10 @@
 name: extract
-role: library
+role: service
 criticality: connector
 description: Tree-sitter extraction of exported symbols and imports per language (zero
   LLM).
 paths:
-- src/bounds/extract
+- src/bounds/core/extract
 exposes:
 - name: get_adapter
   kind: function
@@ -55,6 +55,7 @@ consumes:
   interfaces:
   - IgnoreMatcher
   - has_generated_marker
+- subsystem: shared-api
 tests:
 - tests/extract
 docs:

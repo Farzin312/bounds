@@ -4,7 +4,7 @@ criticality: leaf
 description: Claude Code hook integration - idempotent settings sync and fail-open
   event handling with bounded stdin reads so agent sessions never hang.
 paths:
-- src/bounds/agenthook.py
+- src/bounds/agents/hook.py
 exposes:
 - name: HOOK_COMMAND
   kind: const
@@ -18,3 +18,4 @@ exposes:
   kind: function
 consumes:
 - subsystem: manifest
+- subsystem: shared-api

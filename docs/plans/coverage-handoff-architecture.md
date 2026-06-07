@@ -231,13 +231,13 @@ Honesty here is not a constraint on marketing — it **is** the marketing. (Alig
 - `src/bounds/extract/scan.py` — `mapping_coverage` reshape (`627-711`); add `owned_all` param/pass via `resolve_owners(exts=None)` (`262-301`); reuse `_linkage_bucket` cap (`714-727`); `surface_digest` helper (Stage 4).
 - `src/bounds/validate/engine.py` — gate on `supported.unowned||unsupported.dark` (`292-300`); `_coverage_gap_issue` → `next_steps`/`template_ref` (`339-392`); pass `owned_all`; rollup pre-serialize step.
 - `src/bounds/validate/checks.py` — narrow `owns_unsupported` drift suppression to per-file (`310-313`) [Stage 4]; rollup-aware drift emission (`366-379`, `439-446`).
-- `src/bounds/models.py` — `ValidationReport.to_dict` rollup (`345-354`); drop `fix` on info issues (`322-330`).
-- `src/bounds/guide.py` — `done` + `_coverage_why` to new shape (`62-71`, `191-214`).
+- `src/bounds/shared/models.py` — `ValidationReport.to_dict` rollup (`345-354`); drop `fix` on info issues (`322-330`).
+- `src/bounds/agents/guide.py` — `done` + `_coverage_why` to new shape (`62-71`, `191-214`).
 - `src/bounds/discover.py` — `next_step` + coverage reads (`99`, `249-266`).
 - `src/bounds/cli.py` — overview coverage block (`482-531`).
-- `src/bounds/output.py` — human parity: `mapped_pct` line (`589-594`), `schema_coverage.note` (`667-671`), coverage labels (`286`).
-- `src/bounds/agentsync.py` — one-line `next_steps` nudge in `_SKILL_BODY`/`CANONICAL_BODY` (`61-104`, `483-497`).
+- `src/bounds/shared/output.py` — human parity: `mapped_pct` line (`589-594`), `schema_coverage.note` (`667-671`), coverage labels (`286`).
+- `src/bounds/agents/content.py` — one-line `next_steps` nudge in `SKILL_BODY`/`CANONICAL_BODY`.
 - `src/bounds/errors.py` — add `E_UNSUPPORTED_SURFACE_STALE` (Stage 4).
-- `src/bounds/cache/store.py` + `src/bounds/config.py` — unsupported-file records + `STATE_VERSION` 5 (Stage 4) (`store.py:56-59,218-247`; `config.py:71`).
+- `src/bounds/shared/cache/store.py` + `src/bounds/shared/config.py` — unsupported-file records + `STATE_VERSION` 5 (Stage 4).
 - `README.md` (`137-200`), `docs/coverage.md` (`1-197`), `ARCHITECTURE.md` (`830`) — grounded model + roadmap.
 - Tests per §9.

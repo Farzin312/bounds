@@ -19,7 +19,7 @@ To understand the `models` subsystem's public surface (10 exports, consumed by 5
 | Read this | Size | Token estimate |
 |-----------|------|----------------|
 | `bounds describe models` (verified JSON contract) | ~1,620 bytes | **~400 tokens** |
-| `src/bounds/models.py` (the full source file) | ~11,660 bytes | **~2,900 tokens** |
+| `src/bounds/shared/models.py` (the full source file) | ~11,660 bytes | **~2,900 tokens** |
 
 The agent gets the verified public surface for **~400 tokens** instead of **~2,900 tokens** of source — and in real cases a subsystem spans several files, so the source side is usually far larger. This is one small subsystem on one repo: a contract's size tracks the number of symbols a subsystem exposes, so a wide-API subsystem costs proportionally more (see the measured range below).
 

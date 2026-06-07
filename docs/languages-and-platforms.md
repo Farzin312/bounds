@@ -121,7 +121,7 @@ This is the **canonical, single-source how-to** for moving a language from *unsu
 supported*. [CONTRIBUTING.md](../CONTRIBUTING.md) links here; don't duplicate these steps elsewhere.
 Adding a language is **one adapter class plus a registry entry** — no engine changes.
 
-1. **Create the adapter module** — `src/bounds/extract/<language>.py`. Subclass
+1. **Create the adapter module** — `src/bounds/core/extract/<language>.py`. Subclass
    `extract.base.LanguageAdapter` and set the two class attributes:
 
    ```python

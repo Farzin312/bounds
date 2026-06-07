@@ -1,6 +1,6 @@
 """Canonical contract and pointer bodies for coding agents.
 
-Moved from agentsync.py to keep the logic focused and the file size manageable.
+Separated from sync.py so orchestration and generated content have distinct owners.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ _YAML_STAMP_RE = re.compile(r"# BOUNDS:GENERATED v=(?P<v>\S+) h=(?P<h>[0-9a-f]{8
 CANONICAL_NAME = "AGENTS.md"
 
 CANONICAL_BODY = """\
-> Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agentsync.py`) instead.
+> Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agents/content.py`) instead.
 
 ## Bounds — architecture contract for agents
 

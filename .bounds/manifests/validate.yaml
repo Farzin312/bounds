@@ -1,10 +1,10 @@
 name: validate
-role: platform
+role: service
 criticality: connector
 description: Validation engine - mode dispatch, cached extraction, reference propagation,
   and the eight full validation checks, with an explicitly partial quick mode.
 paths:
-- src/bounds/validate
+- src/bounds/core/validate
 exposes:
 - name: run
   kind: function
@@ -33,6 +33,12 @@ exposes:
 - name: schema_objects
   kind: function
 - name: schema_rls_posture
+  kind: function
+- name: run_preflight
+  kind: function
+- name: run_validate
+  kind: function
+- name: run_validate_quick
   kind: function
 consumes:
 - subsystem: models
@@ -74,6 +80,7 @@ consumes:
   - IgnoreMatcher
   - has_generated_marker
   - load_matcher
+- subsystem: shared-api
 tests:
 - tests/validate
 docs:

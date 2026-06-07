@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..agents import sync as agentsync
+from . import sync as agentsync
+from ..core import sdd as sdd_mod
+from ..core.extract import scan, supported_extensions
+from ..core.manifest import loader as manifest_loader
 from ..shared import gitutil
 from ..shared.ignore import load_matcher
 from ..shared.models import RootManifest
-from . import sdd as sdd_mod
-from .extract import scan, supported_extensions
-from .manifest import loader as manifest_loader
 
 
 def run_guide(project_root: Path, *, sdd: bool = False) -> dict:

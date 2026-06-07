@@ -10,11 +10,11 @@ from pathlib import Path
 
 import click
 
+from ..agents import guide as guide_mod
 from ..agents import sync as agentsync
 from ..core import (
     ciconfig,
     discover as discover_mod,
-    guide as guide_mod,
     sdd as sdd_mod,
 )
 from ..shared import config, errors, output
@@ -239,7 +239,7 @@ def agent_cmd(do_sync: bool, do_detect: bool, do_check: bool, invocation: str | 
     def go() -> None:
         nonlocal do_sync
         if invocation is not None:
-            _apply_invocation_level(invocation)
+            _apply_invocation_level(invocation, do_detect, do_check)
             do_sync = True
 
         modes = [m for m, on in (("sync", do_sync), ("detect", do_detect), ("check", do_check)) if on]
@@ -284,20 +284,34 @@ def prompt_agent_selection(available: list[str], detected: set[str]) -> set[str]
             chosen.add(tok)
     return chosen or None
 
-def _apply_invocation_level(level: str) -> None:
+def _apply_invocation_level(level: str, do_detect: bool, do_check: bool) -> None:
+    """Validate and persist an invocation level before the implied agent sync."""
+    if do_detect or do_check:
+        raise errors.BoundsError(
+            errors.E_USAGE,
+            "--invocation sets the level and re-syncs; it can't combine with --detect/--check",
+            fix="run 'bounds agent --invocation <level>' on its own",
+        )
     root = util.require_root()
     import yaml
     root_path = root / config.BOUNDS_DIR / config.ROOT_FILE
     try:
         raw = yaml.safe_load(root_path.read_text(encoding="utf-8")) or {}
-    except Exception:
+    except yaml.YAMLError as exc:
+        raise errors.BoundsError(
+            errors.E_MANIFEST_PARSE_ERROR,
+            f"could not parse .bounds/root.yaml: {exc}",
+            fix="fix the YAML syntax in .bounds/root.yaml, then retry",
+        ) from exc
+    if not isinstance(raw, dict):
         raw = {}
-    
-    if "agentsync" not in raw:
-        raw["agentsync"] = {}
-    raw["agentsync"]["invocation"] = level
-    
-    root_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    agentsync_cfg = dict(raw.get("agentsync") or {})
+    agentsync_cfg["invocation"] = level
+    raw["agentsync"] = agentsync_cfg
+    root_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, default_flow_style=False),
+        encoding="utf-8",
+    )
 
 def ci_cmd(do_install: bool, want_github: bool, want_action_alias: bool, want_gitlab: bool,
            want_precommit: bool, want_all: bool, human: bool) -> None:

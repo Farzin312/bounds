@@ -453,7 +453,7 @@ def run_overview(root: Path, rootm: RootManifest, subs: dict, schema_issues: lis
         "ownership_overlaps": counts.get(errors.E_SUBSYSTEM_OVERLAP, 0),
         "contract_gaps": counts.get(errors.E_CONTRACT_MISSING_EXPORT, 0),
         "stale_interfaces": counts.get(errors.E_STALE_INTERFACE, 0),
-        "mapped_pct": mapping.get("supported", {}).get("mapped_pct", 0.0),
+        "mapped_pct": mapping.get("mapped_pct", 0.0),
     }
     
     described_n = sum(1 for s in subs.values() if (s.description or "").strip())

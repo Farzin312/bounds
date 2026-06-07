@@ -1,6 +1,6 @@
 <!-- BOUNDS:START -->
-<!-- BOUNDS:GENERATED v=2026.6.24 h=d4406165 -->
-> Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agentsync.py`) instead.
+<!-- BOUNDS:GENERATED v=2026.6.24 h=7c78615b -->
+> Managed by `bounds agent --sync` — edits inside this block are overwritten; edit the generator (`src/bounds/agents/content.py`) instead.
 
 ## Bounds — architecture contract for agents
 
@@ -41,7 +41,7 @@ A `bounds impact` miss likewise returns a `fix` with "did you mean" subsystems a
 ### Source of Truth
 - GitHub is the single source of truth.
 - This repo uses `setuptools-scm` for automatic versioning (no static version string).
-- If the local `bounds` CLI is stale, run: `pip install --upgrade bounds-cli`.
+- If the local `bounds` CLI is stale, run: `pipx install --force git+https://github.com/Farzin312/bounds.git`.
 
 ### Hard rules
 - NEVER read `.bounds/cache.db`, `.bounds/*.json`, `.bounds/manifests/*.yaml`, or `.bounds/root.yaml` directly. The cache is binary; the manifests bypass tree-sitter verification.
@@ -54,4 +54,24 @@ A `bounds impact` miss likewise returns a `fix` with "did you mean" subsystems a
 - Intentional contract changes belong in the spec: update the manifest, then re-baseline with `bounds calibrate --dump-baseline`.
 
 **Invocation policy:** before grepping or opening files to answer an architecture question (what/where something is, what depends on it, what breaks if it changes), FIRST run the relevant Bounds command — `bounds list`, `bounds describe <area>`, `bounds where <symbol>`, `bounds impact <subsystem>`. Fall back to source search only when a lookup misses (a `count: 0` carries `suggestions` — try those first) or the area is unmapped / an unsupported language — then searching directly is expected.
+
+## Bounds in Spec-Driven Development
+
+SDD is enabled for `generic`; this `canonical` artifact wires Bounds into the project's customized SDD loop.
+Bounds stays zero-LLM: it provides verified architecture facts and gates while the agent handles prose spec work.
+
+### Phase contract
+- **specify** → `bounds overview && bounds list` — ground the spec in the current map, coverage, and trust signals.
+- **clarify** → `bounds describe <name> && bounds where <symbol>` — answer questions from verified subsystem and symbol context.
+- **plan** → `bounds impact <name>` — account for declared consumers and the lower-bound blast radius.
+- **tasks** → `bounds impact <name>` — order implementation work along subsystem dependency edges.
+- **analyze** → `bounds validate` — run the full architecture checks before implementation.
+- **implement** → `bounds validate --quick` — catch incremental drift after edits without claiming full health.
+- **verify** → `bounds preflight --ci` — run the blocking architecture gate before review or merge.
+
+### Freshness contract
+- If the spec intentionally changes public surface, update the manifest in the same spec/plan change.
+- Run `bounds calibrate --dump-baseline` only after the manifest reflects the intended contract.
+- `bounds validate --quick` in the edit loop catches accidental drift; `bounds preflight --ci` is the final gate.
+- For unsupported-language subsystems, keep hand-authored exposes in the manifest; calibrate routes unverifiable entries to review instead of deleting them.
 <!-- BOUNDS:END -->

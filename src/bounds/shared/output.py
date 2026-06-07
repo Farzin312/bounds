@@ -628,10 +628,10 @@ def _render_agent_human(payload: dict) -> str:
 
     Dispatches by payload shape to a per-mode helper so each stays small and single-purpose.
     """
-    if "detected" in payload:  # --detect (also the bare `bounds agent` default)
-        return _render_agent_detect_human(payload)
     if {"missing", "configured"} <= payload.keys():  # --check
         return _render_agent_check_human(payload)
+    if "detected" in payload:  # --detect (also the bare `bounds agent` default)
+        return _render_agent_detect_human(payload)
     return _render_agent_sync_human(payload)  # --sync
 
 
@@ -665,7 +665,15 @@ def _render_agent_detect_human(payload: dict) -> str:
 
 def _render_agent_check_human(payload: dict) -> str:
     """`bounds agent --check`: wiring status, with the fix hint when something needs a sync."""
-    lines = [f"agent wiring: {'up to date' if payload.get('ok') else 'needs sync'}"]
+    detected = payload.get("detected", []) or []
+    configured = payload.get("configured", []) or []
+    if not detected and not configured:
+        lines = [
+            "agent wiring: no agents detected",
+            "  next: bounds agent --sync",
+        ]
+    else:
+        lines = [f"agent wiring: {'up to date' if payload.get('ok') else 'needs sync'}"]
     inv = _invocation_note(payload.get("invocation", ""))
     if inv:
         lines.append(inv)
