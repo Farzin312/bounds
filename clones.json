@@ -79,8 +79,16 @@
     "2026-06-08": {
       "count": 16,
       "uniques": 9
+    },
+    "2026-06-09": {
+      "count": 25,
+      "uniques": 7
+    },
+    "2026-06-10": {
+      "count": 28,
+      "uniques": 9
     }
   },
-  "total_clones": 3155,
-  "total_uniques": 820
+  "total_clones": 3208,
+  "total_uniques": 836
 }
