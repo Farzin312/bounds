@@ -275,6 +275,42 @@ entry, not a one-off — add it here, with a test, in the same change.
 - **Fix:** `fix/ci-cycles-and-docs` — `check_cycles` now limits individual cycle reports to the 10 shortest cycles and rolls up the remainder into a summary issue. The summary identifies the top 3 "bottleneck" edges (those appearing in the most cycles) and points to a new `docs/troubleshooting-ci.md` guide.
 - **Test:** `tests/validate/test_cycle_explosion.py`.
 
+### BOUNDS-028 — parent/child nested subsystems reported as false cycles
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-13 via a real-repo adoption audit (a NestJS app split each module dir into a parent subsystem `src/auth` + child `src/auth/guards`).
+- **Affected:** `validate`, `preflight` on any repo whose taxonomy nests a subsystem inside another's path.
+- **Symptom:** dozens of `E_CYCLE_DETECTED` like `auth-guards -> src-auth -> auth-guards` — a module file importing its own subdirectory and back. Normal intra-module layering, not an architectural cycle.
+- **Root cause:** the manifest schema modelled a nested subsystem as a peer; `check_cycles` had no notion of containment, so the mutual import read as a cycle.
+- **Fix:** `hardening/library-audit-fixes` — `build_containment` derives containment from path nesting (+ an optional explicit `parent:` field); a cycle is suppressed only when *every* adjacent pair is a containment pair, so a genuine cross-domain cycle passing through a parent→child edge is still reported.
+- **Test:** `tests/validate/test_checks.py::test_parent_child_nesting_is_not_a_cycle` (+ siblings).
+
+### BOUNDS-029 — cycle rollup named bottleneck edges but not the minimal cut; no regression gate
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-13 (same audit; 119 cycle paths that collapsed to ~13 root edges).
+- **Affected:** `preflight`/`validate` on tangled graphs; CI teams who could only choose between a red board and `allow_failure`.
+- **Symptom:** the explosion rollup (BOUNDS-027) named the top-3 bottleneck edges but truncated the rest, and there was no way to baseline known cycles — so one library-gap class forced a blanket `allow_failure`.
+- **Root cause:** no SCC/feedback-arc reduction; `drift-baseline.json` covered `E_STRUCTURAL_DRIFT` only.
+- **Fix:** `hardening/library-audit-fixes` — the rollup now reports a ranked minimal feedback-arc-set (the smallest edge set whose removal breaks every cycle, each "breaks N") plus the SCC count; `calibrate --dump-baseline` writes `.bounds/cycle-baseline.json` so the gate fails only on NEW cycles.
+- **Test:** `tests/validate/test_cycle_explosion.py`, `tests/validate/test_policy_and_baseline.py`.
+
+### BOUNDS-030 — misleading `E_SCHEMA_UNPARSED` fix hint on valid PL/pgSQL
+- **Severity / Status:** low / **Fixed**
+- **Found:** 2026-06-13 (audit; Supabase-style migrations with `DO $$ … $$` / `CREATE FUNCTION … $$ … $$`).
+- **Affected:** `validate` schema advisories.
+- **Symptom:** a correctly-named migration whose only "problem" was a dollar-quoted procedural body got the hint "add a numeric filename prefix…" — the remedy for `E_SCHEMA_NO_ORDER`, not for an unparsed dialect body.
+- **Root cause:** one generic fix string shared by both schema advisories in `check_schema`.
+- **Fix:** `hardening/library-audit-fixes` — per-code hints (`_SCHEMA_FIX_HINTS`); UNPARSED now explains it's a grammar/dialect limit (the parseable DDL still folded — act only if real schema was lost). Verified on 12 real Supabase migrations: 17 functions + 24 tables fold, 0 false UNPARSED on `$$` bodies.
+- **Test:** `tests/extract/test_schema_fold.py::test_plpgsql_dollar_quoted_bodies_are_opaque_not_unparsed`, `tests/validate/test_checks.py::test_schema_unparsed_fix_hint_is_not_about_filename_order`.
+
+### BOUNDS-031 — NestJS DI-wired controllers/guards reported as orphan exports
+- **Severity / Status:** medium / **Fixed**
+- **Found:** 2026-06-13 (audit; ~40 `E_ORPHAN_EXPORT` almost all DI-wired controllers/modules/guards).
+- **Affected:** `validate`/`overview` orphan detection on framework-wired (NestJS/GraphQL) code.
+- **Symptom:** `@Controller`/`@Resolver` classes flagged as consumed by no subsystem — bounds traces only static imports, but these are invoked by the framework's routing/DI layer.
+- **Root cause:** orphan detection had no notion of framework-invoked entrypoints (only Next.js *file*-level entries were exempt).
+- **Fix:** `hardening/library-audit-fixes` — the TS adapter tags `@Controller`/`@Resolver` classes with `framework_entry` metadata (`STATE_VERSION` 5→6); `check_orphans` treats a framework-entry export as externally consumed. Also adds composition-root auto-detection (`E_COMPOSITION_ROOT`) for the catch-all that caused ~100 false cycles on first adoption. Verified on the `testing-nestjs` monorepo: 0 controllers/resolvers flagged as orphan.
+- **Test:** `tests/extract/test_extract.py::test_nestjs_controller_and_resolver_tagged_framework_entry`, `tests/validate/test_checks.py::test_orphan_check_exempts_nestjs_framework_entry_export` (+ composition-root tests).
+
 ---
 
 See also: [coverage.md](coverage.md) (the mapping-coverage metric + how to close a gap),

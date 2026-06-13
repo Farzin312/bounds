@@ -57,7 +57,7 @@ tests, and review still decide implementation correctness.
 | `bounds preflight` | Blocking CI gate: all 8 pre-PR checks |
 | `bounds overview` | Project dashboard and trust summary: `project`, subsystem count, `roles`/`criticality` breakdown, dependency `edges` (from/to/interfaces), `cycles`, `schema_issues`, and a `health` summary — `ok` (true **only** when a live validation pass has no error-severity issues AND there are no cycles/schema errors, even if `enforce=off` means standalone `validate` would exit 0), `schema_errors`, `cycles`, and a `validation` block (`ok`, `errors`, `warnings`, `structural_drift`, `boundary_violations`, `ownership_overlaps`, `contract_gaps`, `stale_interfaces`, `mapped_pct`, `trust_note`, `next_steps`) folded from a real `validate` run. Treat `trust_note` + `next_steps` as the agent-readable guidance for what Bounds can answer now and what must be mapped, regenerated, or inspected next |
 | `bounds discover` | Auto-generate candidate manifests from un-bounded non-test source, then link convention-matched docs/tests to those source subsystems. Tests/docs are coverage evidence, not generated architecture boundaries by default. On a repo that already has `.bounds/`, discovery targets only currently unmapped non-test source, so it adds coverage without creating duplicate alternate subsystems over owned files or linked tests; use `bounds calibrate` to reconcile drift in existing manifests. `--apply`, `--namespace <ns>`, `--merge-into 'name=p1,p2'` |
-| `bounds calibrate` | Reconcile manifests vs tree-sitter reality (ADD / REMOVE / NEEDS_REVIEW / `consumes` fixes). A `consumes` edge to a subsystem that doesn't exist is surfaced as `consumes?` (never auto-removed — it may be a deliberate forward reference). New or existing bare `consumes` edges stay subsystem-level by default; `--track-interfaces` opts into exact imported interface names, which also makes orphan-export checks meaningful for those providers. `--coarsen-interfaces` removes interface lists from existing consumes edges while keeping the provider edges, useful when an earlier run accidentally made draft contracts too precise. Reports `next_steps` that name calibration's scope: it can write manifest/source reconciliation, but it cannot map coverage gaps or break source cycles. `--apply`, `--subsystem <n>`, `--track-interfaces`, `--coarsen-interfaces`, `--prune-unknown` (with `--apply`, also delete those dangling `consumes` edges), `--check` (CI freshness gate: exits non-zero on NEW drift above the committed baseline, never writes), `--dump-baseline` (record current drift as accepted in `.bounds/drift-baseline.json`) |
+| `bounds calibrate` | Reconcile manifests vs tree-sitter reality (ADD / REMOVE / NEEDS_REVIEW / `consumes` fixes). A `consumes` edge to a subsystem that doesn't exist is surfaced as `consumes?` (never auto-removed — it may be a deliberate forward reference). New or existing bare `consumes` edges stay subsystem-level by default; `--track-interfaces` opts into exact imported interface names, which also makes orphan-export checks meaningful for those providers. `--coarsen-interfaces` removes interface lists from existing consumes edges while keeping the provider edges, useful when an earlier run accidentally made draft contracts too precise. Reports `next_steps` that name calibration's scope: it can write manifest/source reconciliation, but it cannot map coverage gaps or break source cycles. `--apply`, `--subsystem <n>`, `--track-interfaces`, `--coarsen-interfaces`, `--prune-unknown` (with `--apply`, also delete those dangling `consumes` edges), `--check` (CI freshness gate: exits non-zero on NEW drift above the committed baseline, never writes), `--dump-baseline` (record current drift as accepted in `.bounds/drift-baseline.json`; also writes `.bounds/cycle-baseline.json` so `validate`/`preflight` fail only on NEW cycles, and re-attributes a consumed symbol's interface to its new owner when it has moved subsystems) |
 | `bounds coverage` | Full-tree, read-only mapping report. Splits legacy `supported.unowned` into `user_decision_needed` and `algorithm_miss`, keeps the legacy count/sample for compatibility, reports dark unsupported source and principled exclusions, and adds one prioritized `next_step`. `--summary` is token-lean; `--why <path>` explains the exact classifier and fix for one file |
 | `bounds fix-coverage` | Uses the same classifier as `coverage`. Bare mode diagnoses; `--explain <path>` traces one file; `--auto` previews exact repo-relative `.boundsignore` additions for deterministic tool-config misses; `--auto --apply` writes atomically. It never assigns real source to a subsystem |
 | `bounds sdd` | SDD phase map and configuration. Bare/`--status` returns configured phases and commands; `--phase <name>` returns one command and says whether that phase is configured; `--doctor` checks configuration plus full/quick/preflight readiness. **Write flags** patch `.bounds/root.yaml` without touching other keys: `--enable` activates SDD, `--disable` deactivates it, `--phases x,y` (used with `--enable`) sets a phase subset, `--add-phase`/`--remove-phase` make targeted edits to the phase list. Bounds does not infer prose-phase completion |
@@ -79,6 +79,7 @@ Both take file-selection and output toggles (all default off):
 | `--include-gitignored` | Scan files excluded by `.gitignore` |
 | `--follow-symlinks` | Follow external symlinks instead of skipping them with a warning |
 | `--fail-on-unowned` | Treat tracked source files outside every subsystem as a blocking error |
+| `--fail-on <CODE>` | Block on these error codes regardless of mode/`enforce` (repeatable or comma-separated) — the escape hatch to hard-gate the findings you can fix while the overall gate stays soft. Overrides `enforce: warn`. Equivalent to the policy `fail_on:` list |
 | `--ci` | CI plaintext output: one tab-delimited issue per line, for log grepping |
 
 ---
@@ -133,6 +134,35 @@ commit (sub-200ms incremental drift), so an author catches drift before it ever 
 
 CI is the **one hard enforcement point** — it runs in your pipeline, not in the agent. See
 [./team-workflow.md](./team-workflow.md) for the enforced loop.
+
+---
+
+## Gate governance (`.bounds/policy.yaml`)
+
+An optional committed policy makes the gate granular instead of all-or-nothing, so one library-gap
+class never forces a blanket `allow_failure` that also masks regressions. Absent ⇒ no-op; malformed
+⇒ advisory warnings (the gate still runs). All three sections are optional:
+
+```yaml
+version: 1
+severity:                       # re-grade a code (still reported, just non-blocking)
+  E_ORPHAN_EXPORT: warning
+fail_on:                        # block on these regardless of mode/enforce (overrides enforce: warn)
+  - E_BOUNDARY_VIOLATION
+suppress:                       # accept a specific finding — the eslint-disable equivalent
+  - code: E_CYCLE_DETECTED
+    subsystem: rankers          # optional match narrowers: subsystem / file / message_contains
+    message_contains: sellers
+    reason: "accepted legacy coupling, JIRA-123"   # required — no anonymous exceptions
+    owner: farzin               # optional
+    expires: 2026-12-31         # optional, ADVISORY only (never gated against wall-clock — determinism)
+```
+
+A suppressed finding stays in the JSON (`suppressed: true` + an audit `note`) but never blocks; the
+*next* unannotated finding of that code still fails. Suppression wins over a `severity:` override.
+Pair `suppress` (documents accepted debt) with the cycle baseline (catches regressions). The
+per-run `--fail-on` flag mirrors the `fail_on:` list. See
+[./troubleshooting-ci.md](./troubleshooting-ci.md) for the gate-governance walkthrough.
 
 ---
 

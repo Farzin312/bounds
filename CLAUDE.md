@@ -95,7 +95,15 @@ hand-authored expose's file changes (digests come from `scan.unsupported_surface
 on `shared/config.py`, no import cycle) · `core/ciconfig.py` · `shared/gitutil.py` git detection +
 changed-file diff (backs `--quick`) · `shared/ignore.py` `.boundsignore` + generated-code detection ·
 `maintenance/{update,upgrade}.py` release check + `pipx` self-upgrade · `shared/output.py`
-JSON/human emit.
+JSON/human emit · `shared/policy.py` optional `.bounds/policy.yaml` gate governance (per-code
+`severity:` override, `fail_on:`, per-finding `suppress:` with required reason; applied by the engine
+after all findings, before the blocking decision — suppressed findings stay in the report but never
+block; `expires` is advisory only, never gated against wall-clock). Gate extras live in
+`validate/checks.py`: `build_containment` (path-nesting/`parent:` containment so parent↔child imports
+aren't false cycles) + the SCC/minimal-feedback-arc-set cycle root-cause rollup + `current_cycle_keys`
+(backs `.bounds/cycle-baseline.json` via `calibrate --dump-baseline`, so the gate fails only on NEW
+cycles) + `check_composition_root` (`E_COMPOSITION_ROOT`) + framework-entry orphan exemption (a NestJS
+`@Controller`/`@Resolver` tagged `framework_entry` by the TS adapter is consumed externally).
 
 Commands: `guide` · `list` · `describe` · `validate` · `preflight` · `overview` · `init` · `impact` ·
 `where` · `discover` · `calibrate` · `agent` · `ci` · `cache` · `upgrade` · `upgrade-check`.
