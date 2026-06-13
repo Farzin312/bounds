@@ -360,6 +360,11 @@ class Issue:
     file: str | None = None
     fix: str | None = None
     count: int = 1  # >1 when this issue rolls up N findings into one (token-lean); magnitude preserved
+    # Policy annotations (see shared.policy). ``suppressed`` marks a finding a policy/baseline rule
+    # accepted: it stays visible (report-hard) but never blocks the gate. ``note`` carries the human
+    # justification (reason/owner) so an accepted exception is auditable. Both default to "unset".
+    suppressed: bool = False
+    note: str | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -372,6 +377,10 @@ class Issue:
         }
         if self.count != 1:
             d["count"] = self.count  # emitted only when it rolls up >1 finding (keeps lean issues lean)
+        if self.suppressed:
+            d["suppressed"] = True
+        if self.note:
+            d["note"] = self.note
         return d
 
     def sort_key(self) -> tuple:

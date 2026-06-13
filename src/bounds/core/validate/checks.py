@@ -19,7 +19,7 @@ from ..extract.scan import is_framework_entry_file, is_test_file, is_test_symbol
 from ...shared.models import ExtractResult, Issue, RootManifest, SubsystemCompact
 from .schema import SCHEMA_LANGUAGES, _fold_subsystem_schema, schema_diagnostics
 
-__all__ = ["CheckContext", "check_cycles", "index_extracts", "resolve_import"]
+__all__ = ["CheckContext", "check_cycles", "current_cycle_keys", "index_extracts", "resolve_import"]
 
 # Sentinel for "not yet computed" so a genuinely absent tsconfig (cached as None) isn't reloaded.
 _UNSET = object()
@@ -80,6 +80,11 @@ class CheckContext:
     # Files with a generated-code marker. The engine reads this from source only when it parses a
     # file, then caches it so quick validation can skip generated exports without source rereads.
     generated_files: set[str] = field(default_factory=set)
+    # Canonical keys of subsystem-level cycles already accepted in .bounds/cycle-baseline.json. A
+    # cycle whose key is here is known/accepted: it is reported (suppressed, non-blocking) so the
+    # gate fails only on NEW cycles a branch introduces — parity with the drift baseline. Empty ⇒
+    # no baseline committed ⇒ every real cycle is reported normally (opt-in, like the surface baseline).
+    cycle_baseline: set[str] = field(default_factory=set)
 
     def files_of(self, subsystem: str) -> list[str]:
         """Extracted files owned by ``subsystem`` (sorted, only those present in extracts)."""
@@ -703,6 +708,32 @@ def _greedy_feedback_edges(
     return cut
 
 
+# Tab joins a canonical (min-rotated) cycle's nodes into a stable identity key. Tab never appears
+# in a subsystem name, so keys never collide — same convention as the drift baseline.
+_CYCLE_KEY_SEP = "\t"
+
+
+def cycle_key(cycle: list[str]) -> str:
+    """Stable identity for a cycle: its canonical (min-first) node order, tab-joined."""
+    return _CYCLE_KEY_SEP.join(_rotate_min(list(cycle)))
+
+
+def _real_cycles(subsystems: dict[str, SubsystemCompact]) -> list[list[str]]:
+    """The genuine (containment-filtered) subsystem cycles — the single definition shared by the
+    cycle check and the cycle-baseline dump, so a baselined key always matches a reported cycle."""
+    graph = {
+        name: sorted({c.subsystem for c in sub.consumes if c.subsystem in subsystems})
+        for name, sub in subsystems.items()
+    }
+    contains = build_containment(subsystems)
+    return [c for c in _find_cycles(graph) if not _is_containment_cycle(c, contains)]
+
+
+def current_cycle_keys(subsystems: dict[str, SubsystemCompact]) -> list[str]:
+    """Sorted canonical keys of every real cycle — what `calibrate --dump-baseline` records."""
+    return sorted(cycle_key(c) for c in _real_cycles(subsystems))
+
+
 def check_cycles(ctx: CheckContext) -> list[Issue]:
     graph = {
         name: sorted({c.subsystem for c in sub.consumes if c.subsystem in ctx.subsystems})
@@ -719,7 +750,31 @@ def check_cycles(ctx: CheckContext) -> list[Issue]:
     if not real_cycles:
         return []
 
+    # Cycle baseline: a committed set of accepted cycles. Known cycles are reported once as a
+    # suppressed (non-blocking) rollup; only NEW cycles drive the gate — so a repo can hard-gate
+    # regressions without first clearing pre-existing cycle debt (parity with the drift baseline).
     issues: list[Issue] = []
+    if ctx.cycle_baseline:
+        new_cycles = [c for c in real_cycles if cycle_key(c) not in ctx.cycle_baseline]
+        known = len(real_cycles) - len(new_cycles)
+        if known:
+            issues.append(
+                _issue(
+                    errors.E_CYCLE_DETECTED,
+                    f"{known} known cycle{'s' if known != 1 else ''} accepted by "
+                    f".bounds/cycle-baseline.json (suppressed)",
+                    severity="info",
+                    count=known,
+                    fix="re-dump the baseline (`bounds calibrate --dump-baseline`) after intentionally "
+                    "changing the accepted cycle set",
+                )
+            )
+            issues[-1].suppressed = True
+            issues[-1].note = "baselined cycle (accepted debt)"
+        real_cycles = new_cycles
+        if not real_cycles:
+            return issues
+
     # Surface the shortest few cycles individually for direct context. If the graph is a tangle,
     # a flood of individual paths is unactionable — collapse the rest into a root-cause summary:
     # the minimal set of edges whose removal breaks every remaining cycle, ranked by impact.

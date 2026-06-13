@@ -53,6 +53,18 @@ DRIFT_BASELINE_FILE = "drift-baseline.json"
 # Committed (unlike the gitignored cache.db) so the signal survives a fresh clone and works in CI.
 SURFACE_BASELINE_FILE = "surface-baseline.json"
 
+# Committed baseline of accepted subsystem-level dependency cycles, written by
+# `calibrate --dump-baseline`. `validate`/`preflight` suppress these known cycles so the gate
+# fails only on NEW cycles a branch introduces — parity with the drift baseline, but for
+# E_CYCLE_DETECTED. Each entry is a canonical (min-rotated) tab-joined cycle key.
+CYCLE_BASELINE_FILE = "cycle-baseline.json"
+
+# Optional committed governance policy (`.bounds/policy.yaml`): per-code severity overrides,
+# a hard `fail_on` code list, and per-finding suppressions with a justification. Lets a repo
+# hard-gate the findings it can fix while demoting known library-gap classes, instead of
+# disabling the whole gate. Human-readable YAML (like manifests); absent ⇒ no-op.
+POLICY_FILE = "policy.yaml"
+
 # A subsystem name is a single path segment used to build `<MANIFESTS_DIR>/<name>.yaml`. Only
 # letters, digits, '-' and '_' are allowed so a name can never traverse out of the manifests dir
 # (e.g. `../../tmp/x`) or carry a path separator. The single source both cli.init and the loader
@@ -106,6 +118,7 @@ __all__ = [
     "BUILTIN_ROLES",
     "CACHE_FILE",
     "CONFIG_FILE_STEMS",
+    "CYCLE_BASELINE_FILE",
     "DEFAULT_IGNORES",
     "DEFAULT_INVOCATION",
     "DOC_EXTS",
@@ -117,6 +130,7 @@ __all__ = [
     "LEGACY_DIR",
     "MANIFESTS_DIR",
     "MAX_FILE_BYTES",
+    "POLICY_FILE",
     "PROPAGATION_DEPTH",
     "ROLE_BASE_BEHAVIOR",
     "ROOT_FILE",

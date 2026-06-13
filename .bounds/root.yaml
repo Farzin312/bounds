@@ -36,6 +36,7 @@ subsystems:
   - manifest
   - models
   - output
+  - policy
   - public-api
   - sdd
   - shared-api

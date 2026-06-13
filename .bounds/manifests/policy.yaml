@@ -1,0 +1,23 @@
+name: policy
+role: library
+criticality: leaf
+description: "Optional governance policy (.bounds/policy.yaml) \u2014 per-code severity\
+  \ overrides, a hard fail_on code list, and per-finding suppressions with a justification.\
+  \ Lets a repo hard-gate the findings it can fix while demoting/accepting known library-gap\
+  \ classes."
+paths:
+- src/bounds/shared/policy.py
+exposes:
+- name: Policy
+  kind: class
+- name: SuppressRule
+  kind: class
+- name: load_policy
+  kind: function
+consumes:
+- subsystem: config
+- subsystem: errors
+- subsystem: models
+  interfaces:
+  - Issue
+- subsystem: shared-api

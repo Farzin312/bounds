@@ -886,20 +886,29 @@ def _format_linkage_lines(mapping: dict) -> list[str]:
 
 
 def _format_issue_lines(issue: dict) -> list[str]:
-    """Render a single issue as ``  [CODE] subsystem/file: message`` (+ optional fix)."""
+    """Render a single issue as ``  [CODE] subsystem/file: message`` (+ optional note/fix).
+
+    JSON↔human parity: a policy/baseline ``suppressed`` flag and its audit ``note`` are surfaced
+    here too, so the human view never hides that a finding was accepted (and why).
+    """
     code = issue.get("code", "")
     subsystem = issue.get("subsystem")
     file = issue.get("file")
     message = issue.get("message", "")
     fix = issue.get("fix")
+    note = issue.get("note")
+    suppressed = issue.get("suppressed")
 
     location = "/".join(part for part in (subsystem, file) if part)
+    tag = "[suppressed] " if suppressed else ""
     if location:
-        head = f"  [{code}] {location}: {message}"
+        head = f"  {tag}[{code}] {location}: {message}"
     else:
-        head = f"  [{code}] {message}"
+        head = f"  {tag}[{code}] {message}"
 
     lines = [head]
+    if note:
+        lines.append(f"    note: {note}")
     if fix:
         lines.append(f"    fix: {fix}")
     return lines

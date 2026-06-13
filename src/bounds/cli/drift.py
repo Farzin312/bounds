@@ -17,6 +17,18 @@ from ..core.validate import engine as validate_engine
 from ..shared import config, errors, output
 from ..core.manifest import loader as manifest_loader
 
+
+def _parse_fail_on(raw: tuple[str, ...]) -> tuple[str, ...]:
+    """Normalize repeatable/comma-separated --fail-on values into a flat, de-duped tuple of codes."""
+    seen: list[str] = []
+    for value in raw:
+        for code in value.split(","):
+            code = code.strip()
+            if code and code not in seen:
+                seen.append(code)
+    return tuple(seen)
+
+
 def validate_cmd(
     quick: bool,
     mode: str | None,
@@ -26,6 +38,7 @@ def validate_cmd(
     include_gitignored: bool,
     follow_symlinks: bool,
     fail_on_unowned: bool,
+    fail_on: tuple[str, ...],
     is_ci: bool,
     human: bool,
 ) -> None:
@@ -44,6 +57,7 @@ def validate_cmd(
                 include_gitignored=include_gitignored,
                 follow_symlinks=follow_symlinks,
                 fail_on_unowned=fail_on_unowned,
+                fail_on=_parse_fail_on(fail_on),
             )
         output.emit(report.to_dict(), human, ci=is_ci)
         sys.exit(config.EXIT_OK if report.ok else config.EXIT_BLOCKED)
@@ -57,6 +71,7 @@ def preflight_cmd(
     include_gitignored: bool,
     follow_symlinks: bool,
     fail_on_unowned: bool,
+    fail_on: tuple[str, ...],
     human: bool,
 ) -> None:
     """Production-ready architecture gate (validates + coverage check)."""
@@ -71,6 +86,7 @@ def preflight_cmd(
                 include_gitignored=include_gitignored,
                 follow_symlinks=follow_symlinks,
                 fail_on_unowned=fail_on_unowned,
+                fail_on=_parse_fail_on(fail_on),
             )
         from collections import Counter
 

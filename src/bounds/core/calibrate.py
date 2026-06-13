@@ -36,7 +36,7 @@ from ..shared import tsconfig
 from ..shared.ignore import load_matcher
 from .extract.scan import extract_project, subsystems_with_unsupported_source, unsupported_surface_files
 from .manifest import loader as manifest_loader
-from .validate.checks import index_extracts, resolve_import
+from .validate.checks import current_cycle_keys, index_extracts, resolve_import
 
 __all__ = ["run_calibrate"]
 
@@ -386,6 +386,41 @@ def _baseline_path(project_root: Path) -> Path:
     return config.config_dir(project_root) / config.DRIFT_BASELINE_FILE
 
 
+def _cycle_baseline_path(project_root: Path) -> Path:
+    return config.config_dir(project_root) / config.CYCLE_BASELINE_FILE
+
+
+def load_cycle_baseline(project_root: Path) -> set[str]:
+    """Accepted-cycle keys from ``.bounds/cycle-baseline.json`` (empty if absent/malformed).
+
+    Fail-soft: a missing/unreadable/wrong-shape file yields an empty set so the caller treats it
+    as "no baseline" rather than crashing — same posture as the drift/surface baselines.
+    """
+    path = _cycle_baseline_path(project_root)
+    if not path.is_file():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    cycles = data.get("cycles") if isinstance(data, dict) else None
+    if not isinstance(cycles, list):
+        return set()
+    return {str(k) for k in cycles}
+
+
+def _dump_cycle_baseline(project_root: Path, subsystems: dict) -> tuple[Path, int]:
+    """Write the current accepted-cycle keys; return ``(path, count)``."""
+    keys = current_cycle_keys(subsystems)
+    path = _cycle_baseline_path(project_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"version": 1, "cycles": keys}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return path, len(keys)
+
+
 def _load_baseline(project_root: Path) -> tuple[set[str], bool]:
     """Return ``(drift_keys, valid)`` for the committed baseline.
 
@@ -447,6 +482,14 @@ def dump_baseline(project_root: Path, *, subsystem: str | None = None) -> dict:
             f"; recorded {n_files} unsupported-language file hash(es) across "
             f"{len(surfaces)} subsystem(s) for staleness detection"
         )
+    # Also snapshot the accepted subsystem-level dependency cycles so `validate`/`preflight` fail
+    # only on NEW cycles. Whole-repo by nature (cycles are a graph property, not per-subsystem), so
+    # this ignores the `subsystem` filter. Written even when empty, so committing a clean baseline
+    # documents "zero accepted cycles" and arms the regression gate.
+    cpath, n_cycles = _dump_cycle_baseline(project_root, subs)
+    result["cycle_baseline"] = cpath.relative_to(project_root).as_posix()
+    result["cycle_count"] = n_cycles
+    result["note"] += f"; recorded {n_cycles} accepted cycle(s) — only new cycles will fail the gate"
     return result
 
 
