@@ -115,6 +115,61 @@ def test_calibrate_preserves_existing_bare_edge_by_default(tmp_path):
     assert "interfaces" not in db_edge
 
 
+def _build_moved_symbol(tmp_path):
+    """A repo where the symbol ERROR_CODES moved from `oldmod` to `newmod`, but `app` still
+    declares it as consumed from `oldmod` — the audit's interface re-attribution scenario."""
+    src = tmp_path / "src"
+    for name in ("oldmod", "newmod", "app"):
+        (src / name).mkdir(parents=True)
+    (src / "oldmod" / "m.py").write_text("def KEEP():\n    pass\n")          # ERROR_CODES left here
+    (src / "newmod" / "m.py").write_text("def ERROR_CODES():\n    pass\n")   # now lives here
+    (src / "app" / "main.py").write_text(
+        "from ..oldmod.m import KEEP\n"
+        "from ..newmod.m import ERROR_CODES\n"
+        "def go():\n    pass\n"
+    )
+    cfg = tmp_path / config.BOUNDS_DIR
+    (cfg / config.MANIFESTS_DIR).mkdir(parents=True)
+    (cfg / config.ROOT_FILE).write_text(
+        yaml.safe_dump({"version": "1", "project": "x", "subsystems": ["oldmod", "newmod", "app"]})
+    )
+    (cfg / config.MANIFESTS_DIR / "oldmod.yaml").write_text(yaml.safe_dump(
+        {"name": "oldmod", "role": "library", "paths": ["src/oldmod"],
+         "exposes": [{"name": "KEEP", "kind": "function"}]}, sort_keys=False))
+    (cfg / config.MANIFESTS_DIR / "newmod.yaml").write_text(yaml.safe_dump(
+        {"name": "newmod", "role": "library", "paths": ["src/newmod"],
+         "exposes": [{"name": "ERROR_CODES", "kind": "function"}]}, sort_keys=False))
+    (cfg / config.MANIFESTS_DIR / "app.yaml").write_text(yaml.safe_dump(
+        {"name": "app", "role": "service", "paths": ["src/app"],
+         "exposes": [{"name": "go", "kind": "function"}],
+         # app still says ERROR_CODES comes from oldmod (stale) — the symbol has moved.
+         "consumes": [{"subsystem": "oldmod", "interfaces": ["KEEP", "ERROR_CODES"]}]},
+        sort_keys=False))
+    return tmp_path
+
+
+def test_calibrate_reattributes_moved_interface(tmp_path):
+    """When a consumed symbol's owning subsystem changes, calibrate proposes moving the interface
+    reference to the new owner (even without --track-interfaces) instead of just dropping it."""
+    _build_moved_symbol(tmp_path)
+    result = run_calibrate(tmp_path, subsystem="app")
+    app = result["subsystems"]["app"]
+    assert {"interface": "ERROR_CODES", "from": "oldmod", "to": "newmod"} in app["reattribute_consumes"]
+    assert result["summary"]["consumes_reattributed"] == 1
+
+
+def test_calibrate_apply_moves_interface_to_new_owner(tmp_path):
+    """--apply removes the moved interface from the old edge and adds it onto the new owner's edge,
+    so a subsequent validate sees no E_CONTRACT_MISSING_EXPORT."""
+    _build_moved_symbol(tmp_path)
+    run_calibrate(tmp_path, subsystem="app", apply=True)
+    app = yaml.safe_load((tmp_path / config.BOUNDS_DIR / config.MANIFESTS_DIR / "app.yaml").read_text())
+    edges = {c["subsystem"]: c.get("interfaces", []) for c in app["consumes"]}
+    assert "ERROR_CODES" not in edges.get("oldmod", [])   # dropped from the stale owner
+    assert "ERROR_CODES" in edges.get("newmod", [])        # re-attributed to the real owner
+    assert "KEEP" in edges.get("oldmod", [])               # the still-valid interface stays
+
+
 def test_calibrate_track_interfaces_enriches_existing_bare_edge(tmp_path):
     """The explicit interface-tracking path records exact imported names on a bare consumes edge."""
     _build(tmp_path)

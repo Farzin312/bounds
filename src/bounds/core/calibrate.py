@@ -225,9 +225,17 @@ def _calibrate_one(
         and (track_interfaces or provider in interface_tracked_providers)
     ]
 
+    # Where does the subsystem now import each symbol from? (symbol -> new owning provider it
+    # actually imports + which exposes it). Deterministic: first provider in sorted order wins.
+    new_owner_of_iface: dict[str, str] = {}
+    for prov in sorted(actual_consumes):
+        for nm in sorted(actual_consumes[prov]):
+            new_owner_of_iface.setdefault(nm, prov)
+
     remove_consumes: list[dict] = []
     remove_consume_edges: list[str] = []
     unknown_consumes: list[str] = []
+    reattribute_consumes: list[dict] = []
     for c in sub.consumes:
         provider = subs.get(c.subsystem)
         if provider is None:
@@ -238,10 +246,23 @@ def _calibrate_one(
             # E_UNRESOLVED_REFERENCE; this is the calibrate-side fix path for it.
             unknown_consumes.append(c.subsystem)
             continue
+        # Re-attribution: an interface declared on this provider that the provider no longer exposes
+        # but which the subsystem now imports from a DIFFERENT provider that does. The symbol moved
+        # to a new subsystem; move its interface-level reference with it. Done regardless of
+        # --track-interfaces because it PRESERVES the user's existing contract granularity across an
+        # ownership change — without it, calibrate drops the stale ref and (in default mode) re-adds
+        # only a bare edge, leaving the transient E_CONTRACT_MISSING_EXPORT the audit hit.
+        provider_exposes = provider.expose_names()
+        for iface in sorted(c.interfaces):
+            if iface in provider_exposes:
+                continue
+            new_owner = new_owner_of_iface.get(iface)
+            if new_owner and new_owner != c.subsystem:
+                reattribute_consumes.append({"interface": iface, "from": c.subsystem, "to": new_owner})
         if c.subsystem not in actual_consumes:
             remove_consume_edges.append(c.subsystem)
             continue
-        stale = sorted(i for i in c.interfaces if i not in provider.expose_names())
+        stale = sorted(i for i in c.interfaces if i not in provider_exposes)
         if stale:
             remove_consumes.append({"subsystem": c.subsystem, "interfaces": stale})
 
@@ -255,6 +276,7 @@ def _calibrate_one(
         "coarsen_consume_interfaces": coarsen_consume_interfaces,
         "remove_consumes": remove_consumes,
         "remove_consume_edges": sorted(set(remove_consume_edges)),
+        "reattribute_consumes": reattribute_consumes,
         "unknown_consumes": sorted(set(unknown_consumes)),
     }
 
@@ -379,6 +401,8 @@ def drift_keys(proposals: dict[str, dict]) -> list[str]:
                 keys.add(_KEY_SEP.join((sub, "remove_consume", f"{rc['subsystem']}:{iface}")))
         for provider in p.get("remove_consume_edges", []):
             keys.add(_KEY_SEP.join((sub, "remove_consume_edge", str(provider))))
+        for mv in p.get("reattribute_consumes", []):
+            keys.add(_KEY_SEP.join((sub, "reattribute_consume", f"{mv['interface']}:{mv['from']}->{mv['to']}")))
     return sorted(keys)
 
 
@@ -557,6 +581,9 @@ def _summarize(proposals: dict[str, dict]) -> dict:
             + sum(len(p.get("remove_consume_edges", [])) for p in proposals.values())
         ),
         "consumes_unknown": sum(len(p.get("unknown_consumes", [])) for p in proposals.values()),
+        "consumes_reattributed": sum(
+            len(p.get("reattribute_consumes", [])) for p in proposals.values()
+        ),
     }
 
 
@@ -688,6 +715,21 @@ def _apply_proposal(sub, proposal: dict, prune_unknown: bool = False) -> None:
             consumes.append(entry)
         else:
             consumes.append({"subsystem": prov})
+    # Re-attribution: a moved symbol's interface, already dropped from its old (no-longer-exposing)
+    # edge by the stale-removal pass above, is added onto its new owner's edge here so the
+    # interface-level contract follows the symbol. The new-owner edge exists by now (declared, or
+    # just appended as a bare add_consumes edge). Done even in default mode — it preserves the
+    # user's existing granularity rather than introducing new tracking.
+    move_to: dict[str, set[str]] = {}
+    for mv in proposal.get("reattribute_consumes", []):
+        move_to.setdefault(mv["to"], set()).add(mv["interface"])
+    for entry in consumes:
+        if not isinstance(entry, dict):
+            continue
+        provider = entry.get("subsystem")
+        if provider in move_to:
+            merged = sorted(set(entry.get("interfaces") or []) | move_to[provider])
+            entry["interfaces"] = merged
     if consumes:
         raw["consumes"] = consumes
     else:
