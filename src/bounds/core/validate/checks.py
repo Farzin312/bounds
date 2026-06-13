@@ -592,11 +592,24 @@ def build_containment(subsystems: dict[str, SubsystemCompact]) -> dict[str, set[
                 contains[outer].add(inner)
 
     # Explicit `parent:` declarations override/augment path-based detection (loader has already
-    # validated that the referenced parent exists and the chain is acyclic).
+    # validated that the referenced parent exists and the chain is acyclic). We verify this
+    # defensively to ensure a bad manifest config can never suppress a real dependency cycle.
     for child in names:
         declared = (subsystems[child].parent or "").strip()
         if declared and declared in contains and declared != child:
-            contains[declared].add(child)
+            # Walk the explicit parent chain to ensure it's acyclic before applying it.
+            seen = {child}
+            cursor = declared
+            acyclic = True
+            while cursor:
+                if cursor in seen:
+                    acyclic = False
+                    break
+                seen.add(cursor)
+                cursor = (subsystems[cursor].parent or "").strip() if cursor in subsystems else ""
+
+            if acyclic:
+                contains[declared].add(child)
     return contains
 
 

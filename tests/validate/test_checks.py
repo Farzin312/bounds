@@ -560,3 +560,14 @@ def test_orphans_not_flagged_without_interface_level_consumption():
     assert len(flagged) == 1 and flagged[0].count == 1
     orphan_sample = flagged[0].message.split(":", 1)[1]
     assert "b" in orphan_sample and "a" not in orphan_sample
+
+def test_circular_parent_hides_real_cycle():
+    """When A.parent = B and B.parent = A, build_containment sees both as children of each other.
+    _is_containment_cycle must not suppress a REAL dependency cycle between them just because of
+    bad parent config."""
+    subs = {
+        "A": Sub(name="A", parent="B", consumes=[Consumes("B")]),
+        "B": Sub(name="B", parent="A", consumes=[Consumes("A")]),
+    }
+    issues = check_cycles(_ctx(subs))
+    assert any(i.code == errors.E_CYCLE_DETECTED for i in issues)

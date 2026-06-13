@@ -233,33 +233,38 @@ def _validate_parents(subsystems: dict[str, SubsystemCompact]) -> list[Issue]:
     """Validate explicit ``parent:`` declarations: a parent must name a real subsystem and the
     containment graph must be acyclic (no subsystem is its own ancestor). Auto-detected
     path-nesting containment cannot form a cycle by construction, so only explicit edges are
-    checked here. Reported soft (warnings) — a bad ``parent`` never blocks, it just isn't applied."""
+    checked here. Reported as errors — a bad ``parent`` is cleared so it doesn't suppress cycles."""
     issues: list[Issue] = []
+    # Snapshot parents so clearing one during the loop doesn't hide cycles for others.
+    parents = {n: (subsystems[n].parent or "").strip() for n in subsystems}
+
     for name in sorted(subsystems):
-        declared = (subsystems[name].parent or "").strip()
+        declared = parents[name]
         if not declared:
             continue
         if declared == name:
             issues.append(
                 Issue(
                     code=errors.E_SCHEMA_INVALID,
-                    severity="warning",
+                    severity="error",
                     message=f"subsystem '{name}' declares itself as its own parent",
                     subsystem=name,
                     fix=f"remove `parent: {name}` from {name}.yaml",
                 )
             )
+            subsystems[name].parent = ""
             continue
         if declared not in subsystems:
             issues.append(
                 Issue(
                     code=errors.E_SCHEMA_INVALID,
-                    severity="warning",
+                    severity="error",
                     message=f"subsystem '{name}' declares parent '{declared}' which is not a known subsystem",
                     subsystem=name,
                     fix=f"point `parent:` at a subsystem listed in root.subsystems, or remove the key",
                 )
             )
+            subsystems[name].parent = ""
             continue
         # Walk the explicit parent chain; flag a cycle (and stop) if we revisit a node.
         seen = {name}
@@ -269,15 +274,16 @@ def _validate_parents(subsystems: dict[str, SubsystemCompact]) -> list[Issue]:
                 issues.append(
                     Issue(
                         code=errors.E_SCHEMA_INVALID,
-                        severity="warning",
+                        severity="error",
                         message=f"subsystem '{name}' has a circular parent chain via '{cursor}'",
                         subsystem=name,
                         fix="remove a `parent:` edge so the containment chain is acyclic",
                     )
                 )
+                subsystems[name].parent = ""
                 break
             seen.add(cursor)
-            cursor = (subsystems[cursor].parent or "").strip() if cursor in subsystems else ""
+            cursor = parents.get(cursor, "")
     return issues
 
 

@@ -102,3 +102,36 @@ def test_legacy_compact_dir_validates(tmp_path):
     report = engine.run(proj, mode="full")
     assert report.status == "fresh"
     assert report.errors() == []
+
+# ===========================================================================
+# Parent validation
+# ===========================================================================
+def test_validate_parents_cycle():
+    """Circular parent chains must be reported as errors and cleared from the models."""
+    subs = {
+        "A": loader.SubsystemCompact(name="A", parent="B"),
+        "B": loader.SubsystemCompact(name="B", parent="A"),
+    }
+    issues = loader._validate_parents(subs)
+    assert any(i.code == errors.E_SCHEMA_INVALID and "circular parent chain" in i.message for i in issues)
+    assert any(i.severity == "error" for i in issues)
+    assert subs["A"].parent == ""
+    assert subs["B"].parent == ""
+
+
+def test_validate_parents_self():
+    """A subsystem declaring itself as its own parent is an error and is cleared."""
+    subs = {"A": loader.SubsystemCompact(name="A", parent="A")}
+    issues = loader._validate_parents(subs)
+    assert any(i.code == errors.E_SCHEMA_INVALID and "own parent" in i.message for i in issues)
+    assert any(i.severity == "error" for i in issues)
+    assert subs["A"].parent == ""
+
+
+def test_validate_parents_unknown():
+    """A parent that doesn't exist is an error and is cleared."""
+    subs = {"A": loader.SubsystemCompact(name="A", parent="ghost")}
+    issues = loader._validate_parents(subs)
+    assert any(i.code == errors.E_SCHEMA_INVALID and "not a known subsystem" in i.message for i in issues)
+    assert any(i.severity == "error" for i in issues)
+    assert subs["A"].parent == ""
