@@ -19,8 +19,10 @@ from bounds.core.validate.checks import (
     check_cross_impact,
     check_cycles,
     check_orphans,
+    check_schema,
     check_structural_drift,
 )
+from bounds.shared.models import ExtractResult as _ER, Symbol as _Sym
 from _validate_helpers import _ctx  # sibling module (pytest adds tests/validate/ to sys.path)
 
 
@@ -415,6 +417,22 @@ def test_sibling_cycle_unaffected_by_unrelated_nesting():
     }
     issues = check_cycles(_ctx(subs))
     assert any(i.code == errors.E_CYCLE_DETECTED for i in issues)
+
+
+def test_schema_unparsed_fix_hint_is_not_about_filename_order():
+    """E_SCHEMA_UNPARSED must NOT tell the user to add a filename prefix/order header — that advice
+    is for E_SCHEMA_NO_ORDER. A perfectly-named migration with an opaque PL/pgSQL body got the wrong
+    remedy before; the hint must talk about SQL dialect/grammar, not ordering."""
+    unparsed = _Sym("<unparsed>", "schema_error", 1, exported=False,
+                    metadata={"schema_op": "unparsed", "count": 1})
+    extracts = {"db/001_create_thing.sql": _ER("db/001_create_thing.sql", "sql", [unparsed])}
+    subs = {"db": Sub(name="db", paths=["db"])}
+    issues = check_schema(_ctx(subs, extracts, {"db/001_create_thing.sql": "db"}))
+    unparsed_issues = [i for i in issues if i.code == errors.E_SCHEMA_UNPARSED]
+    assert unparsed_issues, "expected an E_SCHEMA_UNPARSED advisory"
+    hint = unparsed_issues[0].fix.lower()
+    assert "filename prefix" not in hint and "bounds:order" not in hint
+    assert "grammar" in hint or "plpgsql" in hint or "dialect" in hint
 
 
 def test_build_containment_detects_strict_nesting_only():

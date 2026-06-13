@@ -126,6 +126,31 @@ def test_unparsable_ddl_statement_keeps_siblings_and_reports():
     assert "E_SCHEMA_UNPARSED" in codes
 
 
+def test_plpgsql_dollar_quoted_bodies_are_opaque_not_unparsed():
+    """Valid PL/pgSQL — anonymous DO blocks, CREATE FUNCTION bodies, EXECUTE format(), RAISE — must
+    never raise E_SCHEMA_UNPARSED: the $$…$$ body is opaque, the enclosing DDL shell still folds.
+    These are the four real-world migration shapes the audit hit; none should warn."""
+    files = {
+        # DO block creating a policy conditionally (no modeled DDL leaks; no warning)
+        "001_do_policy.sql": b"DO $$ BEGIN\n  CREATE POLICY p ON t FOR SELECT USING (true);\nEND $$;",
+        # CREATE FUNCTION with a plpgsql body — the function still folds
+        "002_function.sql": b"CREATE OR REPLACE FUNCTION refresh_contract() RETURNS trigger AS $$\n"
+                            b"BEGIN RETURN NEW; END;\n$$ LANGUAGE plpgsql;",
+        # DO block raising an exception with USING clauses
+        "003_raise.sql": b"DO $$ BEGIN\n  RAISE EXCEPTION USING MESSAGE = 'x', ERRCODE = 'P0001';\nEND $$;",
+        # DO block running dynamic ALTER via EXECUTE format()
+        "004_execute.sql": b"DO $$ BEGIN\n  EXECUTE format('ALTER TABLE %I ADD COLUMN x int', 'c');\nEND $$;",
+    }
+    extracts, fo = _extracts(files)
+    for rel in files:
+        assert extracts[rel].error is None, f"{rel} hard-failed unexpectedly"
+    codes = {c for c, _, _ in schema_diagnostics("db", extracts, fo)}
+    assert "E_SCHEMA_UNPARSED" not in codes
+    # The function shell still folded as a schema object.
+    objs = {(o["kind"], o["name"]) for o in schema_objects("db", extracts, fo)}
+    assert ("function", "refresh_contract") in objs
+
+
 def test_non_ddl_parse_error_is_not_reported_as_schema_loss():
     """A non-DDL statement the grammar trips on (a cron.schedule call) must NOT raise E_SCHEMA_UNPARSED when all tables parsed cleanly — no DDL was lost, so flagging it is cry-wolf."""
     # A file whose tables parse cleanly but which also contains a non-DDL statement the

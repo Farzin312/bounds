@@ -873,9 +873,26 @@ def check_schema(ctx: CheckContext) -> list[Issue]:
                 continue
             seen.add(key)
             issues.append(_issue(code, message, subsystem=name, file=file,
-                                 fix="add a numeric filename prefix, a revision/down_revision "
-                                     "header, or '-- bounds:order N'; or fix the SQL syntax"))
+                                 fix=_SCHEMA_FIX_HINTS[code]))
     return issues
+
+
+# Per-code fix hints. The order/unparsed advisories have different remedies — conflating them
+# (the old single hint that told everyone to "add a numeric filename prefix") was misleading for a
+# perfectly-named migration whose only "problem" is a dialect body tree-sitter can't parse.
+_SCHEMA_FIX_HINTS = {
+    errors.E_SCHEMA_UNPARSED: (
+        "a statement uses SQL the bundled tree-sitter-sql grammar can't parse — usually a "
+        "procedural PL/pgSQL body ($$…$$ / DO block) or a vendor extension. The file's "
+        "parseable DDL still folded, so no action is needed unless a real table/column was "
+        "lost; if so, move the table DDL out of the procedural body (or simplify the statement). "
+        "This is not a filename/order problem."
+    ),
+    errors.E_SCHEMA_NO_ORDER: (
+        "give the migrations a deterministic order: add a numeric filename prefix, a "
+        "revision/down_revision header, or a '-- bounds:order N' comment"
+    ),
+}
 
 
 # ===========================================================================
