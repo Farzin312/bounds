@@ -107,6 +107,11 @@ class SubsystemCompact:
     docs: list[str] = field(default_factory=list)
     tests: list[str] = field(default_factory=list)
     consumed_by: list[str] = field(default_factory=list)  # AUTO-filled by loader
+    # Optional explicit containment: the name of the subsystem this one is nested inside. Bounds
+    # auto-detects containment from declared path nesting (a child whose path is a strict descendant
+    # of a parent's path), so this is only needed to disambiguate when paths don't nest. Parent↔child
+    # imports are treated as intra-module layering, never an architectural cycle. Empty by default.
+    parent: str = ""
     source_path: str = ""
 
     def to_dict(self) -> dict:
@@ -129,6 +134,8 @@ class SubsystemCompact:
             d["docs"] = list(self.docs)
         if self.tests:
             d["tests"] = list(self.tests)
+        if self.parent:
+            d["parent"] = self.parent
         return d
 
     @classmethod
@@ -145,6 +152,7 @@ class SubsystemCompact:
             files=[str(f) for f in (data.get("files") or [])],
             docs=[str(d) for d in (data.get("docs") or [])],
             tests=[str(t) for t in (data.get("tests") or [])],
+            parent=str(data.get("parent", "")),
             source_path=source_path,
         )
 

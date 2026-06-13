@@ -371,6 +371,67 @@ def test_no_cycle_in_dag():
 
 
 # ===========================================================================
+# Check 5 — containment-aware cycle detection
+# ===========================================================================
+def test_parent_child_nesting_is_not_a_cycle():
+    """A module importing its own subdirectory and back (parent ``src/auth`` ↔ child ``src/auth/guards``)
+    is intra-module layering, not an architectural cycle — containment must suppress it."""
+    subs = {
+        "auth": Sub(name="auth", paths=["src/auth"], consumes=[Consumes("auth-guards")]),
+        "auth-guards": Sub(name="auth-guards", paths=["src/auth/guards"], consumes=[Consumes("auth")]),
+    }
+    assert check_cycles(_ctx(subs)) == []
+
+
+def test_explicit_parent_suppresses_cycle_without_path_nesting():
+    """When paths don't nest, an explicit ``parent:`` still establishes containment and suppresses the
+    parent↔child cycle."""
+    subs = {
+        "core": Sub(name="core", paths=["pkg/core"], consumes=[Consumes("core-impl")]),
+        "core-impl": Sub(name="core-impl", paths=["pkg/impl"], parent="core", consumes=[Consumes("core")]),
+    }
+    assert check_cycles(_ctx(subs)) == []
+
+
+def test_genuine_sibling_cycle_through_a_child_is_still_reported():
+    """A real cross-domain cycle that merely passes through a parent→child edge (``auth`` → its child
+    ``auth-guards`` → sibling ``sellers`` → ``auth``) has a non-containment edge, so it is genuine and
+    must still be reported — containment only suppresses pure-nesting cycles."""
+    subs = {
+        "auth": Sub(name="auth", paths=["src/auth"], consumes=[Consumes("auth-guards")]),
+        "auth-guards": Sub(name="auth-guards", paths=["src/auth/guards"], consumes=[Consumes("sellers")]),
+        "sellers": Sub(name="sellers", paths=["src/sellers"], consumes=[Consumes("auth")]),
+    }
+    issues = check_cycles(_ctx(subs))
+    assert any(i.code == errors.E_CYCLE_DETECTED for i in issues)
+
+
+def test_sibling_cycle_unaffected_by_unrelated_nesting():
+    """Two genuinely-cyclic siblings stay reported even when other subsystems are nested elsewhere."""
+    subs = {
+        "a": Sub(name="a", paths=["src/a"], consumes=[Consumes("b")]),
+        "b": Sub(name="b", paths=["src/b"], consumes=[Consumes("a")]),
+        "a-util": Sub(name="a-util", paths=["src/a/util"]),
+    }
+    issues = check_cycles(_ctx(subs))
+    assert any(i.code == errors.E_CYCLE_DETECTED for i in issues)
+
+
+def test_build_containment_detects_strict_nesting_only():
+    from bounds.core.validate.checks import build_containment
+
+    subs = {
+        "auth": Sub(name="auth", paths=["src/auth"]),
+        "guards": Sub(name="guards", paths=["src/auth/guards"]),
+        "sellers": Sub(name="sellers", paths=["src/sellers"]),
+    }
+    contains = build_containment(subs)
+    assert contains["auth"] == {"guards"}
+    assert contains["guards"] == set()
+    assert contains["sellers"] == set()
+
+
+# ===========================================================================
 # Check 6 — orphan detection
 # ===========================================================================
 def test_orphan_export_flagged():

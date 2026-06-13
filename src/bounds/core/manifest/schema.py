@@ -369,6 +369,20 @@ def validate_subsystem(
                 )
             )
 
+    # ``parent`` declares explicit containment: the name of the subsystem this one is nested in.
+    # Auto-detected from path nesting otherwise; this only disambiguates non-nesting layouts.
+    parent = data.get("parent")
+    if parent is not None and not (isinstance(parent, str) and parent.strip()):
+        issues.append(
+            Issue(
+                code=errors.E_SCHEMA_INVALID,
+                severity="error",
+                message=f"subsystem '{declared_name}' 'parent' must be a non-empty subsystem name",
+                subsystem=name,
+                fix="set `parent: <subsystem>` to the containing subsystem, or remove the key",
+            )
+        )
+
     exposes = data.get("exposes")
     if exposes is not None:
         if not isinstance(exposes, list):

@@ -8,6 +8,7 @@ issues use their natural severity; the engine downgrades errors to warnings for 
 from __future__ import annotations
 
 import posixpath
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from posixpath import normpath
@@ -523,6 +524,185 @@ def check_cross_impact(ctx: CheckContext) -> list[Issue]:
 # ===========================================================================
 # Check 5 — cycle detection
 # ===========================================================================
+# How many individual cycle paths to surface before collapsing the rest into a root-cause summary.
+_CYCLE_SAMPLE_CAP = 10
+# How many root edges to name in the minimal-feedback-arc-set summary before truncating.
+_CYCLE_CUT_CAP = 15
+
+
+def _literal_prefix(pattern: str) -> str:
+    """The fixed directory/file prefix of a repo-relative posix path glob, glob tail removed.
+
+    ``src/auth/**`` -> ``src/auth``; ``src/foo.ts`` -> ``src/foo.ts``; ``*`` / ``.`` -> ``""``.
+    Used to reason about which subsystem's declared paths nest inside another's.
+    """
+    head = re.split(r"[*?\[]", pattern, maxsplit=1)[0].rstrip("/")
+    return "" if head in (".", "") else head
+
+
+def _subsystem_prefixes(sub: SubsystemCompact) -> list[str]:
+    """Literal path prefixes a subsystem declares (from ``paths`` + ``files``), glob tails removed."""
+    out: list[str] = []
+    for p in list(sub.paths) + list(sub.files):
+        lp = _literal_prefix(p)
+        if lp:
+            out.append(lp)
+    return out
+
+
+def _strictly_under(inner: str, outer: str) -> bool:
+    """True when posix path ``inner`` is a strict descendant of directory ``outer``."""
+    return bool(outer) and inner != outer and inner.startswith(outer + "/")
+
+
+def build_containment(subsystems: dict[str, SubsystemCompact]) -> dict[str, set[str]]:
+    """Map each subsystem -> the set of subsystems whose declared path tree it strictly *contains*.
+
+    A subsystem nested inside another's declared path (e.g. ``src/auth/guards`` inside ``src/auth``)
+    is a contained child, not a peer. Parent↔child imports are normal intra-module layering
+    (a module file importing its own subdirectory and vice-versa), never an architectural cycle —
+    the manifest schema models them as siblings, so without this they read as false cycles.
+
+    Containment is derived from path nesting and can be overridden/augmented with an explicit
+    ``parent:`` declaration. Interleaved paths (each strictly under the other) are treated as an
+    overlap, not containment, and are left for ``E_SUBSYSTEM_OVERLAP`` to report.
+    """
+    names = sorted(subsystems)
+    prefixes = {n: _subsystem_prefixes(subsystems[n]) for n in names}
+    contains: dict[str, set[str]] = {n: set() for n in names}
+
+    for outer in names:
+        opre = prefixes[outer]
+        if not opre:
+            continue
+        for inner in names:
+            if inner == outer:
+                continue
+            ipre = prefixes[inner]
+            if not ipre:
+                continue
+            inner_under_outer = all(any(_strictly_under(i, o) for o in opre) for i in ipre)
+            outer_under_inner = all(any(_strictly_under(o, i) for i in ipre) for o in opre)
+            if inner_under_outer and not outer_under_inner:
+                contains[outer].add(inner)
+
+    # Explicit `parent:` declarations override/augment path-based detection (loader has already
+    # validated that the referenced parent exists and the chain is acyclic).
+    for child in names:
+        declared = (subsystems[child].parent or "").strip()
+        if declared and declared in contains and declared != child:
+            contains[declared].add(child)
+    return contains
+
+
+def _is_containment_pair(u: str, v: str, contains: dict[str, set[str]]) -> bool:
+    """True when ``u`` and ``v`` are in a parent↔child containment relationship (either direction)."""
+    return v in contains.get(u, ()) or u in contains.get(v, ())
+
+
+def _is_containment_cycle(cycle: list[str], contains: dict[str, set[str]]) -> bool:
+    """True when *every* adjacent pair in a cycle is a containment pair — i.e. the whole cycle lives
+    inside a single nesting chain and is intra-module layering, not a real architectural cycle. A
+    cycle with even one cross-subsystem (non-nesting) edge is genuine and is kept."""
+    n = len(cycle)
+    for i in range(n):
+        if not _is_containment_pair(cycle[i], cycle[(i + 1) % n], contains):
+            return False
+    return True
+
+
+def _count_sccs(real_cycles: list[list[str]]) -> int:
+    """Number of strongly-connected components (independent tangles) over the subgraph induced by
+    the surviving real cycles. Iterative Tarjan so a deep tangle can't raise ``RecursionError``."""
+    adj: dict[str, set[str]] = {}
+    for cyc in real_cycles:
+        n = len(cyc)
+        for i in range(n):
+            adj.setdefault(cyc[i], set()).add(cyc[(i + 1) % n])
+            adj.setdefault(cyc[(i + 1) % n], set())
+    index_of: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on_stack: set[str] = set()
+    stack: list[str] = []
+    counter = 0
+    scc_count = 0
+    for start in sorted(adj):
+        if start in index_of:
+            continue
+        work: list[tuple[str, object]] = [(start, iter(sorted(adj[start])))]
+        index_of[start] = low[start] = counter
+        counter += 1
+        stack.append(start)
+        on_stack.add(start)
+        while work:
+            node, it = work[-1]
+            advanced = False
+            for nxt in it:
+                if nxt not in index_of:
+                    index_of[nxt] = low[nxt] = counter
+                    counter += 1
+                    stack.append(nxt)
+                    on_stack.add(nxt)
+                    work.append((nxt, iter(sorted(adj[nxt]))))
+                    advanced = True
+                    break
+                if nxt in on_stack:
+                    low[node] = min(low[node], index_of[nxt])
+            if advanced:
+                continue
+            if low[node] == index_of[node]:
+                scc_count += 1
+                while True:
+                    w = stack.pop()
+                    on_stack.discard(w)
+                    if w == node:
+                        break
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[node])
+    return scc_count
+
+
+def _greedy_feedback_edges(
+    real_cycles: list[list[str]], contains: dict[str, set[str]]
+) -> list[tuple[tuple[str, str], int]]:
+    """A ranked minimal feedback-arc-set: the smallest set of edges whose removal breaks *every*
+    cycle, greedily chosen most-impactful-first. Returns ``[((u, v), breaks_count), ...]`` where
+    ``breaks_count`` is how many still-unbroken cycles that single edge removal resolves.
+
+    Containment-pair edges are never candidates — a module importing its own subdirectory is not a
+    cuttable architectural dependency. Every real cycle has at least one non-containment edge (else
+    it was filtered out as a containment artifact), so the cut set still covers them all.
+    """
+    cycle_edges: list[frozenset[tuple[str, str]]] = []
+    for cyc in real_cycles:
+        n = len(cyc)
+        cycle_edges.append(frozenset((cyc[i], cyc[(i + 1) % n]) for i in range(n)))
+    covered = [False] * len(cycle_edges)
+    cut: list[tuple[tuple[str, str], int]] = []
+    while True:
+        counts: dict[tuple[str, str], int] = {}
+        for idx, edges in enumerate(cycle_edges):
+            if covered[idx]:
+                continue
+            for e in edges:
+                if _is_containment_pair(e[0], e[1], contains):
+                    continue
+                counts[e] = counts.get(e, 0) + 1
+        if not counts:
+            break
+        # Highest participation wins; ties break on the (u, v) tuple for determinism.
+        best = max(sorted(counts), key=lambda e: counts[e])
+        breaks = 0
+        for idx, edges in enumerate(cycle_edges):
+            if not covered[idx] and best in edges:
+                covered[idx] = True
+                breaks += 1
+        cut.append((best, breaks))
+    return cut
+
+
 def check_cycles(ctx: CheckContext) -> list[Issue]:
     graph = {
         name: sorted({c.subsystem for c in sub.consumes if c.subsystem in ctx.subsystems})
@@ -532,11 +712,18 @@ def check_cycles(ctx: CheckContext) -> list[Issue]:
     if not all_cycles:
         return []
 
+    # Drop parent↔child containment artifacts: a cycle entirely inside one nesting chain is
+    # intra-module layering (the manifest models a nested subsystem as a peer), not a real cycle.
+    contains = build_containment(ctx.subsystems)
+    real_cycles = [c for c in all_cycles if not _is_containment_cycle(c, contains)]
+    if not real_cycles:
+        return []
+
     issues: list[Issue] = []
-    # If the graph is a bowl of spaghetti, reporting 1,000 individual cycles is a flood, not
-    # helpful context. Report the shortest 10, then roll the rest into a summary that names
-    # the most frequent bottleneck edges (the ones whose removal breaks the most cycles).
-    reported_cycles = all_cycles[:10]
+    # Surface the shortest few cycles individually for direct context. If the graph is a tangle,
+    # a flood of individual paths is unactionable — collapse the rest into a root-cause summary:
+    # the minimal set of edges whose removal breaks every remaining cycle, ranked by impact.
+    reported_cycles = real_cycles[:_CYCLE_SAMPLE_CAP]
     for cycle in reported_cycles:
         chain = " -> ".join(cycle + [cycle[0]])
         issues.append(
@@ -548,23 +735,22 @@ def check_cycles(ctx: CheckContext) -> list[Issue]:
             )
         )
 
-    if len(all_cycles) > 10:
-        edge_counts: dict[tuple[str, str], int] = {}
-        for cyc in all_cycles:
-            for i in range(len(cyc)):
-                u, v = cyc[i], cyc[(i + 1) % len(cyc)]
-                edge_counts[(u, v)] = edge_counts.get((u, v), 0) + 1
-
-        # Take the top 3 bottleneck edges
-        bottlenecks = sorted(edge_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-        bottleneck_text = ", ".join(f"'{u}->{v}' ({count})" for (u, v), count in bottlenecks)
-
+    if len(real_cycles) > _CYCLE_SAMPLE_CAP:
+        cut = _greedy_feedback_edges(real_cycles, contains)
+        n_scc = _count_sccs(real_cycles)
+        shown = cut[:_CYCLE_CUT_CAP]
+        cut_text = ", ".join(f"'{u}->{v}' (breaks {breaks})" for (u, v), breaks in shown)
+        if len(cut) > _CYCLE_CUT_CAP:
+            cut_text += f", … (+{len(cut) - _CYCLE_CUT_CAP} more)"
+        tangles = f"{n_scc} strongly-connected component{'s' if n_scc != 1 else ''}"
         issues.append(
             _issue(
                 errors.E_CYCLE_DETECTED,
-                f"... and {len(all_cycles) - 10} more cycles; top bottlenecks: {bottleneck_text}",
-                count=len(all_cycles) - 10,
-                fix="Break a bottleneck edge to resolve many cycles at once; see docs/troubleshooting-ci.md",
+                f"… and {len(real_cycles) - len(reported_cycles)} more cycles across {tangles}; "
+                f"these {len(cut)} root edge{'s' if len(cut) != 1 else ''} break all of them: {cut_text}",
+                count=len(real_cycles) - len(reported_cycles),
+                fix="Cut a ranked root edge (dependency-invert it or move shared code to a library "
+                "subsystem) to resolve many cycles at once; see docs/troubleshooting-ci.md",
             )
         )
 

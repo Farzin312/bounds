@@ -115,6 +115,7 @@ def load_all(
         subsystems[name] = SubsystemCompact.from_dict(raw, source_path=path.as_posix())
 
     _fill_consumed_by(subsystems)
+    issues.extend(_validate_parents(subsystems))
     return root, subsystems, issues
 
 
@@ -226,6 +227,58 @@ def _validate_root_yaml(project_root: Path) -> list[Issue]:
     if not isinstance(data, dict):
         data = {}
     return schema.validate_root(data)
+
+
+def _validate_parents(subsystems: dict[str, SubsystemCompact]) -> list[Issue]:
+    """Validate explicit ``parent:`` declarations: a parent must name a real subsystem and the
+    containment graph must be acyclic (no subsystem is its own ancestor). Auto-detected
+    path-nesting containment cannot form a cycle by construction, so only explicit edges are
+    checked here. Reported soft (warnings) — a bad ``parent`` never blocks, it just isn't applied."""
+    issues: list[Issue] = []
+    for name in sorted(subsystems):
+        declared = (subsystems[name].parent or "").strip()
+        if not declared:
+            continue
+        if declared == name:
+            issues.append(
+                Issue(
+                    code=errors.E_SCHEMA_INVALID,
+                    severity="warning",
+                    message=f"subsystem '{name}' declares itself as its own parent",
+                    subsystem=name,
+                    fix=f"remove `parent: {name}` from {name}.yaml",
+                )
+            )
+            continue
+        if declared not in subsystems:
+            issues.append(
+                Issue(
+                    code=errors.E_SCHEMA_INVALID,
+                    severity="warning",
+                    message=f"subsystem '{name}' declares parent '{declared}' which is not a known subsystem",
+                    subsystem=name,
+                    fix=f"point `parent:` at a subsystem listed in root.subsystems, or remove the key",
+                )
+            )
+            continue
+        # Walk the explicit parent chain; flag a cycle (and stop) if we revisit a node.
+        seen = {name}
+        cursor = declared
+        while cursor:
+            if cursor in seen:
+                issues.append(
+                    Issue(
+                        code=errors.E_SCHEMA_INVALID,
+                        severity="warning",
+                        message=f"subsystem '{name}' has a circular parent chain via '{cursor}'",
+                        subsystem=name,
+                        fix="remove a `parent:` edge so the containment chain is acyclic",
+                    )
+                )
+                break
+            seen.add(cursor)
+            cursor = (subsystems[cursor].parent or "").strip() if cursor in subsystems else ""
+    return issues
 
 
 def _fill_consumed_by(subsystems: dict[str, SubsystemCompact]) -> None:
