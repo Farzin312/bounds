@@ -190,6 +190,8 @@ class SubsystemCompact:
     consumes: list[Consumes] = []  # declared cross-boundary deps
     files: list[str] = []          # optional explicit file list (else derived from paths)
     consumed_by: list[str] = []    # AUTO-filled by loader (inverse of consumes)
+    parent: str = ""               # optional explicit containment (else auto-detected from path nesting);
+                                   # parent↔child imports are intra-module layering, never a cycle
     source_path: str = ""          # abs path to this bounds.yaml
 
 @dataclass
@@ -249,6 +251,9 @@ class Issue:
     subsystem: str | None = None
     file: str | None = None
     fix: str | None = None         # deterministic, actionable suggestion
+    count: int = 1                 # >1 when this issue rolls up N findings into one (token-lean)
+    suppressed: bool = False       # policy/baseline-accepted: stays in the report, never blocks the gate
+    note: str | None = None        # audit justification when suppressed (reason/owner) — serialized when set
 
 @dataclass
 class ValidationReport:
@@ -301,11 +306,14 @@ CACHE_FILE = "cache.db"          # binary SQLite extraction cache (context armor
 STATE_FILE = "state.json"        # legacy JSON cache; read once for auto-migration to cache.db
 GITIGNORE_FILE = ".gitignore"    # scaffolded under .bounds/ so the regenerable cache stays uncommitted
 DRIFT_BASELINE_FILE = "drift-baseline.json"   # accepted-drift baseline; `calibrate --check` flags only drift above it
+CYCLE_BASELINE_FILE = "cycle-baseline.json"   # accepted-cycle baseline; validate/preflight fail only on NEW cycles
+POLICY_FILE = "policy.yaml"      # optional gate governance: per-code severity, fail_on, per-finding suppression
 SCHEMA_VERSION = "1"
-STATE_VERSION = "4"              # cache schema version, mirrored in PRAGMA user_version
+STATE_VERSION = "6"              # cache schema version, mirrored in PRAGMA user_version
                                  # (v3: honor Python __all__ in the export surface +
                                  #  same-file Django ORM inheritance; v4: persist generated-file
-                                 #  flags so quick validation need not reread unchanged source)
+                                 #  flags so quick validation need not reread unchanged source;
+                                 #  v5: shell adapter; v6: NestJS @Controller/@Resolver framework_entry tag)
 
 # Built-in role/criticality enums. With no custom block in root.yaml these are the
 # valid sets (backward compatible); a custom block replaces them via the root registries.
@@ -862,8 +870,8 @@ docs:                           # optional — doc files that document this subs
 2. **Boundary compliance** (`E_BOUNDARY_VIOLATION`, error): for each import in subsystem A resolving to a file owned by subsystem B, the imported names must all be in B's `exposes`. Importing a non-exposed (internal) symbol → violation. Resolution (`checks.resolve_import`): match import `module` against B's file paths via exact-stem, package `/index`/`/__init__`, then a trailing-segment suffix fallback. Relative imports handle both dialects — a TS `./auth.service` keeps the dotted filename (never split into `auth/service`), a Python `..models` treats the dots as separators. For a bare specifier from a TS/JS file the project's `tsconfig.json` `baseUrl`/`paths` aliases (loaded via `tsconfig.load`, threaded as `CheckContext.ts_aliases()`) are tried first, so an aliased import like `@/common` resolves. Fix: "import only B's exposed interfaces, or add `<name>` to B.exposes".
 3. **Contract compliance** (`E_CONTRACT_MISSING_EXPORT`, error): for each `consumes` entry, every listed interface must appear in the provider's `exposes`. For schema contracts, `table.column` is valid only when `table` is exposed and the deterministic SQL fold still contains `column`. Missing → contract break. Fix: "provider `<B>` does not expose `<iface>`; update consumer or provider".
 4. **Cross-subsystem impact** (`E_STALE_INTERFACE`, error/stale): a provider's `structure_hash` changed (it's in `dirty`) and it has consumers (`consumed_by`) → those consumer interfaces may be stale. Emits one issue per affected consumer. Fix: "re-validate consumer `<C>`; provider `<B>` interface surface changed".
-5. **Cycle detection** (`E_CYCLE_DETECTED`, error): build the directed graph from `consumes`; DFS for back-edges; report each cycle as a chain `A → B → C → A`. Fix: "break the dependency cycle; introduce an interface/inversion".
-6. **Orphan detection** (`E_ORPHAN_EXPORT`, warning): an exposed interface that appears in no subsystem's `consumes`, where the owning subsystem's role does **not** carry `orphan_exposes` (the `service` base, and any custom role extending it, legitimately expose unconsumed surface — resolved via `RootManifest.role_registry()`). Fix: "interface `<x>` of `<A>` is consumed by no one; consider removing or marking entrypoint".
+5. **Cycle detection** (`E_CYCLE_DETECTED`, error): build the directed graph from `consumes`; iterative-DFS for back-edges. **Containment filter** (`build_containment`): a cycle is dropped when *every* adjacent pair is a parent↔child containment pair (one subsystem's declared path strictly nests inside the other's, or an explicit `parent:`) — that's intra-module layering, not an architectural cycle; a genuine cross-domain cycle passing through such an edge keeps its non-containment edge and is reported. Up to 10 individual cycles are surfaced; the rest collapse to a **root-cause** rollup: a ranked minimal feedback-arc-set (the smallest edge set whose removal breaks every cycle, each "breaks N") + the SCC count, computed in `check_cycles`. A committed `.bounds/cycle-baseline.json` (`calibrate --dump-baseline`) suppresses known cycles so the gate fails only on NEW ones. **5b. Composition-root detection** (`check_composition_root`, `E_COMPOSITION_ROOT`, warning): flags a catch-all that is both high fan-in and high fan-out.
+6. **Orphan detection** (`E_ORPHAN_EXPORT`, warning): an exposed interface that appears in no subsystem's `consumes`, where the owning subsystem's role does **not** carry `orphan_exposes` (the `service` base, and any custom role extending it, legitimately expose unconsumed surface — resolved via `RootManifest.role_registry()`). **Framework-invoked entrypoints are exempt**: a NestJS `@Controller`/`@Resolver` class (tagged `framework_entry` by the TS adapter) is consumed by the framework's routing/DI layer, not a sibling subsystem — like a Next.js route file. Fix: "interface `<x>` of `<A>` is consumed by no one; consider removing or marking entrypoint".
 
 7. **Schema health** (`check_schema`, warnings only): a migration statement that didn't parse → `E_SCHEMA_UNPARSED` (the file's other statements still fold); order-dependent migrations with no deterministic order → `E_SCHEMA_NO_ORDER`. Runs in `quick`/`full`/`preflight`/`audit`.
 8. **Adapter output contracts** (`E_ADAPTER_CONTRACT`, warning): for every extracted file, the owning adapter's `check_contract()` inspects the output against its declared self-consistency invariants. Pure regression guard (zero LLM, no tree-sitter re-parse, no filesystem read — operates only on the already-built `ExtractResult`). Catches adapter logic regressions that extraction alone would silently pass — e.g., a Prisma relation field leaking as a column, or an all-unparsable SQL migration whose revision header masked the failure. Always advisory (warning only, never blocks). Runs in `quick`/`full`/`preflight`/`audit`.
@@ -885,6 +893,7 @@ Forward references (a `consumes.subsystem` or path that doesn't resolve to a kno
 | `E_UNRESOLVED_REFERENCE` | warning | forward ref to unknown subsystem/interface |
 | `E_COVERAGE_GAP` | warning | a closeable coverage gap — `supported.unowned` remains the compatibility total, split into real ownership decisions and deterministic algorithm misses, plus unsupported-language files no manifest claims (`unsupported.dark`). The fix routes each bucket to `init --path`, `fix-coverage --auto`, or durable hand-authored exposes |
 | `E_SUBSYSTEM_OVERLAP` | warning | two subsystems declare the identical path/file at equal specificity, so ownership rides on the sorted-first tie-break; surfaced by `describe` (advisory) |
+| `E_COMPOSITION_ROOT` | warning | one subsystem is simultaneously a high fan-OUT importer and high fan-IN target (≥50% of siblings on both axes, min 8 subsystems) — the catch-all signature that fuses a DI/HTTP composition root with shared leaf utilities and forms a cycle with essentially every sibling. Advisory; fix points at declaring it an `entry_point` + splitting the leaves |
 | `E_UNOWNED_FILE` | error / warning | tracked source file owned by no subsystem (`--fail-on-unowned`); a `root.entry_points` match degrades to a non-blocking warning |
 | `E_EXTERNAL_SYMLINK` | warning | a scanned path resolves outside the project via a symlink (skipped unless `--follow-symlinks`) |
 | `E_MANIFEST_NOT_FOUND` | fatal | no `.bounds/` (or legacy `.compact/`) found |

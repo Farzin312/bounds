@@ -242,12 +242,14 @@ def impact(name, verify, include_raw, human):
 @click.option("--include-gitignored", "include_gitignored", is_flag=True, default=False, help="Include .gitignore in denominator.")
 @click.option("--follow-symlinks", "follow_symlinks", is_flag=True, default=False, help="Traverse directory symlinks.")
 @click.option("--fail-on-unowned", "fail_on_unowned", is_flag=True, default=False, help="Block on unmapped supported source.")
+@click.option("--fail-on", "fail_on", multiple=True, metavar="CODE",
+              help="Block on these error codes regardless of mode/enforce (repeatable or comma-separated).")
 @click.option("--ci", "is_ci", is_flag=True, default=False, help="Output tab-delimited CI status.")
 @_human
 def validate(quick, mode, enforce, base, include_ignored, include_gitignored,
-             follow_symlinks, fail_on_unowned, is_ci, human):
+             follow_symlinks, fail_on_unowned, fail_on, is_ci, human):
     cli_drift.validate_cmd(quick, mode, enforce, base, include_ignored, include_gitignored,
-                           follow_symlinks, fail_on_unowned, is_ci, human)
+                           follow_symlinks, fail_on_unowned, fail_on, is_ci, human)
 
 @main.command("preflight", short_help="Architecture gate (validate + coverage)")
 @click.option("--ci", "is_ci", is_flag=True, help="Output tab-delimited CI status.")
@@ -255,10 +257,12 @@ def validate(quick, mode, enforce, base, include_ignored, include_gitignored,
 @click.option("--include-gitignored", "include_gitignored", is_flag=True, default=False)
 @click.option("--follow-symlinks", "follow_symlinks", is_flag=True, default=False)
 @click.option("--fail-on-unowned", "fail_on_unowned", is_flag=True, default=False)
+@click.option("--fail-on", "fail_on", multiple=True, metavar="CODE",
+              help="Block on these error codes regardless of enforce (repeatable or comma-separated).")
 @_human
-def preflight(is_ci, include_ignored, include_gitignored, follow_symlinks, fail_on_unowned, human):
+def preflight(is_ci, include_ignored, include_gitignored, follow_symlinks, fail_on_unowned, fail_on, human):
     cli_drift.preflight_cmd(is_ci, include_ignored, include_gitignored,
-                            follow_symlinks, fail_on_unowned, human)
+                            follow_symlinks, fail_on_unowned, fail_on, human)
 
 @main.command("calibrate", short_help="Realign contracts with source after code changes")
 @click.option("--subsystem", default=None)

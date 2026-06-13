@@ -12,7 +12,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from ...shared import config, errors, gitutil, surface
+from ...shared import config, errors, gitutil, policy as policy_mod, surface
 from ...shared.cache import store as cache_store
 from ..extract import content_hash, get_adapter, supported_extensions, scan
 from ...shared.ignore import IgnoreMatcher, has_generated_marker, load_matcher
@@ -32,6 +32,7 @@ def run(
     include_gitignored: bool = False,
     follow_symlinks: bool = False,
     fail_on_unowned: bool = False,
+    fail_on: tuple[str, ...] = (),
 ) -> ValidationReport:
     """Validate the project at ``project_root`` in the given ``mode`` and return a report.
 
@@ -254,6 +255,14 @@ def run(
     # directory/extension walk only (no source reads), so it stays within the --quick budget.
     unsupported_owners = scan.subsystems_with_unsupported_source(project_root, subsystems, matcher)
 
+    # Committed accepted-cycle baseline (opt-in): a cycle whose key is here is reported but does not
+    # block, so the gate fails only on NEW cycles. Loaded lazily (function-local import) to keep the
+    # engine⇄calibrate dependency one-directional. Skipped on --quick (it runs no cycle check).
+    cycle_baseline: set[str] = set()
+    if mode != "quick":
+        from .. import calibrate as _calibrate  # local import: avoid a module-load import cycle
+        cycle_baseline = _calibrate.load_cycle_baseline(project_root)
+
     ctx = CheckContext(
         project_root=project_root,
         root=root,
@@ -264,6 +273,7 @@ def run(
         propagated=propagated,
         unsupported_owners=unsupported_owners,
         generated_files=generated_files,
+        cycle_baseline=cycle_baseline,
     )
     for check in CHECKS_BY_MODE.get(mode, []):
         issues.extend(check(ctx))
@@ -319,9 +329,17 @@ def run(
             for name, changed in surface.stale_subsystems(baseline, current_surface).items():
                 issues.append(_surface_stale_issue(name, changed))
 
+    # Governance policy (.bounds/policy.yaml): re-grade codes, suppress accepted findings, and merge
+    # any committed `fail_on` codes with the per-run --fail-on flag. Applied after every finding is
+    # collected so it sees the full set; suppressed/demoted findings stay in the report (report-hard)
+    # but stop blocking. A malformed policy degrades to advisory warnings (folded in here).
+    policy = policy_mod.load_policy(project_root)
+    issues = policy.apply(issues)
+    issues.extend(policy.issues)
+    effective_fail_on = frozenset(fail_on) | policy.fail_on
+
     status = _status(issues)
-    unowned_blocks = any(i.severity == "error" for i in unowned)
-    blocking = _is_blocking(issues, mode, final_enforce) or unowned_blocks
+    blocking = _is_blocking(issues, mode, final_enforce, effective_fail_on)
     duration_ms = int((time.perf_counter() - started) * 1000)
 
     # coverage: an honest signal that boundary checking is not as complete as a clean
@@ -752,8 +770,25 @@ def _status(issues: list[Issue]) -> str:
     return "fresh"
 
 
-def _is_blocking(issues: list[Issue], mode: str, enforce: str) -> bool:
-    has_error = any(i.severity == "error" for i in issues)
+def _is_blocking(
+    issues: list[Issue], mode: str, enforce: str, fail_on: frozenset[str] = frozenset()
+) -> bool:
+    # Suppressed findings (policy/baseline-accepted) never block, but stay in the report.
+    active = [i for i in issues if not i.suppressed]
+    # --fail-on-unowned promotes unowned files to a hard gate in EVERY mode (opt-in ownership
+    # exhaustiveness): an E_UNOWNED_FILE error blocks regardless of mode/enforce. Entry-point files
+    # are reported as warnings, so they don't trip this.
+    if any(i.code == errors.E_UNOWNED_FILE and i.severity == "error" for i in active):
+        return True
+    # quick/hotfix/audit are advisory and never block on the severity logic below.
+    if mode in ("quick", "hotfix", "audit"):
+        return False
+    # Explicit --fail-on / policy `fail_on` codes block in any blocking-capable mode and override
+    # `enforce: warn` — the escape hatch to hard-gate the findings a repo CAN fix while the overall
+    # gate stays soft.
+    if fail_on and any(i.code in fail_on for i in active):
+        return True
+    has_error = any(i.severity == "error" for i in active)
     if enforce == "warn":
         # Report-but-never-block: warn mode surfaces every issue (CI still prints the
         # report and the JSON still carries the errors) yet always exits clean, so a team
@@ -763,5 +798,4 @@ def _is_blocking(issues: list[Issue], mode: str, enforce: str) -> bool:
         return has_error
     if mode == "full":
         return has_error and enforce == "on"
-    # quick, hotfix, audit never block.
     return False

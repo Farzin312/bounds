@@ -59,4 +59,5 @@ exposes:
   kind: const
 - name: E_INTERNAL
   kind: const
-consumes: []
+- name: E_COMPOSITION_ROOT
+  kind: const

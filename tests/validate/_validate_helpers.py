@@ -14,7 +14,7 @@ from bounds.core.validate.checks import CheckContext
 
 
 def _ctx(subsystems, extracts=None, file_owner=None, dirty=None, propagated=None,
-         unsupported_owners=None, generated_files=None):
+         unsupported_owners=None, generated_files=None, cycle_baseline=None):
     return CheckContext(
         project_root=Path("."),
         root=RootManifest(),
@@ -25,4 +25,5 @@ def _ctx(subsystems, extracts=None, file_owner=None, dirty=None, propagated=None
         propagated=propagated or set(),
         unsupported_owners=unsupported_owners or set(),
         generated_files=generated_files or set(),
+        cycle_baseline=cycle_baseline or set(),
     )

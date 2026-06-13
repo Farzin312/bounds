@@ -8,6 +8,7 @@ issues use their natural severity; the engine downgrades errors to warnings for 
 from __future__ import annotations
 
 import posixpath
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from posixpath import normpath
@@ -18,7 +19,7 @@ from ..extract.scan import is_framework_entry_file, is_test_file, is_test_symbol
 from ...shared.models import ExtractResult, Issue, RootManifest, SubsystemCompact
 from .schema import SCHEMA_LANGUAGES, _fold_subsystem_schema, schema_diagnostics
 
-__all__ = ["CheckContext", "check_cycles", "index_extracts", "resolve_import"]
+__all__ = ["CheckContext", "check_cycles", "current_cycle_keys", "index_extracts", "resolve_import"]
 
 # Sentinel for "not yet computed" so a genuinely absent tsconfig (cached as None) isn't reloaded.
 _UNSET = object()
@@ -79,6 +80,11 @@ class CheckContext:
     # Files with a generated-code marker. The engine reads this from source only when it parses a
     # file, then caches it so quick validation can skip generated exports without source rereads.
     generated_files: set[str] = field(default_factory=set)
+    # Canonical keys of subsystem-level cycles already accepted in .bounds/cycle-baseline.json. A
+    # cycle whose key is here is known/accepted: it is reported (suppressed, non-blocking) so the
+    # gate fails only on NEW cycles a branch introduces — parity with the drift baseline. Empty ⇒
+    # no baseline committed ⇒ every real cycle is reported normally (opt-in, like the surface baseline).
+    cycle_baseline: set[str] = field(default_factory=set)
 
     def files_of(self, subsystem: str) -> list[str]:
         """Extracted files owned by ``subsystem`` (sorted, only those present in extracts)."""
@@ -523,6 +529,211 @@ def check_cross_impact(ctx: CheckContext) -> list[Issue]:
 # ===========================================================================
 # Check 5 — cycle detection
 # ===========================================================================
+# How many individual cycle paths to surface before collapsing the rest into a root-cause summary.
+_CYCLE_SAMPLE_CAP = 10
+# How many root edges to name in the minimal-feedback-arc-set summary before truncating.
+_CYCLE_CUT_CAP = 15
+
+
+def _literal_prefix(pattern: str) -> str:
+    """The fixed directory/file prefix of a repo-relative posix path glob, glob tail removed.
+
+    ``src/auth/**`` -> ``src/auth``; ``src/foo.ts`` -> ``src/foo.ts``; ``*`` / ``.`` -> ``""``.
+    Used to reason about which subsystem's declared paths nest inside another's.
+    """
+    head = re.split(r"[*?\[]", pattern, maxsplit=1)[0].rstrip("/")
+    return "" if head in (".", "") else head
+
+
+def _subsystem_prefixes(sub: SubsystemCompact) -> list[str]:
+    """Literal path prefixes a subsystem declares (from ``paths`` + ``files``), glob tails removed."""
+    out: list[str] = []
+    for p in list(sub.paths) + list(sub.files):
+        lp = _literal_prefix(p)
+        if lp:
+            out.append(lp)
+    return out
+
+
+def _strictly_under(inner: str, outer: str) -> bool:
+    """True when posix path ``inner`` is a strict descendant of directory ``outer``."""
+    return bool(outer) and inner != outer and inner.startswith(outer + "/")
+
+
+def build_containment(subsystems: dict[str, SubsystemCompact]) -> dict[str, set[str]]:
+    """Map each subsystem -> the set of subsystems whose declared path tree it strictly *contains*.
+
+    A subsystem nested inside another's declared path (e.g. ``src/auth/guards`` inside ``src/auth``)
+    is a contained child, not a peer. Parent↔child imports are normal intra-module layering
+    (a module file importing its own subdirectory and vice-versa), never an architectural cycle —
+    the manifest schema models them as siblings, so without this they read as false cycles.
+
+    Containment is derived from path nesting and can be overridden/augmented with an explicit
+    ``parent:`` declaration. Interleaved paths (each strictly under the other) are treated as an
+    overlap, not containment, and are left for ``E_SUBSYSTEM_OVERLAP`` to report.
+    """
+    names = sorted(subsystems)
+    prefixes = {n: _subsystem_prefixes(subsystems[n]) for n in names}
+    contains: dict[str, set[str]] = {n: set() for n in names}
+
+    for outer in names:
+        opre = prefixes[outer]
+        if not opre:
+            continue
+        for inner in names:
+            if inner == outer:
+                continue
+            ipre = prefixes[inner]
+            if not ipre:
+                continue
+            inner_under_outer = all(any(_strictly_under(i, o) for o in opre) for i in ipre)
+            outer_under_inner = all(any(_strictly_under(o, i) for i in ipre) for o in opre)
+            if inner_under_outer and not outer_under_inner:
+                contains[outer].add(inner)
+
+    # Explicit `parent:` declarations override/augment path-based detection (loader has already
+    # validated that the referenced parent exists and the chain is acyclic).
+    for child in names:
+        declared = (subsystems[child].parent or "").strip()
+        if declared and declared in contains and declared != child:
+            contains[declared].add(child)
+    return contains
+
+
+def _is_containment_pair(u: str, v: str, contains: dict[str, set[str]]) -> bool:
+    """True when ``u`` and ``v`` are in a parent↔child containment relationship (either direction)."""
+    return v in contains.get(u, ()) or u in contains.get(v, ())
+
+
+def _is_containment_cycle(cycle: list[str], contains: dict[str, set[str]]) -> bool:
+    """True when *every* adjacent pair in a cycle is a containment pair — i.e. the whole cycle lives
+    inside a single nesting chain and is intra-module layering, not a real architectural cycle. A
+    cycle with even one cross-subsystem (non-nesting) edge is genuine and is kept."""
+    n = len(cycle)
+    for i in range(n):
+        if not _is_containment_pair(cycle[i], cycle[(i + 1) % n], contains):
+            return False
+    return True
+
+
+def _count_sccs(real_cycles: list[list[str]]) -> int:
+    """Number of strongly-connected components (independent tangles) over the subgraph induced by
+    the surviving real cycles. Iterative Tarjan so a deep tangle can't raise ``RecursionError``."""
+    adj: dict[str, set[str]] = {}
+    for cyc in real_cycles:
+        n = len(cyc)
+        for i in range(n):
+            adj.setdefault(cyc[i], set()).add(cyc[(i + 1) % n])
+            adj.setdefault(cyc[(i + 1) % n], set())
+    index_of: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on_stack: set[str] = set()
+    stack: list[str] = []
+    counter = 0
+    scc_count = 0
+    for start in sorted(adj):
+        if start in index_of:
+            continue
+        work: list[tuple[str, object]] = [(start, iter(sorted(adj[start])))]
+        index_of[start] = low[start] = counter
+        counter += 1
+        stack.append(start)
+        on_stack.add(start)
+        while work:
+            node, it = work[-1]
+            advanced = False
+            for nxt in it:
+                if nxt not in index_of:
+                    index_of[nxt] = low[nxt] = counter
+                    counter += 1
+                    stack.append(nxt)
+                    on_stack.add(nxt)
+                    work.append((nxt, iter(sorted(adj[nxt]))))
+                    advanced = True
+                    break
+                if nxt in on_stack:
+                    low[node] = min(low[node], index_of[nxt])
+            if advanced:
+                continue
+            if low[node] == index_of[node]:
+                scc_count += 1
+                while True:
+                    w = stack.pop()
+                    on_stack.discard(w)
+                    if w == node:
+                        break
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[node])
+    return scc_count
+
+
+def _greedy_feedback_edges(
+    real_cycles: list[list[str]], contains: dict[str, set[str]]
+) -> list[tuple[tuple[str, str], int]]:
+    """A ranked minimal feedback-arc-set: the smallest set of edges whose removal breaks *every*
+    cycle, greedily chosen most-impactful-first. Returns ``[((u, v), breaks_count), ...]`` where
+    ``breaks_count`` is how many still-unbroken cycles that single edge removal resolves.
+
+    Containment-pair edges are never candidates — a module importing its own subdirectory is not a
+    cuttable architectural dependency. Every real cycle has at least one non-containment edge (else
+    it was filtered out as a containment artifact), so the cut set still covers them all.
+    """
+    cycle_edges: list[frozenset[tuple[str, str]]] = []
+    for cyc in real_cycles:
+        n = len(cyc)
+        cycle_edges.append(frozenset((cyc[i], cyc[(i + 1) % n]) for i in range(n)))
+    covered = [False] * len(cycle_edges)
+    cut: list[tuple[tuple[str, str], int]] = []
+    while True:
+        counts: dict[tuple[str, str], int] = {}
+        for idx, edges in enumerate(cycle_edges):
+            if covered[idx]:
+                continue
+            for e in edges:
+                if _is_containment_pair(e[0], e[1], contains):
+                    continue
+                counts[e] = counts.get(e, 0) + 1
+        if not counts:
+            break
+        # Highest participation wins; ties break on the (u, v) tuple for determinism.
+        best = max(sorted(counts), key=lambda e: counts[e])
+        breaks = 0
+        for idx, edges in enumerate(cycle_edges):
+            if not covered[idx] and best in edges:
+                covered[idx] = True
+                breaks += 1
+        cut.append((best, breaks))
+    return cut
+
+
+# Tab joins a canonical (min-rotated) cycle's nodes into a stable identity key. Tab never appears
+# in a subsystem name, so keys never collide — same convention as the drift baseline.
+_CYCLE_KEY_SEP = "\t"
+
+
+def cycle_key(cycle: list[str]) -> str:
+    """Stable identity for a cycle: its canonical (min-first) node order, tab-joined."""
+    return _CYCLE_KEY_SEP.join(_rotate_min(list(cycle)))
+
+
+def _real_cycles(subsystems: dict[str, SubsystemCompact]) -> list[list[str]]:
+    """The genuine (containment-filtered) subsystem cycles — the single definition shared by the
+    cycle check and the cycle-baseline dump, so a baselined key always matches a reported cycle."""
+    graph = {
+        name: sorted({c.subsystem for c in sub.consumes if c.subsystem in subsystems})
+        for name, sub in subsystems.items()
+    }
+    contains = build_containment(subsystems)
+    return [c for c in _find_cycles(graph) if not _is_containment_cycle(c, contains)]
+
+
+def current_cycle_keys(subsystems: dict[str, SubsystemCompact]) -> list[str]:
+    """Sorted canonical keys of every real cycle — what `calibrate --dump-baseline` records."""
+    return sorted(cycle_key(c) for c in _real_cycles(subsystems))
+
+
 def check_cycles(ctx: CheckContext) -> list[Issue]:
     graph = {
         name: sorted({c.subsystem for c in sub.consumes if c.subsystem in ctx.subsystems})
@@ -532,11 +743,42 @@ def check_cycles(ctx: CheckContext) -> list[Issue]:
     if not all_cycles:
         return []
 
+    # Drop parent↔child containment artifacts: a cycle entirely inside one nesting chain is
+    # intra-module layering (the manifest models a nested subsystem as a peer), not a real cycle.
+    contains = build_containment(ctx.subsystems)
+    real_cycles = [c for c in all_cycles if not _is_containment_cycle(c, contains)]
+    if not real_cycles:
+        return []
+
+    # Cycle baseline: a committed set of accepted cycles. Known cycles are reported once as a
+    # suppressed (non-blocking) rollup; only NEW cycles drive the gate — so a repo can hard-gate
+    # regressions without first clearing pre-existing cycle debt (parity with the drift baseline).
     issues: list[Issue] = []
-    # If the graph is a bowl of spaghetti, reporting 1,000 individual cycles is a flood, not
-    # helpful context. Report the shortest 10, then roll the rest into a summary that names
-    # the most frequent bottleneck edges (the ones whose removal breaks the most cycles).
-    reported_cycles = all_cycles[:10]
+    if ctx.cycle_baseline:
+        new_cycles = [c for c in real_cycles if cycle_key(c) not in ctx.cycle_baseline]
+        known = len(real_cycles) - len(new_cycles)
+        if known:
+            issues.append(
+                _issue(
+                    errors.E_CYCLE_DETECTED,
+                    f"{known} known cycle{'s' if known != 1 else ''} accepted by "
+                    f".bounds/cycle-baseline.json (suppressed)",
+                    severity="info",
+                    count=known,
+                    fix="re-dump the baseline (`bounds calibrate --dump-baseline`) after intentionally "
+                    "changing the accepted cycle set",
+                )
+            )
+            issues[-1].suppressed = True
+            issues[-1].note = "baselined cycle (accepted debt)"
+        real_cycles = new_cycles
+        if not real_cycles:
+            return issues
+
+    # Surface the shortest few cycles individually for direct context. If the graph is a tangle,
+    # a flood of individual paths is unactionable — collapse the rest into a root-cause summary:
+    # the minimal set of edges whose removal breaks every remaining cycle, ranked by impact.
+    reported_cycles = real_cycles[:_CYCLE_SAMPLE_CAP]
     for cycle in reported_cycles:
         chain = " -> ".join(cycle + [cycle[0]])
         issues.append(
@@ -548,23 +790,22 @@ def check_cycles(ctx: CheckContext) -> list[Issue]:
             )
         )
 
-    if len(all_cycles) > 10:
-        edge_counts: dict[tuple[str, str], int] = {}
-        for cyc in all_cycles:
-            for i in range(len(cyc)):
-                u, v = cyc[i], cyc[(i + 1) % len(cyc)]
-                edge_counts[(u, v)] = edge_counts.get((u, v), 0) + 1
-
-        # Take the top 3 bottleneck edges
-        bottlenecks = sorted(edge_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-        bottleneck_text = ", ".join(f"'{u}->{v}' ({count})" for (u, v), count in bottlenecks)
-
+    if len(real_cycles) > _CYCLE_SAMPLE_CAP:
+        cut = _greedy_feedback_edges(real_cycles, contains)
+        n_scc = _count_sccs(real_cycles)
+        shown = cut[:_CYCLE_CUT_CAP]
+        cut_text = ", ".join(f"'{u}->{v}' (breaks {breaks})" for (u, v), breaks in shown)
+        if len(cut) > _CYCLE_CUT_CAP:
+            cut_text += f", … (+{len(cut) - _CYCLE_CUT_CAP} more)"
+        tangles = f"{n_scc} strongly-connected component{'s' if n_scc != 1 else ''}"
         issues.append(
             _issue(
                 errors.E_CYCLE_DETECTED,
-                f"... and {len(all_cycles) - 10} more cycles; top bottlenecks: {bottleneck_text}",
-                count=len(all_cycles) - 10,
-                fix="Break a bottleneck edge to resolve many cycles at once; see docs/troubleshooting-ci.md",
+                f"… and {len(real_cycles) - len(reported_cycles)} more cycles across {tangles}; "
+                f"these {len(cut)} root edge{'s' if len(cut) != 1 else ''} break all of them: {cut_text}",
+                count=len(real_cycles) - len(reported_cycles),
+                fix="Cut a ranked root edge (dependency-invert it or move shared code to a library "
+                "subsystem) to resolve many cycles at once; see docs/troubleshooting-ci.md",
             )
         )
 
@@ -619,8 +860,73 @@ def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
 
 
 # ===========================================================================
+# Check 5b — composition-root detection (advisory; never blocks)
+# ===========================================================================
+# A subsystem must fan out to AND fan in from at least this fraction of the other subsystems to be
+# flagged. High on both axes is the catch-all signature; the threshold keeps a normal hub (a shared
+# library many things import, or a top-level app that imports many things, but not both) from firing.
+_COMPOSITION_ROOT_RATIO = 0.5
+# Below this many subsystems the ratios are too noisy to be meaningful (a 3-subsystem repo where one
+# imports the other two and is imported by them is just small, not a catch-all).
+_COMPOSITION_ROOT_MIN_SUBSYSTEMS = 8
+
+
+def check_composition_root(ctx: CheckContext) -> list[Issue]:
+    """Flag a catch-all subsystem that is simultaneously a high fan-out importer and high fan-in
+    target — a DI/HTTP composition root fused with a pile of shared leaf utilities. Such a subsystem
+    forms a cycle with essentially every sibling and costs a painful manual split on first adoption
+    (the audit's ``src`` catch-all). Advisory only; the fix points at the deterministic remedy."""
+    subsystems = ctx.subsystems
+    n = len(subsystems)
+    if n < _COMPOSITION_ROOT_MIN_SUBSYSTEMS:
+        return []
+    others = n - 1
+    # fan-out: distinct sibling subsystems this one consumes; fan-in: distinct siblings that consume it.
+    fan_out: dict[str, set[str]] = {name: set() for name in subsystems}
+    fan_in: dict[str, set[str]] = {name: set() for name in subsystems}
+    for name, sub in subsystems.items():
+        for c in sub.consumes:
+            if c.subsystem in subsystems and c.subsystem != name:
+                fan_out[name].add(c.subsystem)
+                fan_in[c.subsystem].add(name)
+
+    threshold = _COMPOSITION_ROOT_RATIO * others
+    issues: list[Issue] = []
+    for name in sorted(subsystems):
+        out_n, in_n = len(fan_out[name]), len(fan_in[name])
+        if out_n >= threshold and in_n >= threshold:
+            issues.append(
+                _issue(
+                    errors.E_COMPOSITION_ROOT,
+                    f"subsystem '{name}' is both a high fan-out importer ({out_n}/{others} subsystems) "
+                    f"and a high fan-in target ({in_n}/{others}) — the catch-all signature that fuses a "
+                    f"composition root with shared leaf utilities",
+                    subsystem=name,
+                    fix=f"declare '{name}' an entry_point in root.yaml (a source-only composition root), "
+                    f"and split its shared leaf directories into their own subsystems so siblings depend "
+                    f"on the leaves, not the root — this clears the cycles it forms with everything",
+                )
+            )
+    return issues
+
+
+# ===========================================================================
 # Check 6 — orphan detection
 # ===========================================================================
+def _framework_entry_exports(ctx: CheckContext, subsystem: str) -> set[str]:
+    """Exported symbol names a framework invokes directly (NestJS ``@Controller``/``@Resolver``).
+
+    Read from the extracted symbols' ``framework_entry`` metadata tag (set by the TS adapter), so the
+    orphan check can treat an HTTP/GraphQL entrypoint as externally consumed rather than orphaned.
+    """
+    out: set[str] = set()
+    for rel in ctx.files_of(subsystem):
+        for sym in ctx.extracts[rel].symbols:
+            if sym.exported and (sym.metadata or {}).get("framework_entry"):
+                out.add(sym.name)
+    return out
+
+
 def check_orphans(ctx: CheckContext) -> list[Issue]:
     consumed: set[tuple[str, str]] = set()
     # Subsystems for which at least one consumer declared the *specific* interfaces it uses. Orphan
@@ -643,7 +949,14 @@ def check_orphans(ctx: CheckContext) -> list[Issue]:
             continue
         if name not in iface_tracked:  # no interface-level consumption to judge against — skip
             continue
-        orphans = [i for i in sorted(sub.expose_names()) if (name, i) not in consumed]
+        # Framework-invoked entrypoints (a NestJS @Controller/@Resolver class) are consumed by the
+        # framework's routing/DI layer, not by a sibling subsystem's static import — so they are
+        # never true orphans, exactly like a Next.js route file's exports. Exempt them here.
+        framework_entries = _framework_entry_exports(ctx, name)
+        orphans = [
+            i for i in sorted(sub.expose_names())
+            if (name, i) not in consumed and i not in framework_entries
+        ]
         if not orphans:
             continue
         # Roll up per subsystem (same pattern as the drift rollup above): a library public surface
@@ -687,9 +1000,26 @@ def check_schema(ctx: CheckContext) -> list[Issue]:
                 continue
             seen.add(key)
             issues.append(_issue(code, message, subsystem=name, file=file,
-                                 fix="add a numeric filename prefix, a revision/down_revision "
-                                     "header, or '-- bounds:order N'; or fix the SQL syntax"))
+                                 fix=_SCHEMA_FIX_HINTS[code]))
     return issues
+
+
+# Per-code fix hints. The order/unparsed advisories have different remedies — conflating them
+# (the old single hint that told everyone to "add a numeric filename prefix") was misleading for a
+# perfectly-named migration whose only "problem" is a dialect body tree-sitter can't parse.
+_SCHEMA_FIX_HINTS = {
+    errors.E_SCHEMA_UNPARSED: (
+        "a statement uses SQL the bundled tree-sitter-sql grammar can't parse — usually a "
+        "procedural PL/pgSQL body ($$…$$ / DO block) or a vendor extension. The file's "
+        "parseable DDL still folded, so no action is needed unless a real table/column was "
+        "lost; if so, move the table DDL out of the procedural body (or simplify the statement). "
+        "This is not a filename/order problem."
+    ),
+    errors.E_SCHEMA_NO_ORDER: (
+        "give the migrations a deterministic order: add a numeric filename prefix, a "
+        "revision/down_revision header, or a '-- bounds:order N' comment"
+    ),
+}
 
 
 # ===========================================================================
@@ -727,6 +1057,7 @@ _ALL = [
     check_contract,
     check_cross_impact,
     check_cycles,
+    check_composition_root,
     check_orphans,
     check_schema,
     check_adapter_contracts,

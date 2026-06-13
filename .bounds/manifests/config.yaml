@@ -79,3 +79,7 @@ exposes:
   kind: const
 - name: CONFIG_FILE_STEMS
   kind: const
+- name: CYCLE_BASELINE_FILE
+  kind: const
+- name: POLICY_FILE
+  kind: const

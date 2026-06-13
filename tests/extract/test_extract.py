@@ -282,6 +282,21 @@ def test_orm_typeorm_entity_object_name_form():
     assert {s.name: s.metadata.get("model") for s in res.symbols if s.kind == "table"} == {"accounts": "Account"}
 
 
+def test_nestjs_controller_and_resolver_tagged_framework_entry():
+    """A NestJS @Controller/@Resolver class is a framework-invoked entrypoint, so its class symbol
+    is tagged framework_entry — the orphan check uses this to avoid flagging DI-wired entrypoints."""
+    src = (b"import { Controller } from '@nestjs/common';\n"
+           b"import { Resolver } from '@nestjs/graphql';\n"
+           b"@Controller('users')\nexport class UsersController {}\n"
+           b"@Resolver()\nexport class UserResolver {}\n"
+           b"export class PlainService {}\n")
+    res = get_adapter("users.controller.ts").extract("users.controller.ts", src)
+    tagged = {s.name: s.metadata.get("framework_entry") for s in res.symbols if s.metadata.get("framework_entry")}
+    assert tagged == {"UsersController": "nest_controller", "UserResolver": "nest_resolver"}
+    # A plain (undecorated) class is NOT tagged.
+    assert all(s.metadata.get("framework_entry") is None for s in res.symbols if s.name == "PlainService")
+
+
 def test_orm_drizzle_sqlite_and_mysql_tables():
     """Drizzle's sqliteTable/mysqlTable builders (not just pgTable) must be recognized — Bounds must cover every Drizzle dialect or it undercounts tables on non-Postgres repos."""
     src = (b'export const a = sqliteTable("a_tbl", {});\n'

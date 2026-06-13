@@ -15,12 +15,15 @@ from bounds.core.validate import engine
 from bounds.core.validate.checks import (
     _find_cycles,
     check_boundary,
+    check_composition_root,
     check_contract,
     check_cross_impact,
     check_cycles,
     check_orphans,
+    check_schema,
     check_structural_drift,
 )
+from bounds.shared.models import Consumes as _Con, ExtractResult as _ER, Symbol as _Sym
 from _validate_helpers import _ctx  # sibling module (pytest adds tests/validate/ to sys.path)
 
 
@@ -368,6 +371,156 @@ def test_no_cycle_in_dag():
         "b": Sub(name="b"),
     }
     assert check_cycles(_ctx(subs)) == []
+
+
+# ===========================================================================
+# Check 5 — containment-aware cycle detection
+# ===========================================================================
+def test_parent_child_nesting_is_not_a_cycle():
+    """A module importing its own subdirectory and back (parent ``src/auth`` ↔ child ``src/auth/guards``)
+    is intra-module layering, not an architectural cycle — containment must suppress it."""
+    subs = {
+        "auth": Sub(name="auth", paths=["src/auth"], consumes=[Consumes("auth-guards")]),
+        "auth-guards": Sub(name="auth-guards", paths=["src/auth/guards"], consumes=[Consumes("auth")]),
+    }
+    assert check_cycles(_ctx(subs)) == []
+
+
+def test_explicit_parent_suppresses_cycle_without_path_nesting():
+    """When paths don't nest, an explicit ``parent:`` still establishes containment and suppresses the
+    parent↔child cycle."""
+    subs = {
+        "core": Sub(name="core", paths=["pkg/core"], consumes=[Consumes("core-impl")]),
+        "core-impl": Sub(name="core-impl", paths=["pkg/impl"], parent="core", consumes=[Consumes("core")]),
+    }
+    assert check_cycles(_ctx(subs)) == []
+
+
+def test_genuine_sibling_cycle_through_a_child_is_still_reported():
+    """A real cross-domain cycle that merely passes through a parent→child edge (``auth`` → its child
+    ``auth-guards`` → sibling ``sellers`` → ``auth``) has a non-containment edge, so it is genuine and
+    must still be reported — containment only suppresses pure-nesting cycles."""
+    subs = {
+        "auth": Sub(name="auth", paths=["src/auth"], consumes=[Consumes("auth-guards")]),
+        "auth-guards": Sub(name="auth-guards", paths=["src/auth/guards"], consumes=[Consumes("sellers")]),
+        "sellers": Sub(name="sellers", paths=["src/sellers"], consumes=[Consumes("auth")]),
+    }
+    issues = check_cycles(_ctx(subs))
+    assert any(i.code == errors.E_CYCLE_DETECTED for i in issues)
+
+
+def test_sibling_cycle_unaffected_by_unrelated_nesting():
+    """Two genuinely-cyclic siblings stay reported even when other subsystems are nested elsewhere."""
+    subs = {
+        "a": Sub(name="a", paths=["src/a"], consumes=[Consumes("b")]),
+        "b": Sub(name="b", paths=["src/b"], consumes=[Consumes("a")]),
+        "a-util": Sub(name="a-util", paths=["src/a/util"]),
+    }
+    issues = check_cycles(_ctx(subs))
+    assert any(i.code == errors.E_CYCLE_DETECTED for i in issues)
+
+
+def test_schema_unparsed_fix_hint_is_not_about_filename_order():
+    """E_SCHEMA_UNPARSED must NOT tell the user to add a filename prefix/order header — that advice
+    is for E_SCHEMA_NO_ORDER. A perfectly-named migration with an opaque PL/pgSQL body got the wrong
+    remedy before; the hint must talk about SQL dialect/grammar, not ordering."""
+    unparsed = _Sym("<unparsed>", "schema_error", 1, exported=False,
+                    metadata={"schema_op": "unparsed", "count": 1})
+    extracts = {"db/001_create_thing.sql": _ER("db/001_create_thing.sql", "sql", [unparsed])}
+    subs = {"db": Sub(name="db", paths=["db"])}
+    issues = check_schema(_ctx(subs, extracts, {"db/001_create_thing.sql": "db"}))
+    unparsed_issues = [i for i in issues if i.code == errors.E_SCHEMA_UNPARSED]
+    assert unparsed_issues, "expected an E_SCHEMA_UNPARSED advisory"
+    hint = unparsed_issues[0].fix.lower()
+    assert "filename prefix" not in hint and "bounds:order" not in hint
+    assert "grammar" in hint or "plpgsql" in hint or "dialect" in hint
+
+
+def test_build_containment_detects_strict_nesting_only():
+    from bounds.core.validate.checks import build_containment
+
+    subs = {
+        "auth": Sub(name="auth", paths=["src/auth"]),
+        "guards": Sub(name="guards", paths=["src/auth/guards"]),
+        "sellers": Sub(name="sellers", paths=["src/sellers"]),
+    }
+    contains = build_containment(subs)
+    assert contains["auth"] == {"guards"}
+    assert contains["guards"] == set()
+    assert contains["sellers"] == set()
+
+
+# ===========================================================================
+# Check 5b — composition-root detection
+# ===========================================================================
+def test_composition_root_flags_high_fanin_and_fanout_catchall():
+    """A subsystem that both imports nearly every sibling AND is imported by nearly every sibling —
+    the catch-all/composition-root signature — is flagged with E_COMPOSITION_ROOT (advisory)."""
+    leaves = [f"s{i}" for i in range(10)]
+    subs = {}
+    # 'root' consumes every leaf (high fan-out) and every leaf consumes 'root' (high fan-in).
+    subs["root"] = Sub(name="root", paths=["src"], consumes=[_Con(s) for s in leaves])
+    for i, s in enumerate(leaves):
+        subs[s] = Sub(name=s, paths=[f"src/{s}"], consumes=[_Con("root")])
+    issues = check_composition_root(_ctx(subs))
+    flagged = [i for i in issues if i.code == errors.E_COMPOSITION_ROOT]
+    assert flagged and flagged[0].subsystem == "root"
+    assert all(i.severity == "warning" for i in flagged)  # advisory, never blocks
+
+
+def test_composition_root_silent_on_normal_hub():
+    """A library many things import (high fan-IN only) or an app that imports many (high fan-OUT only)
+    is a normal hub, not a catch-all — it must NOT be flagged."""
+    leaves = [f"s{i}" for i in range(10)]
+    subs = {"lib": Sub(name="lib", paths=["src/lib"])}  # imported by all, imports nothing
+    for s in leaves:
+        subs[s] = Sub(name=s, paths=[f"src/{s}"], consumes=[_Con("lib")])
+    assert check_composition_root(_ctx(subs)) == []
+
+
+def test_composition_root_silent_on_small_graph():
+    """Below the minimum subsystem count the ratios are too noisy; no flag on a tiny repo."""
+    subs = {
+        "root": Sub(name="root", paths=["src"], consumes=[_Con("a"), _Con("b")]),
+        "a": Sub(name="a", paths=["src/a"], consumes=[_Con("root")]),
+        "b": Sub(name="b", paths=["src/b"], consumes=[_Con("root")]),
+    }
+    assert check_composition_root(_ctx(subs)) == []
+
+
+# ===========================================================================
+# Check 6 — framework-aware orphan exemption
+# ===========================================================================
+def test_orphan_check_exempts_nestjs_framework_entry_export():
+    """A NestJS @Controller class (tagged framework_entry by the extractor) is consumed by the
+    framework, not a sibling subsystem — so it must NOT be flagged E_ORPHAN_EXPORT even when no
+    subsystem consumes it at interface level."""
+    # 'api' exposes a controller; 'other' has an interface-tracked edge (flips the orphan check on),
+    # but consumes nothing from 'api'. Without the exemption, FollowsController reads as an orphan.
+    subs = {
+        "api": Sub(name="api", paths=["src/api"], exposes=[Interface("FollowsController")]),
+        "other": Sub(name="other", paths=["src/other"], consumes=[Consumes("api", interfaces=["x"])]),
+    }
+    extracts = {
+        "src/api/c.ts": _ER("src/api/c.ts", "typescript",
+                            [_Sym("FollowsController", "class", 1, True,
+                                  metadata={"framework_entry": "nest_controller"})]),
+    }
+    issues = check_orphans(_ctx(subs, extracts, {"src/api/c.ts": "api"}))
+    assert not any(i.code == errors.E_ORPHAN_EXPORT and "FollowsController" in i.message for i in issues)
+
+
+def test_orphan_check_still_flags_plain_unconsumed_export():
+    """The exemption is narrow: a plain (untagged) unconsumed export is still an orphan."""
+    subs = {
+        "api": Sub(name="api", paths=["src/api"], exposes=[Interface("plainHelper")]),
+        "other": Sub(name="other", paths=["src/other"], consumes=[Consumes("api", interfaces=["x"])]),
+    }
+    extracts = {
+        "src/api/h.ts": _ER("src/api/h.ts", "typescript", [_Sym("plainHelper", "function", 1, True)]),
+    }
+    issues = check_orphans(_ctx(subs, extracts, {"src/api/h.ts": "api"}))
+    assert any(i.code == errors.E_ORPHAN_EXPORT and "plainHelper" in i.message for i in issues)
 
 
 # ===========================================================================

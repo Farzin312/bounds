@@ -40,6 +40,8 @@ exposes:
   kind: function
 - name: run_validate_quick
   kind: function
+- name: current_cycle_keys
+  kind: function
 consumes:
 - subsystem: models
   via: models

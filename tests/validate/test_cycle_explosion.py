@@ -28,15 +28,17 @@ def test_cycle_explosion_reporting():
     )
     
     issues = check_cycles(ctx)
-    
-    # It should report 10 individual cycles + 1 rollup issue = 11 total issues
+
+    # It should report 10 individual cycles + 1 root-cause rollup issue = 11 total issues
     assert len(issues) == 11
     assert any("more cycles" in i.message for i in issues)
-    
-    # Check for bottleneck reporting
+
+    # The rollup is a minimal feedback-arc-set: the ranked root edges whose removal breaks every
+    # cycle. In god -> a{i} -> b{j} -> god, cutting the 10 'b{j}->god' (or 'god->a{i}') edges breaks
+    # all 100 cycles, so the summary should name a small, actionable root-edge set, not 100 paths.
     rollup = next(i for i in issues if "more cycles" in i.message)
-    assert "top bottlenecks" in rollup.message
-    # In this specific graph (god -> a{i} -> b{j} -> god), 
-    # 'b{j} -> god' should be a bottleneck as it's part of many cycles.
+    assert "root edge" in rollup.message
+    assert "breaks" in rollup.message
     assert "->god" in rollup.message
+    assert "strongly-connected component" in rollup.message
     assert "docs/troubleshooting-ci.md" in rollup.fix
