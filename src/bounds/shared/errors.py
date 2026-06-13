@@ -28,6 +28,12 @@ E_COVERAGE_GAP = "E_COVERAGE_GAP"
 # Warning (advisory): the file is still deterministically owned, but the ambiguity is a manifest smell
 # an agent should resolve (narrow one path / move it to `files:`) rather than rely on alphabetical luck.
 E_SUBSYSTEM_OVERLAP = "E_SUBSYSTEM_OVERLAP"
+# One subsystem is simultaneously a high fan-OUT importer (depends on nearly every sibling) AND a
+# high fan-IN target (imported by nearly every sibling) — the signature of a catch-all that
+# conflates a DI/HTTP composition root with a pile of shared leaf utilities. Advisory: such a
+# subsystem produces a cycle with essentially every other one and forces a painful manual split on
+# first adoption. The fix points at declaring it an entry_point and/or extracting its leaf dirs.
+E_COMPOSITION_ROOT = "E_COMPOSITION_ROOT"
 
 # ---- Schema / extraction codes ----
 E_SCHEMA_INVALID = "E_SCHEMA_INVALID"
@@ -70,6 +76,7 @@ SEVERITY = {
     E_EXTERNAL_SYMLINK: "warning",
     E_COVERAGE_GAP: "warning",
     E_SUBSYSTEM_OVERLAP: "warning",
+    E_COMPOSITION_ROOT: "warning",
     E_SCHEMA_INVALID: "error",
     E_SCHEMA_NO_ORDER: "warning",
     E_SCHEMA_UNPARSED: "warning",
@@ -102,6 +109,7 @@ __all__ = [
     "CompactError",
     "E_ADAPTER_CONTRACT",
     "E_BOUNDARY_VIOLATION",
+    "E_COMPOSITION_ROOT",
     "E_CONTRACT_MISSING_EXPORT",
     "E_COVERAGE_GAP",
     "E_CYCLE_DETECTED",

@@ -860,8 +860,73 @@ def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
 
 
 # ===========================================================================
+# Check 5b — composition-root detection (advisory; never blocks)
+# ===========================================================================
+# A subsystem must fan out to AND fan in from at least this fraction of the other subsystems to be
+# flagged. High on both axes is the catch-all signature; the threshold keeps a normal hub (a shared
+# library many things import, or a top-level app that imports many things, but not both) from firing.
+_COMPOSITION_ROOT_RATIO = 0.5
+# Below this many subsystems the ratios are too noisy to be meaningful (a 3-subsystem repo where one
+# imports the other two and is imported by them is just small, not a catch-all).
+_COMPOSITION_ROOT_MIN_SUBSYSTEMS = 8
+
+
+def check_composition_root(ctx: CheckContext) -> list[Issue]:
+    """Flag a catch-all subsystem that is simultaneously a high fan-out importer and high fan-in
+    target — a DI/HTTP composition root fused with a pile of shared leaf utilities. Such a subsystem
+    forms a cycle with essentially every sibling and costs a painful manual split on first adoption
+    (the audit's ``src`` catch-all). Advisory only; the fix points at the deterministic remedy."""
+    subsystems = ctx.subsystems
+    n = len(subsystems)
+    if n < _COMPOSITION_ROOT_MIN_SUBSYSTEMS:
+        return []
+    others = n - 1
+    # fan-out: distinct sibling subsystems this one consumes; fan-in: distinct siblings that consume it.
+    fan_out: dict[str, set[str]] = {name: set() for name in subsystems}
+    fan_in: dict[str, set[str]] = {name: set() for name in subsystems}
+    for name, sub in subsystems.items():
+        for c in sub.consumes:
+            if c.subsystem in subsystems and c.subsystem != name:
+                fan_out[name].add(c.subsystem)
+                fan_in[c.subsystem].add(name)
+
+    threshold = _COMPOSITION_ROOT_RATIO * others
+    issues: list[Issue] = []
+    for name in sorted(subsystems):
+        out_n, in_n = len(fan_out[name]), len(fan_in[name])
+        if out_n >= threshold and in_n >= threshold:
+            issues.append(
+                _issue(
+                    errors.E_COMPOSITION_ROOT,
+                    f"subsystem '{name}' is both a high fan-out importer ({out_n}/{others} subsystems) "
+                    f"and a high fan-in target ({in_n}/{others}) — the catch-all signature that fuses a "
+                    f"composition root with shared leaf utilities",
+                    subsystem=name,
+                    fix=f"declare '{name}' an entry_point in root.yaml (a source-only composition root), "
+                    f"and split its shared leaf directories into their own subsystems so siblings depend "
+                    f"on the leaves, not the root — this clears the cycles it forms with everything",
+                )
+            )
+    return issues
+
+
+# ===========================================================================
 # Check 6 — orphan detection
 # ===========================================================================
+def _framework_entry_exports(ctx: CheckContext, subsystem: str) -> set[str]:
+    """Exported symbol names a framework invokes directly (NestJS ``@Controller``/``@Resolver``).
+
+    Read from the extracted symbols' ``framework_entry`` metadata tag (set by the TS adapter), so the
+    orphan check can treat an HTTP/GraphQL entrypoint as externally consumed rather than orphaned.
+    """
+    out: set[str] = set()
+    for rel in ctx.files_of(subsystem):
+        for sym in ctx.extracts[rel].symbols:
+            if sym.exported and (sym.metadata or {}).get("framework_entry"):
+                out.add(sym.name)
+    return out
+
+
 def check_orphans(ctx: CheckContext) -> list[Issue]:
     consumed: set[tuple[str, str]] = set()
     # Subsystems for which at least one consumer declared the *specific* interfaces it uses. Orphan
@@ -884,7 +949,14 @@ def check_orphans(ctx: CheckContext) -> list[Issue]:
             continue
         if name not in iface_tracked:  # no interface-level consumption to judge against — skip
             continue
-        orphans = [i for i in sorted(sub.expose_names()) if (name, i) not in consumed]
+        # Framework-invoked entrypoints (a NestJS @Controller/@Resolver class) are consumed by the
+        # framework's routing/DI layer, not by a sibling subsystem's static import — so they are
+        # never true orphans, exactly like a Next.js route file's exports. Exempt them here.
+        framework_entries = _framework_entry_exports(ctx, name)
+        orphans = [
+            i for i in sorted(sub.expose_names())
+            if (name, i) not in consumed and i not in framework_entries
+        ]
         if not orphans:
             continue
         # Roll up per subsystem (same pattern as the drift rollup above): a library public surface
@@ -985,6 +1057,7 @@ _ALL = [
     check_contract,
     check_cross_impact,
     check_cycles,
+    check_composition_root,
     check_orphans,
     check_schema,
     check_adapter_contracts,

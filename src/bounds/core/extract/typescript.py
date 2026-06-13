@@ -116,9 +116,14 @@ def _decl_symbols(decl: ts.Node, source: bytes, line: int, exported: bool) -> li
     if t in _DECL_KIND:
         name_node = decl.child_by_field_name("name")
         name = _text(name_node, source) if name_node is not None else "default"
-        table_name = _typeorm_table_name(decl, name, source) if t in ("class_declaration", "abstract_class_declaration") else None
+        is_class = t in ("class_declaration", "abstract_class_declaration")
+        table_name = _typeorm_table_name(decl, name, source) if is_class else None
         if table_name is not None:
             return [Symbol(name=table_name, kind="table", line=line, exported=exported, metadata={"model": name})]
+        nest_role = _nest_framework_entry(decl, source) if is_class else None
+        if nest_role is not None:
+            return [Symbol(name=name, kind=_DECL_KIND[t], line=line, exported=exported,
+                           metadata={"framework_entry": nest_role})]
         return [Symbol(name=name, kind=_DECL_KIND[t], line=line, exported=exported)]
     if t in ("lexical_declaration", "variable_declaration"):
         out: list[Symbol] = []
@@ -225,6 +230,33 @@ def _object_prop_string(obj: ts.Node, key: str, source: bytes) -> str | None:
         v = pair.child_by_field_name("value")
         if k is not None and v is not None and v.type == "string" and _text(k, source).strip("\"'") == key:
             return _string_value(v, source)
+    return None
+
+
+# NestJS class decorators that mark an externally-invoked entrypoint: an HTTP controller or a
+# GraphQL resolver is called by the framework's routing layer, not imported by a sibling subsystem,
+# so its exported class is consumed externally — never a true orphan export (see check_orphans).
+_NEST_ENTRY_DECORATORS = {"Controller": "nest_controller", "Resolver": "nest_resolver"}
+
+
+def _nest_framework_entry(decl: ts.Node, source: bytes) -> str | None:
+    """The NestJS framework-entry role of a class (``@Controller``/``@Resolver``), or None.
+
+    These are framework-invoked entrypoints (HTTP routes / GraphQL resolvers), so their exports are
+    consumed by the framework, not by another subsystem — like a Next.js route file's exports.
+    """
+    for child in decl.children:
+        if child.type != "decorator":
+            continue
+        call = next((c for c in child.named_children if c.type == "call_expression"), None)
+        name = _call_name(call, source) if call is not None else None
+        # Bare `@Controller` (no call) also counts — read the decorator's identifier directly.
+        if name is None:
+            ident = next((c for c in child.named_children if c.type == "identifier"), None)
+            name = _text(ident, source) if ident is not None else None
+        role = _NEST_ENTRY_DECORATORS.get(name or "")
+        if role is not None:
+            return role
     return None
 
 
@@ -488,9 +520,16 @@ class TypeScriptAdapter(LanguageAdapter):
                 if ct in ("class_declaration", "abstract_class_declaration"):
                     name_node = child.child_by_field_name("name")
                     class_name = _text(name_node, source) if name_node is not None else "default"
+                    # Decorators sit on the export_statement (the parent), not the class_declaration,
+                    # so the table/framework checks read `node`, not `child`.
                     table_name = _typeorm_table_name(node, class_name, source)
                     if table_name is not None:
                         out.append(Symbol(name=table_name, kind="table", line=line, exported=True, metadata={"model": class_name}))
+                        continue
+                    nest_role = _nest_framework_entry(node, source)
+                    if nest_role is not None:
+                        out.append(Symbol(name=class_name, kind=_DECL_KIND[ct], line=line,
+                                          exported=True, metadata={"framework_entry": nest_role}))
                         continue
                 out.extend(_decl_symbols(child, source, line, exported=True))
             elif ct == "string":

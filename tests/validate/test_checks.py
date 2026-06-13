@@ -15,6 +15,7 @@ from bounds.core.validate import engine
 from bounds.core.validate.checks import (
     _find_cycles,
     check_boundary,
+    check_composition_root,
     check_contract,
     check_cross_impact,
     check_cycles,
@@ -22,7 +23,7 @@ from bounds.core.validate.checks import (
     check_schema,
     check_structural_drift,
 )
-from bounds.shared.models import ExtractResult as _ER, Symbol as _Sym
+from bounds.shared.models import Consumes as _Con, ExtractResult as _ER, Symbol as _Sym
 from _validate_helpers import _ctx  # sibling module (pytest adds tests/validate/ to sys.path)
 
 
@@ -447,6 +448,79 @@ def test_build_containment_detects_strict_nesting_only():
     assert contains["auth"] == {"guards"}
     assert contains["guards"] == set()
     assert contains["sellers"] == set()
+
+
+# ===========================================================================
+# Check 5b — composition-root detection
+# ===========================================================================
+def test_composition_root_flags_high_fanin_and_fanout_catchall():
+    """A subsystem that both imports nearly every sibling AND is imported by nearly every sibling —
+    the catch-all/composition-root signature — is flagged with E_COMPOSITION_ROOT (advisory)."""
+    leaves = [f"s{i}" for i in range(10)]
+    subs = {}
+    # 'root' consumes every leaf (high fan-out) and every leaf consumes 'root' (high fan-in).
+    subs["root"] = Sub(name="root", paths=["src"], consumes=[_Con(s) for s in leaves])
+    for i, s in enumerate(leaves):
+        subs[s] = Sub(name=s, paths=[f"src/{s}"], consumes=[_Con("root")])
+    issues = check_composition_root(_ctx(subs))
+    flagged = [i for i in issues if i.code == errors.E_COMPOSITION_ROOT]
+    assert flagged and flagged[0].subsystem == "root"
+    assert all(i.severity == "warning" for i in flagged)  # advisory, never blocks
+
+
+def test_composition_root_silent_on_normal_hub():
+    """A library many things import (high fan-IN only) or an app that imports many (high fan-OUT only)
+    is a normal hub, not a catch-all — it must NOT be flagged."""
+    leaves = [f"s{i}" for i in range(10)]
+    subs = {"lib": Sub(name="lib", paths=["src/lib"])}  # imported by all, imports nothing
+    for s in leaves:
+        subs[s] = Sub(name=s, paths=[f"src/{s}"], consumes=[_Con("lib")])
+    assert check_composition_root(_ctx(subs)) == []
+
+
+def test_composition_root_silent_on_small_graph():
+    """Below the minimum subsystem count the ratios are too noisy; no flag on a tiny repo."""
+    subs = {
+        "root": Sub(name="root", paths=["src"], consumes=[_Con("a"), _Con("b")]),
+        "a": Sub(name="a", paths=["src/a"], consumes=[_Con("root")]),
+        "b": Sub(name="b", paths=["src/b"], consumes=[_Con("root")]),
+    }
+    assert check_composition_root(_ctx(subs)) == []
+
+
+# ===========================================================================
+# Check 6 — framework-aware orphan exemption
+# ===========================================================================
+def test_orphan_check_exempts_nestjs_framework_entry_export():
+    """A NestJS @Controller class (tagged framework_entry by the extractor) is consumed by the
+    framework, not a sibling subsystem — so it must NOT be flagged E_ORPHAN_EXPORT even when no
+    subsystem consumes it at interface level."""
+    # 'api' exposes a controller; 'other' has an interface-tracked edge (flips the orphan check on),
+    # but consumes nothing from 'api'. Without the exemption, FollowsController reads as an orphan.
+    subs = {
+        "api": Sub(name="api", paths=["src/api"], exposes=[Interface("FollowsController")]),
+        "other": Sub(name="other", paths=["src/other"], consumes=[Consumes("api", interfaces=["x"])]),
+    }
+    extracts = {
+        "src/api/c.ts": _ER("src/api/c.ts", "typescript",
+                            [_Sym("FollowsController", "class", 1, True,
+                                  metadata={"framework_entry": "nest_controller"})]),
+    }
+    issues = check_orphans(_ctx(subs, extracts, {"src/api/c.ts": "api"}))
+    assert not any(i.code == errors.E_ORPHAN_EXPORT and "FollowsController" in i.message for i in issues)
+
+
+def test_orphan_check_still_flags_plain_unconsumed_export():
+    """The exemption is narrow: a plain (untagged) unconsumed export is still an orphan."""
+    subs = {
+        "api": Sub(name="api", paths=["src/api"], exposes=[Interface("plainHelper")]),
+        "other": Sub(name="other", paths=["src/other"], consumes=[Consumes("api", interfaces=["x"])]),
+    }
+    extracts = {
+        "src/api/h.ts": _ER("src/api/h.ts", "typescript", [_Sym("plainHelper", "function", 1, True)]),
+    }
+    issues = check_orphans(_ctx(subs, extracts, {"src/api/h.ts": "api"}))
+    assert any(i.code == errors.E_ORPHAN_EXPORT and "plainHelper" in i.message for i in issues)
 
 
 # ===========================================================================
