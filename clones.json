@@ -143,8 +143,12 @@
     "2026-06-24": {
       "count": 8,
       "uniques": 5
+    },
+    "2026-06-25": {
+      "count": 7,
+      "uniques": 4
     }
   },
-  "total_clones": 3929,
-  "total_uniques": 1018
+  "total_clones": 3936,
+  "total_uniques": 1022
 }
