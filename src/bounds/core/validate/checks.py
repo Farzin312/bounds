@@ -26,6 +26,9 @@ _UNSET = object()
 
 # Importer extensions for which tsconfig path aliases apply (a Python file never uses them).
 _TS_IMPORTER_EXTS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
+# Extensions TypeScript emits, which NodeNext requires source to import BY — `./x.js`
+# in a .ts file means `x.ts` on disk. Used to add a de-suffixed resolution candidate.
+_EMITTED_JS_EXTS = (".js", ".jsx", ".mjs", ".cjs")
 
 
 def _issue(
@@ -261,7 +264,21 @@ def _candidate_stems(
         else:
             rest_path = rest.replace(".", "/").strip("/")
         stem = normpath(posixpath.join(up, rest_path)) if rest_path else normpath(up or ".")
-        return [] if stem in (".", "", "/") else [stem]
+        if stem in (".", "", "/"):
+            return []
+        stems = [stem]
+        # NodeNext/ESM: a TS file imports a sibling TS module by its EMITTED specifier
+        # ("./pricing.js" -> pricing.ts, "./m.mjs" -> m.mts). `known_noext` is keyed
+        # extension-less, so the raw stem keeps ".js" and matches nothing — which drops
+        # roughly every local edge in a NodeNext codebase and quietly makes cycle
+        # detection and blast-radius unusable there. Append the de-suffixed stem AFTER
+        # the exact one, so a real on-disk `.js` file still wins when both exist.
+        if _is_ts_like(importer_rel):
+            for js_ext in _EMITTED_JS_EXTS:
+                if stem.endswith(js_ext):
+                    stems.append(stem[: -len(js_ext)])
+                    break
+        return stems
     # Bare dotted (Python "a.b.c") or bare package (TS "react", "@scope/pkg", "@/alias").
     candidates: list[str] = []
     if aliases is not None and _is_ts_like(importer_rel):

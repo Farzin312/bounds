@@ -144,3 +144,36 @@ def test_sql_and_prisma_emit_no_import_edges():
     prisma = get_adapter("schema.prisma").extract("schema.prisma", b"model T {\n  id Int @id\n}\n")
     assert sql.imports == []
     assert prisma.imports == []
+
+
+# ===========================================================================
+# NodeNext / ESM emitted-specifier resolution
+# ===========================================================================
+def test_resolve_nodenext_js_specifier_to_ts_source():
+    """NodeNext requires TS source to import a sibling TS module by its EMITTED specifier:
+    `./pricing.js` on disk is `pricing.ts`. Regression for the bug where the stem kept `.js`,
+    matched nothing in the extension-less index, and dropped the edge — which in a NodeNext
+    codebase drops nearly every local edge and makes cycle detection unusable."""
+    known = {"src/billing/pricing": "src/billing/pricing.ts"}
+    assert (resolve_import("src/ai/router.ts", "../billing/pricing.js", known)
+            == "src/billing/pricing.ts")
+
+
+def test_resolve_nodenext_mjs_and_cjs_specifiers():
+    """`.mjs`/`.cjs` specifiers resolve to their `.mts`/`.cts` sources the same way."""
+    known = {"src/a/m": "src/a/m.mts", "src/a/c": "src/a/c.cts"}
+    assert resolve_import("src/a/x.mts", "./m.mjs", known) == "src/a/m.mts"
+    assert resolve_import("src/a/x.cts", "./c.cjs", known) == "src/a/c.cts"
+
+
+def test_resolve_prefers_real_js_file_over_desuffixed_stem():
+    """When both `weird.js.ts` and `weird.js` exist, the exact stem wins — the de-suffixed
+    candidate is only a fallback, so a genuine on-disk .js file is never shadowed."""
+    known = {"src/weird.js": "src/weird.js.ts", "src/weird": "src/weird.js"}
+    assert resolve_import("src/app.ts", "./weird.js", known) == "src/weird.js.ts"
+
+
+def test_resolve_python_dot_js_is_not_desuffixed():
+    """A Python importer never gets NodeNext treatment; dots stay package separators."""
+    known = {"pkg/js": "pkg/js.py"}
+    assert resolve_import("pkg/main.py", ".js", known) == "pkg/js.py"
