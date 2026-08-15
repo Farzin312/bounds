@@ -339,8 +339,12 @@
     "2026-08-12": {
       "count": 1,
       "uniques": 1
+    },
+    "2026-08-13": {
+      "count": 3,
+      "uniques": 3
     }
   },
-  "total_clones": 4516,
-  "total_uniques": 1231
+  "total_clones": 4519,
+  "total_uniques": 1234
 }
