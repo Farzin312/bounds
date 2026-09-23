@@ -499,8 +499,12 @@
     "2026-09-21": {
       "count": 11,
       "uniques": 7
+    },
+    "2026-09-22": {
+      "count": 13,
+      "uniques": 8
     }
   },
-  "total_clones": 4793,
-  "total_uniques": 1389
+  "total_clones": 4806,
+  "total_uniques": 1397
 }
