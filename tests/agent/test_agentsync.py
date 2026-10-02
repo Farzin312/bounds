@@ -745,3 +745,13 @@ def test_agent_check_human_explains_empty_detection(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert "agent wiring: no agents detected" in result.output
     assert "next: bounds agent --sync" in result.output
+
+
+def test_canonical_body_carries_no_host_repository_facts():
+    """The managed block is synced into every consumer's AGENTS.md, so it must
+    not describe the Bounds repository itself. A consumer with a static
+    package.json version was told it used setuptools-scm with none."""
+    from bounds.agents.content import CANONICAL_BODY
+
+    assert "setuptools-scm" not in CANONICAL_BODY
+    assert "This repo uses" not in CANONICAL_BODY
