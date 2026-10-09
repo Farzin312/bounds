@@ -563,8 +563,12 @@
     "2026-10-07": {
       "count": 3,
       "uniques": 3
+    },
+    "2026-10-08": {
+      "count": 10,
+      "uniques": 6
     }
   },
-  "total_clones": 4913,
-  "total_uniques": 1466
+  "total_clones": 4923,
+  "total_uniques": 1472
 }
