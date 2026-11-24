@@ -747,8 +747,12 @@
     "2026-11-22": {
       "count": 1,
       "uniques": 1
+    },
+    "2026-11-23": {
+      "count": 16,
+      "uniques": 10
     }
   },
-  "total_clones": 5445,
-  "total_uniques": 1743
+  "total_clones": 5461,
+  "total_uniques": 1753
 }
